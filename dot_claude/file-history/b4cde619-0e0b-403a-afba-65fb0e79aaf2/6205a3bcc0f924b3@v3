@@ -1,0 +1,143 @@
+"""
+FUnIE-GAN 推理模块（兼容 TensorFlow 2.x）
+"""
+import os
+import numpy as np
+import cv2
+
+# 延迟导入，避免未安装 TensorFlow 时崩溃
+TF_AVAILABLE = False
+try:
+    import tensorflow as tf
+    from tensorflow import keras
+    TF_AVAILABLE = True
+except ImportError:
+    print("[警告] TensorFlow 未安装，FUnIE-GAN 不可用")
+
+
+class FUnIEGANInference:
+    """FUnIE-GAN 推理器"""
+
+    def __init__(self, model_dir='FUnIE-GAN/saved_models/gen_p'):
+        """
+        初始化 FUnIE-GAN 模型
+
+        Args:
+            model_dir: 模型目录，包含 .h5 和 .json 文件
+        """
+        if not TF_AVAILABLE:
+            raise RuntimeError("TensorFlow 未安装，无法使用 FUnIE-GAN")
+
+        self.model = None
+        self.model_loaded = False
+
+        # 查找模型文件
+        model_files = [f for f in os.listdir(model_dir) if f.endswith('.h5')]
+        if not model_files:
+            raise FileNotFoundError(f"未找到模型文件: {model_dir}")
+
+        model_name = model_files[0].replace('.h5', '')
+        model_h5 = os.path.join(model_dir, f"{model_name}.h5")
+        model_json = os.path.join(model_dir, f"{model_name}.json")
+
+        if not (os.path.exists(model_h5) and os.path.exists(model_json)):
+            raise FileNotFoundError(f"模型文件不完整: {model_dir}")
+
+        print(f"加载 FUnIE-GAN 模型: {model_name}")
+
+        # 直接加载 .h5 文件（避免 Keras 版本不兼容问题）
+        try:
+            # Keras 3.x: 直接加载完整模型
+            self.model = keras.models.load_model(model_h5, compile=False)
+        except Exception as e:
+            print(f"[警告] 直接加载失败: {e}")
+            # Fallback: 尝试 tf.keras (TensorFlow 2.x)
+            import tensorflow.keras as tf_keras
+            self.model = tf_keras.models.load_model(model_h5, compile=False)
+
+        self.model_loaded = True
+        print("FUnIE-GAN 模型加载成功")
+
+    def preprocess(self, img):
+        """预处理图像：归一化到 [-1, 1]"""
+        img = img.astype(np.float32)
+        return (img / 127.5) - 1.0
+
+    def deprocess(self, img):
+        """后处理图像：[-1, 1] -> [0, 255]"""
+        img = (img + 1.0) * 127.5
+        return np.clip(img, 0, 255).astype(np.uint8)
+
+    def enhance(self, img):
+        """
+        增强单张图像
+
+        Args:
+            img: BGR 图像 (H, W, 3)
+
+        Returns:
+            增强后的 BGR 图像 (H, W, 3)
+        """
+        if not self.model_loaded:
+            raise RuntimeError("模型未加载")
+
+        # 记录原始尺寸
+        orig_h, orig_w = img.shape[:2]
+
+        # Resize 到 256x256（FUnIE-GAN 训练尺寸）
+        img_resized = cv2.resize(img, (256, 256))
+
+        # BGR -> RGB
+        img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
+
+        # 预处理
+        img_preprocessed = self.preprocess(img_rgb)
+        img_batch = np.expand_dims(img_preprocessed, axis=0)
+
+        # 推理
+        enhanced_batch = self.model.predict(img_batch, verbose=0)
+
+        # 后处理
+        enhanced = self.deprocess(enhanced_batch[0])
+
+        # RGB -> BGR
+        enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_RGB2BGR)
+
+        # Resize 回原始尺寸
+        enhanced_bgr = cv2.resize(enhanced_bgr, (orig_w, orig_h))
+
+        return enhanced_bgr
+
+
+def test_funie_gan():
+    """测试 FUnIE-GAN"""
+    import sys
+
+    if len(sys.argv) < 3:
+        print("用法: python funie_gan_inference.py <input.jpg> <output.jpg>")
+        sys.exit(1)
+
+    input_path = sys.argv[1]
+    output_path = sys.argv[2]
+
+    # 加载模型
+    enhancer = FUnIEGANInference()
+
+    # 读取图像
+    img = cv2.imread(input_path)
+    if img is None:
+        print(f"无法读取图像: {input_path}")
+        sys.exit(1)
+
+    print(f"处理图像: {input_path} ({img.shape[1]}x{img.shape[0]})")
+
+    # 增强
+    enhanced = enhancer.enhance(img)
+
+    # 保存
+    cv2.imwrite(output_path, enhanced)
+    print(f"增强图像已保存: {output_path}")
+
+
+if __name__ == "__main__":
+    test_funie_gan()

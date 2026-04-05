@@ -1,0 +1,58 @@
+# Boss Assistant - Claude Code Guidance
+
+## Project Overview
+Boss直聘半自动招聘助手 - Semi-automated recruitment assistant for Boss直聘 (zhipin.com).
+Recruiter-side (Boss端) tool for searching candidates, extracting profiles, and sending templated messages.
+
+## Tech Stack
+- Python 3.10+
+- Browser automation: Patchright (Playwright fork) + Chrome CDP
+- Anti-detection: Emunium (human-like interactions)
+- CLI: Click + Rich
+- Database: SQLAlchemy + SQLite
+- Rate limiting: Database-backed with adaptive throttling
+
+## Project Structure
+- `src/cli/main.py` - Click CLI with 10 commands (boss login/search/profile/message/pipeline/export/templates/status/logout)
+- `src/core/` - Browser manager (CDP singleton), session encryption, anti-detection
+- `src/modules/` - Feature modules: auth, search, profile, message, export
+- `src/services/pipeline.py` - Search → score → message orchestration
+- `src/models/database.py` - SQLAlchemy ORM (Candidate, Message, SearchHistory, ActionLog)
+- `src/utils/` - Config, rate limiter, delays, retry, validators, captcha, checkpoint, scoring, logger
+- `src/exceptions/errors.py` - Custom exception hierarchy
+- `config/` - settings.json, selectors.json, message_templates.json
+- `tests/` - Pytest unit tests
+
+## Key Patterns
+- Singleton pattern for BrowserManager, Config, RateLimiter, SessionManager
+- `page.evaluate()` JS extraction for DOM parsing (not CSS selectors)
+- Log-normal delays with fatigue/distraction simulation
+- Database-backed rate limiting with adaptive throttling on captcha detection
+- Checkpoint-based pipeline resume
+- Candidate IDs: `zp_{encryptGeekId}` format
+
+## Running
+```bash
+# Start Chrome with CDP
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+
+# Run commands
+python -m src.cli.main login
+python -m src.cli.main search -k "前端工程师" -p 2
+python -m src.cli.main pipeline -k "前端" -t greeting --dry-run
+```
+
+## Testing
+```bash
+pytest tests/ -v
+```
+
+## Important Notes
+- CDP mode only - user manages Chrome lifecycle and logs in manually
+- Boss直聘 has stricter anti-crawling than Maimai - use conservative rate limits
+- Candidate IDs use encrypted format (encryptGeekId), stored as `zp_{id}`
+- Search pages: recommend (`/web/boss/recommend`) and active search (`/web/boss/search/geek`)
+- Selectors in config/selectors.json are placeholders - fill with real values from Phase 0 recording
+
+## Skills
+- `review`（全局 skill）：带记忆的代码审查。当用户要求分析工程缺陷、代码审查、优化空间时，使用 `/review` 触发。审查历史记录保存在 `.claude/review-history.md`

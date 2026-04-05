@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Pipeline - Maimai Assistant{% endblock %}
+
+{% block content %}
+<h2>Pipeline (Search + Message)</h2>
+
+<form id="pipeline-form">
+    <div class="grid">
+        <label>
+            Keywords (one per line)
+            <textarea name="keywords" rows="3" placeholder="e.g. 前端工程师" required></textarea>
+        </label>
+        <label>
+            Company filter (one per line, optional)
+            <textarea name="company" rows="3" placeholder="e.g. 字节跳动"></textarea>
+        </label>
+    </div>
+    <div class="grid">
+        <label>
+            Template
+            <select name="template" id="template-select" required>
+                <option value="">Loading...</option>
+            </select>
+        </label>
+        <label>
+            Pages
+            <input type="number" name="pages" value="1" min="1" max="50">
+        </label>
+    </div>
+    <div id="template-vars"></div>
+    <fieldset>
+        <label>
+            <input type="checkbox" name="auto_send">
+            Auto-send (skip candidate confirmation)
+        </label>
+        <label>
+            <input type="checkbox" name="dry_run">
+            Dry run (search only, no messages)
+        </label>
+    </fieldset>
+    <button type="submit">Start Pipeline</button>
+</form>
+
+<!-- Progress section -->
+<div id="pipeline-progress" hidden>
+    <article>
+        <header>
+            <span id="pipeline-status-text">Queued...</span>
+            <span id="pipeline-task-id" class="badge" style="float:right"></span>
+        </header>
+        <progress id="pipeline-progress-bar" value="0" max="100"></progress>
+        <p id="pipeline-detail"></p>
+    </article>
+</div>
+
+<!-- Confirmation section (manual mode) -->
+<div id="pipeline-confirm" hidden>
+    <article>
+        <header>Select Candidates to Message</header>
+        <p>
+            <label>
+                <input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)">
+                Select All (<span id="confirm-count">0</span> candidates)
+            </label>
+        </p>
+        <div id="candidate-list"></div>
+        <footer>
+            <button onclick="confirmCandidates()" class="primary">Confirm & Send</button>
+            <button onclick="confirmCandidates(true)" class="secondary outline">Cancel</button>
+        </footer>
+    </article>
+</div>
+
+<!-- Results -->
+<div id="pipeline-results" hidden>
+    <article>
+        <header>Pipeline Complete</header>
+        <div id="results-summary"></div>
+    </article>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/pipeline.js"></script>
+<script>
+// Load templates on page load
+(async () => {
+    try {
+        const res = await fetch('/api/templates');
+        const templates = await res.json();
+        const select = document.getElementById('template-select');
+        select.innerHTML = templates.map(t =>
+            `<option value="${t.name}">${t.name} — ${t.description || 'No description'}</option>`
+        ).join('');
+
+        // Show template variables when selection changes
+        select.addEventListener('change', () => {
+            const tpl = templates.find(t => t.name === select.value);
+            const varsDiv = document.getElementById('template-vars');
+            if (tpl && tpl.variables.length) {
+                // Filter out auto-filled variables
+                const autoVars = ['name', 'company', 'position'];
+                const manualVars = tpl.variables.filter(v => !autoVars.includes(v));
+                if (manualVars.length) {
+                    varsDiv.innerHTML = '<fieldset><legend>Template Variables</legend>' +
+                        manualVars.map(v =>
+                            `<label>${v}<input type="text" name="var_${v}" placeholder="${v}"></label>`
+                        ).join('') + '</fieldset>';
+                } else {
+                    varsDiv.innerHTML = '<small>Variables (name, company, position) will be auto-filled per candidate.</small>';
+                }
+            } else {
+                varsDiv.innerHTML = '';
+            }
+        });
+        select.dispatchEvent(new Event('change'));
+    } catch (e) {
+        console.error('Failed to load templates:', e);
+    }
+})();
+</script>
+{% endblock %}

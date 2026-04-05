@@ -1,0 +1,31 @@
+     1→/* Boss Assistant — client-side helpers */
+     2→
+     3→/**
+     4→ * Show a toast notification.
+     5→ * @param {string} message
+     6→ * @param {"success"|"error"|"warning"|"info"} type
+     7→ */
+     8→function showToast(message, type = "info") {
+     9→    const container = document.getElementById("toast-container");
+    10→    if (!container) return;
+    11→    const toast = document.createElement("div");
+    12→    toast.className = `toast toast-${type}`;
+    13→    toast.textContent = message;
+    14→    container.appendChild(toast);
+    15→    setTimeout(() => toast.remove(), 4000);
+    16→}
+    17→
+    18→/* Listen for HX-Trigger response headers to show toasts */
+    19→document.body.addEventListener("showToast", function (evt) {
+    20→    const detail = evt.detail || {};
+    21→    showToast(detail.message || "操作完成", detail.type || "success");
+    22→});
+    23→
+    24→/* Auto-scroll pipeline log to bottom when new content arrives */
+    25→document.body.addEventListener("htmx:afterSwap", function (evt) {
+    26→    const log = document.querySelector(".pipeline-log");
+    27→    if (log) {
+    28→        log.scrollTop = log.scrollHeight;
+    29→    }
+    30→});
+    31→

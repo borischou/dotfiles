@@ -1,0 +1,200 @@
+    55→
+    56→
+    57→@dataclass
+    58→class BatchConfig:
+    59→    """Configuration for _send_message_batch_common()."""
+    60→
+    61→    mode_label: str  # "" / "Enterprise Inline" / "Talent Bank Inline"
+    62→    panel_title: str  # Rich Panel title
+    63→    progress_description: str  # Progress bar description
+    64→    pre_validate: bool = False
+    65→
+    66→
+    67→# Maimai chat URL - navigate directly to chat page
+    68→MAIMAI_CHAT_URL = (
+    69→    "https://maimai.cn/bizmember/uh_chat_pc?u2={user_id}&from=pc_web_search&fr=profile"
+    70→)
+    71→
+    72→
+    73→def _extract_user_id(profile_url: str) -> Optional[str]:
+    74→    """Extract dstu/user_id from a Maimai profile URL for direct chat navigation.
+    75→
+    76→    Only returns IDs that are known to work with the chat URL (u2= parameter).
+    77→    Query-param IDs (dstu, u2, egid) are reliable for chat navigation.
+    78→    Path-based IDs (/contact/detail/xxx) are NOT the same as chat user IDs
+    79→    and should not be used for direct chat URL construction.
+    80→    """
+    81→    from urllib.parse import urlparse, parse_qs
+    82→
+    83→    parsed = urlparse(profile_url)
+    84→    params = parse_qs(parsed.query)
+    85→    # Only use query parameter IDs — these are confirmed to work with uh_chat_pc
+    86→    for key in ("dstu", "u2", "egid"):
+    87→        if key in params:
+    88→            return params[key][0]
+    89→    return None
+    90→
+    91→
+    92→async def _navigate_to_chat(
+    93→    page: Page,
+    94→    profile_url: Optional[str],
+    95→    config,
+    96→    browser: BrowserManager,
+    97→    maimai_id: str,
+    98→    interactive: bool = False,
+    99→    discovered_selectors=None,
+   100→) -> bool:
+   101→    """Navigate to the chat page for a candidate.
+   102→
+   103→    Tries in order:
+   104→    1. Extract user_id from profile_url query params → direct chat URL
+   105→    2. Navigate to profile_url, extract user_id from redirected URL → direct chat URL
+   106→    3. Click chat button on profile page as fallback
+   107→
+   108→    If no profile_url is provided, looks up the candidate's profile_url from DB.
+   109→
+   110→    Args:
+   111→        page: Playwright page instance
+   112→        profile_url: Candidate's profile URL (may be None)
+   113→        config: Config instance
+   114→        browser: Browser manager instance
+   115→        maimai_id: Candidate's Maimai ID
+   116→        interactive: Enable interactive selector discovery
+   117→        discovered_selectors: Shared DiscoveredSelectors instance
+   118→
+   119→    Returns:
+   120→        True if successfully navigated to chat page
+   121→    """
+   122→    db_manager = get_db_manager()
+   123→
+   124→    # Resolve profile URL from DB if not provided
+   125→    if not profile_url:
+   126→        with db_manager.session_scope() as session:
+   127→            db_candidate = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+   128→            profile_url = db_candidate.profile_url if db_candidate else None
+   129→
+   130→        if not profile_url:
+   131→            raise PermanentFailureError(f"No profile URL for {maimai_id}")
+   132→
+   133→    # Try extracting user_id directly from profile URL
+   134→    user_id = _extract_user_id(profile_url)
+   135→    logger.debug(f"_navigate_to_chat: profile_url={profile_url!r}, extracted user_id={user_id}")
+   136→
+   137→    if user_id:
+   138→        chat_url = MAIMAI_CHAT_URL.format(user_id=user_id)
+   139→        await retry_navigation(page, chat_url, wait_until="domcontentloaded")
+   140→        await async_random_delay("page_load")
+   141→        return True
+   142→
+   143→    # Navigate to profile page, then try to extract user_id from resulting URL
+   144→    logger.debug(f"_navigate_to_chat: navigating to profile {profile_url}")
+   145→    await retry_navigation(page, profile_url, wait_until="domcontentloaded")
+   146→    await async_random_delay("page_load")
+   147→
+   148→    current_url = page.url
+   149→    logger.debug(f"_navigate_to_chat: landed on {current_url}")
+   150→    redirected_user_id = _extract_user_id(current_url)
+   151→    if redirected_user_id:
+   152→        logger.info(f"Extracted user_id={redirected_user_id} from page URL, redirecting to chat")
+   153→        chat_url = MAIMAI_CHAT_URL.format(user_id=redirected_user_id)
+   154→        await retry_navigation(page, chat_url, wait_until="domcontentloaded")
+   155→        await async_random_delay("page_load")
+   156→        return True
+   157→
+   158→    # Fallback: click chat button on profile page
+   159→    chat_button_found = await _click_chat_button(page, config)
+   160→    if chat_button_found:
+   161→        await async_random_delay("action")
+   162→        return True
+   163→
+   164→    # If interactive mode, trigger selector discovery
+   165→    if interactive and discovered_selectors is not None and not discovered_selectors.is_populated:
+   166→        from src.modules.selector_discovery import discover_chat_page
+   167→
+   168→        console.print(
+   169→            "[yellow]Chat button not found. Entering interactive discovery mode...[/yellow]"
+   170→        )
+   171→        result = await discover_chat_page(page, maimai_id, browser)
+   172→        if result.is_populated:
+   173→            discovered_selectors.chat_button = result.chat_button
+   174→            discovered_selectors.message_input = result.message_input
+   175→            discovered_selectors.send_button = result.send_button
+   176→            discovered_selectors.chat_url_pattern = result.chat_url_pattern
+   177→            discovered_selectors.skip_chat_button = result.skip_chat_button
+   178→            discovered_selectors.is_populated = True
+   179→            return True
+   180→
+   181→    console.print("[red]Could not find chat button[/red]")
+   182→    await browser.screenshot(f"message_error_{maimai_id}")
+   183→    return False
+   184→
+   185→
+   186→async def extract_contact_quota(page: Page) -> Optional[dict]:
+   187→    """Extract contact quota from Quick Contact page's embedded share_data.
+   188→
+   189→    The Quick Contact page server-renders ``window.share_data`` which includes
+   190→    ``mem_status.mem_info`` with remaining quotas for various member actions.
+   191→
+   192→    Args:
+   193→        page: Playwright page on a Quick Contact (极速联系) page
+   194→
+   195→    Returns:
+   196→        Dict with quota info, or None if data is unavailable::
+   197→
+   198→            {
+   199→                'uh_left': int,        # 极速联系 remaining
+   200→                'addfr_left': int,     # 加好友 remaining
+   201→                'dc_left': int,        # 直聊 remaining
+   202→                'expire_time': str,    # membership expiry
+   203→                'cost': int,           # vouchers consumed per contact
+   204→            }
+   205→    """
+   206→    try:
+   207→        quota = await page.evaluate(
+   208→            """() => {
+   209→            if (window.share_data && window.share_data.mem_status &&
+   210→                window.share_data.mem_status.mem_info) {
+   211→                const info = window.share_data.mem_status.mem_info;
+   212→                return {
+   213→                    uh_left: info.uh_left,
+   214→                    addfr_left: info.addfr_left,
+   215→                    dc_left: info.dc_left,
+   216→                    expire_time: info.expire_time || null,
+   217→                    cost: (window.share_data.fast_contact_pay_num || {}).final_num || 1,
+   218→                };
+   219→            }
+   220→            return null;
+   221→        }"""
+   222→        )
+   223→        return quota
+   224→    except Exception as e:
+   225→        logger.debug(f"Failed to extract contact quota: {e}")
+   226→        return None
+   227→
+   228→
+   229→async def fetch_contact_quota(browser: Optional["BrowserManager"] = None) -> Optional[dict]:
+   230→    """Fetch current contact quota by navigating to a Quick Contact page.
+   231→
+   232→    Uses a well-known user ID to load the Quick Contact page and extract
+   233→    ``window.share_data.mem_status.mem_info``. Useful for the ``status``
+   234→    command or any context where quota needs to be checked independently.
+   235→
+   236→    Args:
+   237→        browser: BrowserManager instance (uses global singleton if None)
+   238→
+   239→    Returns:
+   240→        Quota dict (see extract_contact_quota), or None on failure
+   241→    """
+   242→    if browser is None:
+   243→        browser = get_browser_manager()
+   244→
+   245→    page = browser.page
+   246→    # Use own user ID (u1 == u2 loads the page without actually creating a chat)
+   247→    probe_url = MAIMAI_CHAT_URL.format(user_id="1")
+   248→    try:
+   249→        await retry_navigation(page, probe_url, wait_until="domcontentloaded")
+   250→        await async_random_delay("page_load")
+   251→        return await extract_contact_quota(page)
+   252→    except Exception as e:
+   253→        logger.debug(f"Failed to fetch contact quota: {e}")
+   254→        return None

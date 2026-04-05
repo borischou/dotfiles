@@ -1,0 +1,58 @@
+{
+  "session_id": "888e07b2-a46c-4f22-a68c-77aa1518809d",
+  "project_path": "/Users/zhouboli/Documents/boss-assistant",
+  "start_time": "2026-02-12T08:16:48.606Z",
+  "duration_minutes": 1128,
+  "user_message_count": 6,
+  "assistant_message_count": 90,
+  "tool_counts": {
+    "Read": 14,
+    "Glob": 1,
+    "TaskCreate": 5,
+    "TaskUpdate": 6,
+    "Edit": 16,
+    "Write": 4,
+    "Bash": 10
+  },
+  "languages": {
+    "Python": 30,
+    "JSON": 2
+  },
+  "git_commits": 1,
+  "git_pushes": 0,
+  "input_tokens": 473,
+  "output_tokens": 5045,
+  "first_prompt": "Implement the following plan:  # 中文候选人智能评分系统 - 实施方案  ## Context  当前项目的 `scoring.py` 仅基于职级、公司层级、关键词匹配做简单评分，缺少对中文技能的语义理解、学历/经验匹配、以及 LLM 深度评估能力。本次改造将构建两层评分架构：规则引擎（jieba 中文分词 + 多因子加权）+ 可选的本地 Ollama LLM 语义…",
+  "user_interruptions": 0,
+  "user_response_times": [
+    21.191,
+    2938.816
+  ],
+  "tool_errors": 1,
+  "tool_error_categories": {
+    "Command Failed": 1
+  },
+  "uses_task_agent": false,
+  "uses_mcp": false,
+  "uses_web_search": false,
+  "uses_web_fetch": false,
+  "lines_added": 1485,
+  "lines_removed": 39,
+  "files_modified": 7,
+  "message_hours": [
+    16,
+    16,
+    17,
+    11,
+    11,
+    11
+  ],
+  "user_message_timestamps": [
+    "2026-02-12T08:16:48.606Z",
+    "2026-02-12T08:23:19.775Z",
+    "2026-02-12T09:14:22.408Z",
+    "2026-02-13T03:04:44.018Z",
+    "2026-02-13T03:04:44.016Z",
+    "2026-02-13T03:04:44.016Z"
+  ]
+}

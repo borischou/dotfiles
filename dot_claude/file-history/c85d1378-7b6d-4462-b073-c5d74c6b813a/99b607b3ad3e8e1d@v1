@@ -1,0 +1,2632 @@
+"""Message module for sending messages to candidates.
+
+Handles message template rendering, interactive confirmation,
+and message sending with full audit trail.
+"""
+
+import asyncio
+import json
+import sys
+import traceback
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from src.modules.selector_discovery import DiscoveredSelectors
+
+import questionary
+from patchright.async_api import Page
+from loguru import logger
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
+from src.core.browser import BrowserManager, get_browser_manager
+from src.core.anti_detection import human_type, human_click
+from src.modules.auth import ensure_logged_in
+from src.utils.config import get_config
+from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+from src.utils.delays import async_random_delay
+from src.utils.retry import retry_navigation
+from src.utils.validators import (
+    validate_maimai_id,
+    validate_template_variables,
+    validate_template_rendering,
+)
+from src.models.database import Candidate, Message, get_db_manager
+from src.exceptions.errors import (
+    PermanentFailureError,
+    RateLimitExceededError,
+    ValidationError,
+    QuotaExhaustedError,
+)
+
+console = Console()
+
+
+@dataclass
+class CandidateSendResult:
+    """Result of sending a message to a single candidate."""
+
+    success: bool
+    status: str  # 'sent', 'failed', 'quota_exhausted', 'rate_limited'
+    reason: str = ""
+    attempts: int = 1
+    content: str = ""
+    abort_batch: bool = False  # True → stop remaining candidates
+
+
+@dataclass
+class BatchConfig:
+    """Configuration for _send_message_batch_common()."""
+
+    mode_label: str  # "" / "Enterprise Inline" / "Talent Bank Inline"
+    panel_title: str  # Rich Panel title
+    progress_description: str  # Progress bar description
+    pre_validate: bool = False
+
+
+# Maimai chat URL - navigate directly to chat page
+MAIMAI_CHAT_URL = (
+    "https://maimai.cn/bizmember/uh_chat_pc?u2={user_id}&from=pc_web_search&fr=profile"
+)
+
+
+def _extract_user_id(profile_url: str) -> Optional[str]:
+    """Extract dstu/user_id from a Maimai profile URL for direct chat navigation.
+
+    Only returns IDs that are known to work with the chat URL (u2= parameter).
+    Query-param IDs (dstu, u2, egid) are reliable for chat navigation.
+    Path-based IDs (/contact/detail/xxx) are NOT the same as chat user IDs
+    and should not be used for direct chat URL construction.
+    """
+    from urllib.parse import urlparse, parse_qs
+
+    parsed = urlparse(profile_url)
+    params = parse_qs(parsed.query)
+    # Only use query parameter IDs — these are confirmed to work with uh_chat_pc
+    for key in ("dstu", "u2", "egid"):
+        if key in params:
+            return params[key][0]
+    return None
+
+
+async def _navigate_to_chat(
+    page: Page,
+    profile_url: Optional[str],
+    config,
+    browser: BrowserManager,
+    maimai_id: str,
+    interactive: bool = False,
+    discovered_selectors=None,
+) -> bool:
+    """Navigate to the chat page for a candidate.
+
+    Tries in order:
+    1. Extract user_id from profile_url query params → direct chat URL
+    2. Navigate to profile_url, extract user_id from redirected URL → direct chat URL
+    3. Click chat button on profile page as fallback
+
+    If no profile_url is provided, looks up the candidate's profile_url from DB.
+
+    Args:
+        page: Playwright page instance
+        profile_url: Candidate's profile URL (may be None)
+        config: Config instance
+        browser: Browser manager instance
+        maimai_id: Candidate's Maimai ID
+        interactive: Enable interactive selector discovery
+        discovered_selectors: Shared DiscoveredSelectors instance
+
+    Returns:
+        True if successfully navigated to chat page
+    """
+    db_manager = get_db_manager()
+
+    # Resolve profile URL from DB if not provided
+    if not profile_url:
+        with db_manager.session_scope() as session:
+            db_candidate = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+            profile_url = db_candidate.profile_url if db_candidate else None
+
+        if not profile_url:
+            raise PermanentFailureError(f"No profile URL for {maimai_id}")
+
+    # Try extracting user_id directly from profile URL
+    user_id = _extract_user_id(profile_url)
+    logger.debug(f"_navigate_to_chat: profile_url={profile_url!r}, extracted user_id={user_id}")
+
+    if user_id:
+        chat_url = MAIMAI_CHAT_URL.format(user_id=user_id)
+        await retry_navigation(page, chat_url, wait_until="domcontentloaded")
+        await async_random_delay("page_load")
+        return True
+
+    # Navigate to profile page, then try to extract user_id from resulting URL
+    logger.debug(f"_navigate_to_chat: navigating to profile {profile_url}")
+    await retry_navigation(page, profile_url, wait_until="domcontentloaded")
+    await async_random_delay("page_load")
+
+    current_url = page.url
+    logger.debug(f"_navigate_to_chat: landed on {current_url}")
+    redirected_user_id = _extract_user_id(current_url)
+    if redirected_user_id:
+        logger.info(f"Extracted user_id={redirected_user_id} from page URL, redirecting to chat")
+        chat_url = MAIMAI_CHAT_URL.format(user_id=redirected_user_id)
+        await retry_navigation(page, chat_url, wait_until="domcontentloaded")
+        await async_random_delay("page_load")
+        return True
+
+    # Fallback: click chat button on profile page
+    chat_button_found = await _click_chat_button(page, config)
+    if chat_button_found:
+        await async_random_delay("action")
+        return True
+
+    # If interactive mode, trigger selector discovery
+    if interactive and discovered_selectors is not None and not discovered_selectors.is_populated:
+        from src.modules.selector_discovery import discover_chat_page
+
+        console.print(
+            "[yellow]Chat button not found. Entering interactive discovery mode...[/yellow]"
+        )
+        result = await discover_chat_page(page, maimai_id, browser)
+        if result.is_populated:
+            discovered_selectors.chat_button = result.chat_button
+            discovered_selectors.message_input = result.message_input
+            discovered_selectors.send_button = result.send_button
+            discovered_selectors.chat_url_pattern = result.chat_url_pattern
+            discovered_selectors.skip_chat_button = result.skip_chat_button
+            discovered_selectors.is_populated = True
+            return True
+
+    console.print("[red]Could not find chat button[/red]")
+    await browser.screenshot(f"message_error_{maimai_id}")
+    return False
+
+
+async def extract_contact_quota(page: Page) -> Optional[dict]:
+    """Extract contact quota from Quick Contact page's embedded share_data.
+
+    The Quick Contact page server-renders ``window.share_data`` which includes
+    ``mem_status.mem_info`` with remaining quotas for various member actions.
+
+    Args:
+        page: Playwright page on a Quick Contact (极速联系) page
+
+    Returns:
+        Dict with quota info, or None if data is unavailable::
+
+            {
+                'uh_left': int,        # 极速联系 remaining
+                'addfr_left': int,     # 加好友 remaining
+                'dc_left': int,        # 直聊 remaining
+                'expire_time': str,    # membership expiry
+                'cost': int,           # vouchers consumed per contact
+            }
+    """
+    try:
+        quota = await page.evaluate(
+            """() => {
+            if (window.share_data && window.share_data.mem_status &&
+                window.share_data.mem_status.mem_info) {
+                const info = window.share_data.mem_status.mem_info;
+                return {
+                    uh_left: info.uh_left,
+                    addfr_left: info.addfr_left,
+                    dc_left: info.dc_left,
+                    expire_time: info.expire_time || null,
+                    cost: (window.share_data.fast_contact_pay_num || {}).final_num || 1,
+                };
+            }
+            return null;
+        }"""
+        )
+        return quota
+    except Exception as e:
+        logger.debug(f"Failed to extract contact quota: {e}")
+        return None
+
+
+async def fetch_contact_quota(browser: Optional["BrowserManager"] = None) -> Optional[dict]:
+    """Fetch current contact quota by navigating to a Quick Contact page.
+
+    Uses a well-known user ID to load the Quick Contact page and extract
+    ``window.share_data.mem_status.mem_info``. Useful for the ``status``
+    command or any context where quota needs to be checked independently.
+
+    Args:
+        browser: BrowserManager instance (uses global singleton if None)
+
+    Returns:
+        Quota dict (see extract_contact_quota), or None on failure
+    """
+    if browser is None:
+        browser = get_browser_manager()
+
+    page = browser.page
+    # Use own user ID (u1 == u2 loads the page without actually creating a chat)
+    probe_url = MAIMAI_CHAT_URL.format(user_id="1")
+    try:
+        await retry_navigation(page, probe_url, wait_until="domcontentloaded")
+        await async_random_delay("page_load")
+        return await extract_contact_quota(page)
+    except Exception as e:
+        logger.debug(f"Failed to fetch contact quota: {e}")
+        return None
+
+
+def _display_quota(quota: dict, just_sent: bool = True) -> None:
+    """Display contact quota info to the console.
+
+    Args:
+        quota: Quota dict from extract_contact_quota()
+        just_sent: If True, subtract cost from uh_left for post-send display
+    """
+    uh_left = quota.get("uh_left", 0)
+    cost = quota.get("cost", 1)
+    if just_sent:
+        uh_left = max(0, uh_left - cost)
+    console.print(f"[dim]联系券剩余: {uh_left}[/dim]")
+
+
+async def _handle_quick_contact(page: Page, content: str) -> Optional[bool]:
+    """Handle Maimai's "极速联系" (Quick Contact) page.
+
+    This page appears instead of regular chat for some candidates. It has a
+    category selector, a textarea, and a "提交" (Submit) button.
+
+    Submission works by manipulating the React component directly: setting
+    the message via setState and calling the debounced send method (with
+    flush) to trigger the POST to /bizmember/uh-chat/api/send_v2.
+
+    DOM-level textarea.fill() does NOT update React's controlled state, and
+    DOM click on the submit button does NOT reliably trigger the send API.
+
+    Args:
+        page: Playwright page instance
+        content: Message content to send
+
+    Returns:
+        True if message was sent via quick contact form,
+        False if quick contact page was detected but sending failed,
+        None if this is not a quick contact page (caller should continue normal flow)
+    """
+    try:
+        # Detect quick contact page via page title or page content
+        is_quick_contact = await page.evaluate(
+            """() => {
+            const title = document.title || '';
+            const bodyText = document.body ? document.body.innerText : '';
+            return title.includes('极速联系') || bodyText.includes('极速联系');
+        }"""
+        )
+
+        if not is_quick_contact:
+            return None
+
+        logger.info("Detected '极速联系' (Quick Contact) page")
+
+        # Validate message length (Quick Contact enforces 10-300 chars)
+        if len(content) < 10:
+            logger.error(
+                f"Quick contact: message too short ({len(content)} chars, "
+                "minimum 10). Quick Contact requires 10-300 characters."
+            )
+            return False
+        if len(content) > 300:
+            logger.error(
+                f"Quick contact: message too long ({len(content)} chars, "
+                "maximum 300). Quick Contact requires 10-300 characters."
+            )
+            return False
+
+        # Extract quota info before submitting (share_data is available on page load)
+        quota = await extract_contact_quota(page)
+
+        # Check if quota is exhausted
+        if quota and quota.get("uh_left", 0) <= 0:
+            raise QuotaExhaustedError(remaining=quota.get("uh_left", 0))
+
+        # Install XHR interceptor to capture the send_v2 response
+        await page.evaluate(
+            """() => {
+            window.__sendV2Result = null;
+            const origOpen = XMLHttpRequest.prototype.open;
+            const origSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(m, u) {
+                this.__url = u; this.__method = m;
+                return origOpen.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function(b) {
+                if (this.__url && this.__url.includes('send_v2')) {
+                    const xhr = this;
+                    xhr.addEventListener('load', function() {
+                        try {
+                            window.__sendV2Result = {
+                                status: xhr.status,
+                                response: xhr.responseText,
+                            };
+                        } catch(e) {
+                            window.__sendV2Result = {status: xhr.status, error: e.message};
+                        }
+                    });
+                    xhr.addEventListener('error', function() {
+                        window.__sendV2Result = {status: 0, error: 'network_error'};
+                    });
+                }
+                return origSend.apply(this, arguments);
+            };
+        }"""
+        )
+
+        # Submit via React component internals:
+        # 1. Find the class component that owns the form state
+        # 2. Set message + unlock push_type via setState
+        # 3. Call the debounced send() method and flush() to execute immediately
+        send_triggered = await page.evaluate(
+            """(msg) => {
+            const textarea = document.querySelector('textarea');
+            if (!textarea) return {success: false, error: 'no textarea'};
+            const keys = Object.keys(textarea);
+            const fiberKey = keys.find(
+                k => k.startsWith('__reactInternalInstance') || k.startsWith('__reactFiber')
+            );
+            if (!fiberKey) return {success: false, error: 'no React fiber'};
+
+            let fiber = textarea[fiberKey];
+            while (fiber) {
+                if (fiber.stateNode && fiber.stateNode.state
+                    && 'message' in fiber.stateNode.state
+                    && typeof fiber.stateNode.send === 'function') {
+                    const component = fiber.stateNode;
+                    // Set message and ensure push_type is not locked (true = sending lock)
+                    component.setState({message: msg, push_type: false}, () => {
+                        component.send();
+                        if (typeof component.send.flush === 'function') {
+                            component.send.flush();
+                        }
+                    });
+                    return {success: true};
+                }
+                fiber = fiber.return;
+            }
+            return {success: false, error: 'React component not found'};
+        }""",
+            content,
+        )
+
+        if not send_triggered.get("success"):
+            logger.warning(
+                f"Quick contact: failed to trigger send via React: "
+                f"{send_triggered.get('error', 'unknown')}"
+            )
+            return False
+
+        # Wait for the API response (send_v2 XHR)
+        send_result = None
+        for _ in range(10):
+            await asyncio.sleep(0.5)
+            send_result = await page.evaluate("() => window.__sendV2Result")
+            if send_result is not None:
+                break
+
+        if send_result is None:
+            logger.warning("Quick contact: send_v2 API call was not captured (timeout)")
+            return False
+
+        # Parse the API response
+        response_text = send_result.get("response", "")
+        try:
+            resp_data = json.loads(response_text) if response_text else {}
+        except (json.JSONDecodeError, TypeError):
+            resp_data = {}
+
+        ret = resp_data.get("ret")
+        error_msg = resp_data.get("error", "")
+
+        if ret == -1:
+            logger.warning(f"Quick contact: send failed — {error_msg}")
+            if error_msg:
+                console.print(f"  [red]Quick Contact 失败: {error_msg}[/red]")
+            return False
+
+        logger.info("Quick contact: message sent successfully")
+        await async_random_delay("action")
+
+        # Display remaining quota
+        if quota:
+            _display_quota(quota, just_sent=True)
+
+        return True
+
+    except PermanentFailureError:
+        raise  # Let quota exhaustion etc. propagate to abort the batch
+    except Exception as e:
+        logger.error(f"Quick contact handling failed: {e}\n{traceback.format_exc()}")
+        return False
+
+
+async def _detect_vip_paywall(page: Page) -> bool:
+    """Detect if a VIP/membership paywall is blocking the current page.
+
+    Non-VIP accounts may be redirected to a recharge/upgrade page when
+    trying to message certain candidates. This checks the page URL and
+    visible text for common paywall indicators.
+
+    Args:
+        page: Playwright page instance
+
+    Returns:
+        True if a VIP paywall is detected
+    """
+    try:
+        return await page.evaluate(
+            """() => {
+            const url = window.location.href;
+            const urlKeywords = ['vip', 'member', 'pay', 'recharge', 'upgrade', 'subscribe'];
+            if (urlKeywords.some(kw => url.toLowerCase().includes(kw))) {
+                return true;
+            }
+
+            const title = document.title || '';
+            const bodyText = document.body ? document.body.innerText.substring(0, 3000) : '';
+            const text = title + ' ' + bodyText;
+
+            const paywallPatterns = [
+                '开通会员', '升级会员', '会员专享', '会员权益',
+                '充值', '付费', '购买会员', '开通VIP', '升级VIP',
+                '立即开通', '立即升级', '立即购买',
+                '会员到期', '续费', '解锁', '次数已用完',
+                '今日沟通次数', '沟通人数已达上限',
+            ];
+
+            return paywallPatterns.some(p => text.includes(p));
+        }"""
+        )
+    except Exception as e:
+        logger.debug(f"VIP paywall detection failed: {e}")
+        return False
+
+
+async def send_message(
+    maimai_id: str,
+    template_name: str,
+    variables: Dict[str, str],
+    browser: Optional[BrowserManager] = None,
+    skip_confirmation: bool = False,
+    interactive: bool = False,
+    discovered_selectors: Optional["DiscoveredSelectors"] = None,
+    _skip_rate_check: bool = False,
+    profile_url: Optional[str] = None,
+) -> bool:
+    """
+    Send a message to a candidate.
+
+    Args:
+        maimai_id: Candidate's Maimai ID
+        template_name: Name of message template to use
+        variables: Variables to substitute in template
+        browser: Browser manager instance
+        skip_confirmation: Skip confirmation (only for testing)
+        interactive: Enable interactive selector discovery on failure
+        discovered_selectors: Shared DiscoveredSelectors instance for reuse
+
+    Returns:
+        True if message was sent successfully
+
+    Raises:
+        RateLimitExceededError: If rate limit exceeded
+        ValidationError: If template or variables invalid
+    """
+    # Validate and clean inputs
+    maimai_id = validate_maimai_id(maimai_id)
+
+    if browser is None:
+        browser = get_browser_manager()
+
+    config = get_config()
+    rate_limiter = get_rate_limiter()
+    db_manager = get_db_manager()
+
+    # Get template
+    try:
+        template = config.get_template(template_name)
+    except Exception:
+        raise ValidationError(f"Template not found: {template_name}")
+
+    # Validate template variables
+    validate_template_variables(template, variables)
+
+    # Render message content
+    content = render_template(template["content"], variables)
+
+    # Get candidate info for display
+    candidate_info = _get_candidate_info(db_manager, maimai_id)
+
+    # Preview and confirm
+    if not skip_confirmation:
+        action = await interactive_confirm(content, candidate_info, template_name)
+
+        if action == "skip":
+            console.print("[yellow]Message skipped[/yellow]")
+            _log_message(db_manager, maimai_id, template_name, content, "cancelled")
+            return False
+
+        elif action == "edit":
+            # Allow user to edit content
+            content = await edit_message(content)
+            if content is None:
+                console.print("[yellow]Message cancelled[/yellow]")
+                return False
+
+            # Re-confirm after edit
+            action = await interactive_confirm(content, candidate_info, template_name)
+            if action != "send":
+                console.print("[yellow]Message skipped[/yellow]")
+                return False
+
+        elif action != "send":
+            console.print("[yellow]Message cancelled[/yellow]")
+            return False
+
+    # Check rate limit (waits through min-interval) - skip when called from batch
+    if not _skip_rate_check:
+        await async_check_rate_limit("send_message")
+
+    # Ensure logged in
+    await ensure_logged_in(browser)
+
+    try:
+        page = browser.page
+
+        # If we have populated discovered selectors, use them directly
+        if discovered_selectors and discovered_selectors.is_populated:
+            from src.modules.selector_discovery import apply_discovered_selectors
+
+            success = await apply_discovered_selectors(
+                page, maimai_id, discovered_selectors, content
+            )
+            if success:
+                rate_limiter.log_action(
+                    "send_message", {"maimai_id": maimai_id, "template": template_name}
+                )
+                _log_message(db_manager, maimai_id, template_name, content, "sent")
+                console.print("[green]Message sent successfully![/green]")
+                return True
+            else:
+                console.print("[red]Failed to send with discovered selectors[/red]")
+                await browser.screenshot(f"message_error_{maimai_id}")
+                _log_message(db_manager, maimai_id, template_name, content, "failed")
+                return False
+
+        nav_ok = await _navigate_to_chat(
+            page,
+            profile_url,
+            config,
+            browser,
+            maimai_id,
+            interactive,
+            discovered_selectors,
+        )
+        if not nav_ok:
+            _log_message(db_manager, maimai_id, template_name, content, "failed")
+            return False
+
+        # Check for "等待回应" (Awaiting Response) — already messaged this candidate
+        try:
+            awaiting = await page.evaluate(
+                """() => {
+                const text = document.body ? document.body.innerText : '';
+                return text.includes('等待回应') || text.includes('等待对方回复');
+            }"""
+            )
+            if awaiting:
+                logger.info(f"Candidate {maimai_id} already messaged (awaiting response), skipping")
+                console.print(f"[yellow]Already messaged {maimai_id} (等待回应), skipping[/yellow]")
+                _log_message(db_manager, maimai_id, template_name, content, "cancelled")
+                return False
+        except Exception as e:
+            logger.debug(f"Awaiting-response check failed for {maimai_id}: {e}")
+
+        # Check for "极速联系" (Quick Contact) page
+        qc_result = await _handle_quick_contact(page, content)
+        if qc_result is True:
+            rate_limiter.log_action(
+                "send_message",
+                {
+                    "maimai_id": maimai_id,
+                    "template": template_name,
+                    "mode": "quick_contact",
+                },
+            )
+            _log_message(db_manager, maimai_id, template_name, content, "sent")
+            console.print("[green]Message sent via Quick Contact![/green]")
+            return True
+        elif qc_result is False:
+            console.print("[red]Quick Contact page detected but send failed[/red]")
+            await browser.screenshot(f"message_error_qc_{maimai_id}")
+            _log_message(db_manager, maimai_id, template_name, content, "failed")
+            return False
+        # qc_result is None → not a quick contact page, continue normal flow
+
+        # If interactive discovery succeeded, apply discovered selectors
+        if discovered_selectors and discovered_selectors.is_populated:
+            from src.modules.selector_discovery import apply_discovered_selectors
+
+            success = await apply_discovered_selectors(
+                page, maimai_id, discovered_selectors, content
+            )
+            if success:
+                rate_limiter.log_action(
+                    "send_message", {"maimai_id": maimai_id, "template": template_name}
+                )
+                _log_message(db_manager, maimai_id, template_name, content, "sent")
+                console.print("[green]Message sent successfully![/green]")
+                return True
+
+        # Check for existing conversation to avoid duplicate greetings
+        has_existing = await _check_existing_conversation(page, maimai_id)
+        if has_existing:
+            console.print(
+                f"[yellow]Existing conversation detected with {maimai_id}. Skipping to avoid duplicate.[/yellow]"
+            )
+            _log_message(db_manager, maimai_id, template_name, content, "cancelled")
+            return False
+
+        # Find message input and type message
+        input_found = await _type_message(page, config, content)
+        if not input_found:
+            console.print("[red]Could not find message input[/red]")
+            await browser.screenshot(f"message_error_{maimai_id}")
+            _log_message(db_manager, maimai_id, template_name, content, "failed")
+            return False
+
+        await async_random_delay("action")
+
+        # Click send button
+        sent = await _click_send_button(page, config)
+        if not sent:
+            console.print("[red]Could not send message[/red]")
+            await browser.screenshot(f"message_error_{maimai_id}")
+            _log_message(db_manager, maimai_id, template_name, content, "failed")
+            return False
+
+        # Check if clicking send triggered a VIP paywall popup
+        await asyncio.sleep(1)
+        if await _detect_vip_paywall(page):
+            console.print(
+                f"[yellow]VIP paywall popup appeared after send for {maimai_id}, skipping[/yellow]"
+            )
+            _log_message(db_manager, maimai_id, template_name, content, "cancelled")
+            raise PermanentFailureError(f"VIP paywall detected for {maimai_id}")
+
+        # Verify message was actually sent
+        verified = await _verify_message_sent(page, content)
+        if not verified:
+            logger.warning(
+                f"Message to {maimai_id}: send button clicked but could not verify delivery"
+            )
+            console.print(
+                "[yellow]Warning: Message send could not be verified. Marking as unverified.[/yellow]"
+            )
+            await browser.screenshot(f"message_unverified_{maimai_id}")
+            # Still log as sent but with unverified note in details
+            rate_limiter.log_action(
+                "send_message",
+                {
+                    "maimai_id": maimai_id,
+                    "template": template_name,
+                    "verified": False,
+                },
+            )
+            _log_message(db_manager, maimai_id, template_name, content, "sent")
+            console.print("[yellow]Message marked as sent (unverified)[/yellow]")
+            return True
+
+        # Log action
+        rate_limiter.log_action(
+            "send_message",
+            {
+                "maimai_id": maimai_id,
+                "template": template_name,
+                "verified": True,
+            },
+        )
+
+        # Log message to database
+        _log_message(db_manager, maimai_id, template_name, content, "sent")
+
+        console.print("[green]Message sent and verified![/green]")
+        return True
+
+    except PermanentFailureError:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
+        await browser.screenshot(f"message_error_{maimai_id}")
+        _log_message(db_manager, maimai_id, template_name, content, "failed")
+        raise
+
+
+async def _send_message_batch_common(
+    candidates: List[dict],
+    template_name: str,
+    common_variables: Dict[str, str],
+    send_one: Callable[[dict, str], Awaitable[CandidateSendResult]],
+    batch_config: BatchConfig,
+    skip_messaged: bool = True,
+    skip_confirmation: bool = False,
+) -> Dict[str, Any]:
+    """Common orchestration for all three batch-send paths.
+
+    Handles: template loading, filtering already-messaged, preview panel,
+    confirmation, progress bar, rate limiting, template rendering, and
+    result collection.  The actual per-candidate send logic is delegated
+    to the ``send_one`` callback.
+
+    Args:
+        candidates: List of dicts with maimai_id, name, company, title
+        template_name: Name of message template
+        common_variables: Shared template variables
+        send_one: async callback(candidate_dict, rendered_content) → CandidateSendResult
+        batch_config: Display / behaviour config for this path
+        skip_messaged: Skip already-messaged candidates
+        skip_confirmation: Skip interactive confirmation prompt
+
+    Returns:
+        Dict with total, sent, failed, skipped, rate_limited, details
+    """
+    config = get_config()
+    db_manager = get_db_manager()
+
+    try:
+        template = config.get_template(template_name)
+    except Exception:
+        raise ValidationError(f"Template not found: {template_name}")
+
+    results = {
+        "total": len(candidates),
+        "sent": 0,
+        "failed": 0,
+        "skipped": 0,
+        "rate_limited": 0,
+        "quota_exhausted": 0,
+        "details": [],
+    }
+
+    # --- Filter already-messaged candidates ---
+    send_list = []
+    if skip_messaged:
+        all_ids = [c["maimai_id"] for c in candidates]
+        with db_manager.session_scope() as session:
+            rows = (
+                session.query(Message.candidate_maimai_id)
+                .filter(Message.candidate_maimai_id.in_(all_ids), Message.status == "sent")
+                .distinct()
+                .all()
+            )
+            messaged_ids = {row[0] for row in rows}
+
+        for c in candidates:
+            if c["maimai_id"] in messaged_ids:
+                results["skipped"] += 1
+                results["details"].append(
+                    {
+                        "maimai_id": c["maimai_id"],
+                        "name": c["name"],
+                        "status": "skipped",
+                        "reason": "already messaged",
+                    }
+                )
+            else:
+                send_list.append(c)
+    else:
+        send_list = list(candidates)
+
+    if not send_list:
+        if results["skipped"] > 0:
+            console.print(
+                f"[yellow]All {results['skipped']} candidates already messaged. Skipping send.[/yellow]"
+            )
+        else:
+            console.print("[yellow]No candidates to send messages to.[/yellow]")
+        return results
+
+    # --- Optional pre-validation (Path A) ---
+    if batch_config.pre_validate:
+        console.print("[dim]Validating template for all candidates...[/dim]")
+        for c in send_list:
+            test_vars = {
+                **common_variables,
+                "name": c.get("name", ""),
+                "company": c.get("company", ""),
+                "position": c.get("title", ""),
+            }
+            is_valid, missing = validate_template_rendering(template["content"], test_vars, c)
+            if not is_valid:
+                raise ValidationError(
+                    f"候选人 {c.get('name', 'Unknown')} 的模板变量缺失或为空:\n"
+                    f"  缺失: {', '.join(missing)}\n"
+                    f"  候选人信息: {c}\n"
+                    f"  请检查模板或补充变量"
+                )
+
+    # --- Build preview ---
+    first = send_list[0]
+    first_vars = {
+        **common_variables,
+        "name": first["name"],
+        "company": first["company"],
+        "position": first["title"],
+    }
+    # If pre-validated, skip redundant validation in render
+    first_content = render_template(
+        template["content"], first_vars, validate=not batch_config.pre_validate
+    )
+
+    summary_text = Text()
+    summary_text.append("Template: ", style="bold")
+    summary_text.append(f"{template_name}\n")
+    if batch_config.mode_label:
+        summary_text.append("Mode: ", style="bold")
+        summary_text.append(f"{batch_config.mode_label}\n")
+    summary_text.append("Candidates: ", style="bold")
+    summary_text.append(f"{len(candidates)} found, {results['skipped']} already messaged\n")
+    summary_text.append("Will send to: ", style="bold")
+    summary_text.append(f"{len(send_list)} candidates\n\n")
+    summary_text.append("Message Preview ", style="bold cyan")
+    summary_text.append("(first candidate):\n", style="dim")
+    summary_text.append("To: ", style="bold cyan")
+    recipient = first["name"]
+    if first.get("title") and first.get("company"):
+        recipient += f" ({first['title']} @ {first['company']})"
+    summary_text.append(f"{recipient}\n\n")
+    summary_text.append(first_content)
+
+    console.print(
+        Panel(
+            summary_text,
+            title=batch_config.panel_title,
+            border_style="green",
+            padding=(1, 2),
+        )
+    )
+
+    # --- Confirmation ---
+    if skip_confirmation:
+        console.print(f"[green]Auto-confirmed: sending to {len(send_list)} candidates[/green]")
+    else:
+        loop = asyncio.get_running_loop()
+        confirm = await loop.run_in_executor(
+            None,
+            lambda: questionary.confirm(
+                f"Confirm batch send to {len(send_list)} candidates?"
+            ).unsafe_ask(),
+        )
+        if not confirm:
+            console.print("[yellow]Batch send cancelled.[/yellow]")
+            return results
+
+    # --- Send loop ---
+    from rich.progress import (
+        Progress,
+        BarColumn,
+        TextColumn as ProgressTextColumn,
+        MofNCompleteColumn,
+    )
+
+    with Progress(
+        ProgressTextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task(batch_config.progress_description, total=len(send_list))
+
+        for c in send_list:
+            # Rate limit check
+            try:
+                await async_check_rate_limit("send_message")
+            except RateLimitExceededError as e:
+                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+                remaining = len(send_list) - (results["sent"] + results["failed"])
+                results["rate_limited"] = remaining
+                results["details"].append(
+                    {
+                        "maimai_id": c["maimai_id"],
+                        "name": c["name"],
+                        "status": "rate_limited",
+                        "reason": str(e),
+                    }
+                )
+                break
+
+            # Build per-candidate variables and render template
+            variables = {
+                **common_variables,
+                "name": c["name"],
+                "company": c["company"],
+                "position": c["title"],
+            }
+            try:
+                content = render_template(
+                    template["content"],
+                    variables,
+                    validate=not batch_config.pre_validate,
+                )
+            except ValidationError as e:
+                logger.error(f"Template rendering failed for {c['name']}: {e}")
+                results["failed"] += 1
+                results["details"].append(
+                    {
+                        "maimai_id": c["maimai_id"],
+                        "name": c["name"],
+                        "status": "failed",
+                        "reason": f"模板渲染失败: {e}",
+                    }
+                )
+                progress.advance(task)
+                continue
+
+            # Delegate to path-specific sender
+            result = await send_one(c, content)
+
+            # Record result
+            if result.status == "sent":
+                results["sent"] += 1
+            elif result.status in ("quota_exhausted", "rate_limited"):
+                if result.status == "rate_limited":
+                    remaining = len(send_list) - (results["sent"] + results["failed"])
+                    results["rate_limited"] = remaining
+                else:
+                    results["quota_exhausted"] += 1
+            else:
+                results["failed"] += 1
+
+            detail = {
+                "maimai_id": c["maimai_id"],
+                "name": c["name"],
+                "status": result.status,
+            }
+            if result.reason:
+                detail["reason"] = result.reason
+            if result.attempts > 1:
+                detail["attempts"] = result.attempts
+            if result.content:
+                detail["content"] = result.content
+            elif content:
+                detail["content"] = content
+            results["details"].append(detail)
+
+            if result.abort_batch:
+                remaining = len(send_list) - (results["sent"] + results["failed"])
+                if remaining > 0:
+                    console.print(f"[yellow]跳过剩余 {remaining} 位候选人[/yellow]")
+                break
+
+            progress.advance(task)
+
+            await async_random_delay("message")
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Path-specific sender callbacks
+# ---------------------------------------------------------------------------
+
+
+def _make_search_center_sender(
+    browser: BrowserManager,
+    template_name: str,
+    interactive: bool,
+    discovered_selectors,
+) -> Callable[[dict, str], Awaitable[CandidateSendResult]]:
+    """Create a sender callback for search-center (Path A) with retry + timeout."""
+
+    max_retries = 2
+    per_candidate_timeout = 90
+
+    async def _send(c: dict, content: str) -> CandidateSendResult:
+        variables = {
+            "name": c["name"],
+            "company": c["company"],
+            "position": c["title"],
+        }
+        last_error = None
+        for attempt in range(1 + max_retries):
+            try:
+                success = await asyncio.wait_for(
+                    send_message(
+                        maimai_id=c["maimai_id"],
+                        template_name=template_name,
+                        variables=variables,
+                        browser=browser,
+                        skip_confirmation=True,
+                        interactive=interactive,
+                        discovered_selectors=discovered_selectors,
+                        _skip_rate_check=True,
+                        profile_url=c.get("profile_url"),
+                    ),
+                    timeout=per_candidate_timeout,
+                )
+                if success:
+                    return CandidateSendResult(
+                        success=True,
+                        status="sent",
+                        attempts=attempt + 1,
+                        content=content,
+                    )
+                last_error = "send returned False"
+
+            except asyncio.TimeoutError:
+                console.print(
+                    f"[yellow]Timeout for {c['name']} ({c['maimai_id']}), skipping.[/yellow]"
+                )
+                return CandidateSendResult(
+                    success=False,
+                    status="failed",
+                    reason=f"Timed out after {per_candidate_timeout}s",
+                    attempts=attempt + 1,
+                    content=content,
+                )
+            except QuotaExhaustedError as e:
+                console.print("\n[red]联系券已用尽，终止批量发送[/red]")
+                return CandidateSendResult(
+                    success=False,
+                    status="quota_exhausted",
+                    reason=str(e),
+                    attempts=attempt + 1,
+                    content=content,
+                    abort_batch=True,
+                )
+            except PermanentFailureError as e:
+                console.print(f"[yellow]{e}. Skipping.[/yellow]")
+                return CandidateSendResult(
+                    success=False,
+                    status="failed",
+                    reason=str(e),
+                    attempts=attempt + 1,
+                    content=content,
+                )
+            except RateLimitExceededError as e:
+                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+                return CandidateSendResult(
+                    success=False,
+                    status="rate_limited",
+                    reason=str(e),
+                    attempts=attempt + 1,
+                    content=content,
+                    abort_batch=True,
+                )
+            except Exception as e:
+                last_error = str(e)
+
+            # Retry with exponential backoff
+            if attempt < max_retries:
+                from src.utils.delays import get_retry_delay
+
+                delay = get_retry_delay(attempt, base_delay=3.0, max_delay=30.0)
+                logger.info(f"Retry {attempt + 1}/{max_retries} for {c['name']} in {delay:.1f}s")
+                await asyncio.sleep(delay)
+
+        # All retries exhausted
+        actual_attempts = max_retries + 1
+        logger.error(
+            f"Failed to send message to {c['name']} after {actual_attempts} attempt(s): {last_error}"
+        )
+        return CandidateSendResult(
+            success=False,
+            status="failed",
+            reason=last_error or "unknown error",
+            attempts=actual_attempts,
+            content=content,
+        )
+
+    return _send
+
+
+def _make_enterprise_sender(
+    page: Page,
+    config,
+    rate_limiter,
+    db_manager,
+    template_name: str,
+) -> Callable[[dict, str], Awaitable[CandidateSendResult]]:
+    """Create a sender callback for enterprise inline (Path B)."""
+
+    async def _send(c: dict, content: str) -> CandidateSendResult:
+        # Scroll to candidate card
+        try:
+            card_locator = page.get_by_text(c["name"], exact=False).first
+            await card_locator.scroll_into_view_if_needed(timeout=5000)
+            await async_random_delay("action")
+        except Exception as e:
+            logger.warning(f"Could not scroll to card for '{c['name']}': {e}")
+
+        success = await send_message_enterprise_inline(page, content, config)
+
+        if success:
+            rate_limiter.log_action(
+                "send_message",
+                {
+                    "maimai_id": c["maimai_id"],
+                    "template": template_name,
+                    "mode": "enterprise",
+                },
+            )
+            _log_message(db_manager, c["maimai_id"], template_name, content, "sent")
+            return CandidateSendResult(success=True, status="sent", content=content)
+        else:
+            logger.warning(
+                f"Enterprise inline send failed for {c['name']} ({c['maimai_id']}): "
+                f"send_message_enterprise_inline returned False"
+            )
+            _log_message(db_manager, c["maimai_id"], template_name, content, "failed")
+            return CandidateSendResult(
+                success=False,
+                status="failed",
+                reason="inline send returned False",
+                content=content,
+            )
+
+    return _send
+
+
+def _make_talent_bank_sender(
+    page: Page,
+    browser: BrowserManager,
+    config,
+    rate_limiter,
+    db_manager,
+    template_name: str,
+    exchange_phone: bool,
+    exchange_wechat: bool,
+) -> Callable[[dict, str], Awaitable[CandidateSendResult]]:
+    """Create a sender callback for talent bank inline (Path C)."""
+
+    async def _send(c: dict, content: str) -> CandidateSendResult:
+        # Scroll to candidate card and locate its "立即沟通" button
+        chat_btn_handle = None
+        try:
+            name_locator = page.get_by_text(c["name"], exact=False).first
+            await name_locator.scroll_into_view_if_needed(timeout=5000)
+            await async_random_delay("action")
+
+            name_el = await name_locator.element_handle(timeout=3000)
+            if name_el:
+                chat_btn_handle = await page.evaluate_handle(
+                    """(nameEl) => {
+                    let el = nameEl.parentElement;
+                    while (el && el !== document.body) {
+                        const btns = el.querySelectorAll('span, button, a, div');
+                        for (const b of btns) {
+                            if (b.textContent.trim() === '立即沟通' && b.childElementCount <= 1) {
+                                return b;
+                            }
+                        }
+                        el = el.parentElement;
+                    }
+                    return null;
+                }""",
+                    name_el,
+                )
+                if chat_btn_handle:
+                    try:
+                        tag = await chat_btn_handle.evaluate("el => el ? el.tagName : null")
+                        if not tag:
+                            chat_btn_handle = None
+                    except Exception:
+                        chat_btn_handle = None
+        except Exception as e:
+            logger.warning(f"Could not locate card button for '{c['name']}': {e}")
+            chat_btn_handle = None
+
+        success = await send_message_talent_bank_inline(
+            page,
+            content,
+            browser,
+            config,
+            exchange_phone=exchange_phone,
+            exchange_wechat=exchange_wechat,
+            chat_btn_handle=chat_btn_handle,
+        )
+
+        if success:
+            rate_limiter.log_action(
+                "send_message",
+                {
+                    "maimai_id": c["maimai_id"],
+                    "template": template_name,
+                    "mode": "talent_bank",
+                },
+            )
+            _log_message(db_manager, c["maimai_id"], template_name, content, "sent")
+            return CandidateSendResult(success=True, status="sent", content=content)
+        else:
+            logger.warning(f"Talent bank inline send failed for {c['name']} ({c['maimai_id']})")
+            _log_message(db_manager, c["maimai_id"], template_name, content, "failed")
+            return CandidateSendResult(
+                success=False,
+                status="failed",
+                reason="inline send returned False",
+                content=content,
+            )
+
+    return _send
+
+
+# ---------------------------------------------------------------------------
+# Public batch-send functions (thin wrappers over _send_message_batch_common)
+# ---------------------------------------------------------------------------
+
+
+async def send_message_batch(
+    candidates: List[dict],
+    template_name: str,
+    common_variables: Dict[str, str],
+    browser: BrowserManager,
+    skip_messaged: bool = True,
+    interactive: bool = False,
+    skip_confirmation: bool = False,
+) -> Dict[str, Any]:
+    """Batch send messages via search-center path (Path A).
+
+    Signature preserved for backward compatibility.
+    """
+    if interactive:
+        from src.modules.selector_discovery import DiscoveredSelectors
+
+        discovered_selectors = DiscoveredSelectors()
+    else:
+        discovered_selectors = None
+
+    send_one = _make_search_center_sender(browser, template_name, interactive, discovered_selectors)
+
+    return await _send_message_batch_common(
+        candidates=candidates,
+        template_name=template_name,
+        common_variables=common_variables,
+        send_one=send_one,
+        batch_config=BatchConfig(
+            mode_label="",
+            panel_title="Pipeline Summary",
+            progress_description="Sending messages...",
+            pre_validate=True,
+        ),
+        skip_messaged=skip_messaged,
+        skip_confirmation=skip_confirmation,
+    )
+
+
+def render_template(template_content: str, variables: Dict[str, str], validate: bool = True) -> str:
+    """
+    Render template with variables.
+
+    Maimai chat is plain text, so values are substituted as-is without
+    HTML escaping (which would produce visible &amp; entities in chat).
+
+    Args:
+        template_content: Template string with {variable} placeholders
+        variables: Variable values to substitute
+        validate: Whether to validate template before rendering (default True)
+
+    Returns:
+        Rendered message content
+
+    Raises:
+        ValidationError: If template validation fails and validate=True
+    """
+    if validate:
+        # Validate template can be fully rendered
+        is_valid, missing = validate_template_rendering(template_content, variables, {})
+        if not is_valid:
+            raise ValidationError(f"模板变量缺失或为空: {', '.join(missing)}\n" f"请检查模板或提供完整变量")
+
+    content = template_content
+    for key, value in variables.items():
+        content = content.replace(f"{{{key}}}", str(value))
+    return content
+
+
+def preview_message(
+    template_name: str, variables: Dict[str, str], candidate_info: Optional[Dict] = None
+) -> str:
+    """
+    Preview a message without sending.
+
+    Args:
+        template_name: Name of template
+        variables: Variables for template
+        candidate_info: Optional candidate info for context
+
+    Returns:
+        Rendered message content
+    """
+    config = get_config()
+    template = config.get_template(template_name)
+    content = render_template(template["content"], variables)
+
+    # Display preview
+    display_message_preview(content, candidate_info, template_name)
+
+    return content
+
+
+def display_message_preview(
+    content: str, candidate_info: Optional[Dict] = None, template_name: Optional[str] = None
+) -> None:
+    """
+    Display formatted message preview in terminal.
+
+    Args:
+        content: Message content
+        candidate_info: Optional candidate info
+        template_name: Optional template name
+    """
+    # Build recipient line
+    if candidate_info:
+        recipient = f"{candidate_info.get('name', 'Unknown')}"
+        if candidate_info.get("title") and candidate_info.get("company"):
+            recipient += f" ({candidate_info['title']} @ {candidate_info['company']})"
+    else:
+        recipient = "Unknown recipient"
+
+    # Create panel
+    title = "Message Preview"
+    if template_name:
+        title += f" [{template_name}]"
+
+    panel_content = Text()
+    panel_content.append("To: ", style="bold cyan")
+    panel_content.append(recipient + "\n\n")
+    panel_content.append(content)
+
+    console.print(Panel(panel_content, title=title, border_style="cyan", padding=(1, 2)))
+
+
+async def interactive_confirm(
+    content: str, candidate_info: Optional[Dict] = None, template_name: Optional[str] = None
+) -> str:
+    """
+    Show interactive confirmation dialog.
+
+    Args:
+        content: Message content to confirm
+        candidate_info: Optional candidate info
+        template_name: Optional template name
+
+    Returns:
+        Action string: 'send', 'edit', or 'skip'
+    """
+    # Display preview
+    display_message_preview(content, candidate_info, template_name)
+
+    console.print()
+
+    # Interactive prompt
+    choices = [
+        questionary.Choice("Send message", value="send"),
+        questionary.Choice("Edit content", value="edit"),
+        questionary.Choice("Skip (don't send)", value="skip"),
+    ]
+
+    loop = asyncio.get_running_loop()
+    action = await loop.run_in_executor(
+        None,
+        lambda: questionary.select(
+            "What would you like to do?",
+            choices=choices,
+            style=questionary.Style(
+                [
+                    ("selected", "fg:green bold"),
+                    ("pointer", "fg:green bold"),
+                    ("highlighted", "fg:green"),
+                ]
+            ),
+        ).unsafe_ask(),
+    )
+
+    return action or "skip"
+
+
+async def edit_message(content: str) -> Optional[str]:
+    """
+    Allow user to edit message content.
+
+    Args:
+        content: Original content
+
+    Returns:
+        Edited content or None if cancelled
+    """
+    console.print("\n[dim]Enter new message content (Ctrl+D to finish, Ctrl+C to cancel):[/dim]")
+
+    try:
+        loop = asyncio.get_running_loop()
+        edited = await loop.run_in_executor(
+            None, lambda: questionary.text("Message:", default=content, multiline=True).unsafe_ask()
+        )
+
+        return edited
+    except KeyboardInterrupt:
+        return None
+
+
+async def _find_element_by_selectors(page: Page, selectors: List[str], timeout: int = 3000):
+    """Try multiple selectors and return the first matching element.
+
+    Args:
+        page: Playwright page instance
+        selectors: List of CSS selectors to try in order
+        timeout: Timeout per selector in ms
+
+    Returns:
+        Tuple of (element, selector) or (None, None) if not found
+    """
+    for selector in selectors:
+        try:
+            elem = await page.wait_for_selector(selector, timeout=timeout)
+            if elem:
+                return elem, selector
+        except Exception:
+            continue
+    return None, None
+
+
+async def _click_chat_button(page: Page, config) -> bool:
+    """Find and click chat/message button, then wait for navigation to chat page."""
+    selectors = [
+        config.get_selector("message.chat_button"),
+        'button[class*="chat"]',
+        '[class*="message-btn"]',
+        'button:has-text("极速联系")',
+        'button:has-text("立即沟通")',
+        'button:has-text("发消息")',
+        'button:has-text("私信")',
+        'button:has-text("聊天")',
+    ]
+
+    url_before = page.url
+
+    for selector in selectors:
+        try:
+            button = await page.wait_for_selector(selector, timeout=3000)
+            if button:
+                await human_click(page, selector)
+                logger.debug(f"Clicked chat button: {selector}")
+
+                # Wait for navigation or page change after clicking
+                try:
+                    # Wait for URL change (chat page transition) or new content load
+                    await page.wait_for_url(
+                        lambda url: url != url_before,
+                        timeout=8000,
+                    )
+                    logger.debug(f"Page navigated to: {page.url}")
+                except Exception:
+                    # URL may not change if chat opens as overlay/modal
+                    logger.debug(
+                        "URL did not change after chat button click, checking for chat panel"
+                    )
+
+                # Wait for chat-related elements to appear (input or conversation area)
+                chat_ready_selectors = [
+                    "textarea",
+                    '[contenteditable="true"]',
+                    '[class*="chat-container"]',
+                    '[class*="chat-content"]',
+                    '[class*="message-list"]',
+                    '[class*="im-message"]',
+                ]
+                for chat_sel in chat_ready_selectors:
+                    try:
+                        await page.wait_for_selector(chat_sel, timeout=5000)
+                        logger.debug(f"Chat page ready, found: {chat_sel}")
+                        return True
+                    except Exception:
+                        continue
+
+                # If we got here, button was clicked but no chat UI detected
+                # Still return True since the button was found and clicked
+                logger.warning("Chat button clicked but chat UI not detected")
+                return True
+        except Exception:
+            continue
+
+    logger.warning("Chat button not found")
+    return False
+
+
+async def _type_message(page: Page, config, content: str) -> bool:
+    """Find message input and type content.
+
+    Uses progressively broader selectors. Broad selectors (bare textarea,
+    contenteditable) are only tried when the current URL looks like a chat page
+    to avoid typing into unrelated inputs (e.g. search bars on profile pages).
+    """
+    # Chat-specific selectors (always safe to try)
+    chat_selectors = [
+        config.get_selector("message.message_input"),
+        'textarea[class*="chat"]',
+        'textarea[class*="message"]',
+        'textarea[class*="im-"]',
+        '[class*="chat"] [contenteditable="true"]',
+        '[class*="im-"] [contenteditable="true"]',
+        '[class*="message"] [contenteditable="true"]',
+    ]
+
+    for selector in chat_selectors:
+        try:
+            input_elem = await page.wait_for_selector(selector, timeout=3000)
+            if input_elem:
+                await human_type(page, selector, content)
+                logger.debug(f"Typed message in: {selector}")
+                return True
+        except Exception as e:
+            logger.debug(f"Chat selector '{selector}' failed: {e}")
+            continue
+
+    # Broad selectors — only try if URL suggests we're on a chat page
+    current_url = page.url
+    is_chat_page = any(kw in current_url for kw in ("chat", "im/", "uh_chat", "message"))
+
+    if is_chat_page:
+        broad_selectors = [
+            '[contenteditable="true"]',
+            "textarea",
+        ]
+        for selector in broad_selectors:
+            try:
+                input_elem = await page.wait_for_selector(selector, timeout=3000)
+                if input_elem:
+                    await human_type(page, selector, content)
+                    logger.debug(f"Typed message in (broad, chat URL): {selector}")
+                    return True
+            except Exception as e:
+                logger.debug(f"Broad selector '{selector}' failed: {e}")
+                continue
+
+    logger.warning(f"Message input not found (is_chat_page={is_chat_page}, url={current_url})")
+    return False
+
+
+async def _click_send_button(page: Page, config) -> bool:
+    """Find and click send button."""
+    selectors = [
+        config.get_selector("message.send_button"),
+        'button[class*="send"]',
+        'button:has-text("提交")',
+        'button:has-text("发送")',
+        'button:has-text("Send")',
+        '[class*="send-btn"]',
+    ]
+
+    button, selector = await _find_element_by_selectors(page, selectors)
+    if button:
+        await human_click(page, selector)
+        logger.debug(f"Clicked send button: {selector}")
+        await async_random_delay("action")
+        return True
+
+    logger.warning("Send button not found")
+    return False
+
+
+async def _verify_message_sent(page: Page, content: str, timeout: int = 5000) -> bool:
+    """
+    Verify that a message was actually sent by checking the conversation area.
+
+    Polls up to `timeout` ms with short intervals to handle async rendering.
+
+    Checks for:
+    1. The sent message content appearing in the conversation
+    2. The message input being cleared (indicating successful send)
+    3. A sent/delivered indicator element
+
+    Args:
+        page: Playwright page instance
+        content: The message content that was sent
+        timeout: Max time to wait for verification in ms
+
+    Returns:
+        True if message send was verified
+    """
+    import time
+
+    # Short snippet for matching (first 20 chars, avoid template artifacts)
+    snippet = content[:20].strip()
+
+    poll_interval_ms = 500
+    deadline = time.monotonic() + timeout / 1000.0
+
+    while True:
+        try:
+            # Strategy 1: Check if message content appears in conversation area
+            verified = await page.evaluate(
+                """(snippet) => {
+                const chatSelectors = [
+                    '[class*="message-list"]',
+                    '[class*="chat-content"]',
+                    '[class*="conversation"]',
+                    '[class*="msg-list"]',
+                    '[class*="im-message"]',
+                    '[class*="chat-msg"]',
+                ];
+
+                for (const sel of chatSelectors) {
+                    const container = document.querySelector(sel);
+                    if (container && container.textContent.includes(snippet)) {
+                        return true;
+                    }
+                }
+
+                // Fallback: scan leaf-ish elements in the lower portion of the page
+                const viewportHeight = window.innerHeight;
+                const elements = document.querySelectorAll('div, p, span');
+                for (const el of elements) {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.top > viewportHeight * 0.3 && el.textContent.includes(snippet)) {
+                        if (el.textContent.length < snippet.length + 200) {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }""",
+                snippet,
+            )
+
+            if verified:
+                logger.debug("Message send verified: content found in conversation")
+                return True
+
+            # Strategy 2: Check if the chat input was cleared (indicates successful send)
+            # Only check textarea/contenteditable inside chat containers to avoid
+            # false positives from search boxes or other form inputs.
+            input_cleared = await page.evaluate(
+                """() => {
+                const chatContainers = document.querySelectorAll(
+                    '[class*="chat"], [class*="im-"], [class*="message"], [class*="editor"]'
+                );
+                for (const container of chatContainers) {
+                    const inputs = container.querySelectorAll(
+                        'textarea, [contenteditable="true"]'
+                    );
+                    for (const input of inputs) {
+                        const rect = input.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            const value = input.value || input.textContent || '';
+                            if (value.trim() === '') {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            }"""
+            )
+
+            if input_cleared:
+                logger.debug("Message send verified: input field was cleared")
+                return True
+
+            # Strategy 3: Check for sent/delivered indicators
+            sent_indicators = [
+                '[class*="sent"]',
+                '[class*="delivered"]',
+                '[class*="success"]',
+                '[class*="msg-status"]',
+            ]
+            for selector in sent_indicators:
+                try:
+                    indicator = await page.query_selector(selector)
+                    if indicator and await indicator.is_visible():
+                        logger.debug(f"Message send verified: indicator found ({selector})")
+                        return True
+                except Exception:
+                    continue
+
+        except Exception as e:
+            logger.warning(f"Message verification poll failed: {e}")
+
+        # Check if we've exceeded the deadline
+        if time.monotonic() >= deadline:
+            break
+
+        await asyncio.sleep(poll_interval_ms / 1000.0)
+
+    logger.warning("Could not verify message was sent after polling")
+    return False
+
+
+async def _check_existing_conversation(page: Page, maimai_id: str) -> bool:
+    """
+    Check if there's already an existing conversation with this candidate.
+
+    Checks for actual user message bubbles (not system prompts/tips) in the
+    conversation area.
+
+    Args:
+        page: Playwright page instance
+        maimai_id: Candidate's Maimai ID
+
+    Returns:
+        True if an existing conversation was detected
+    """
+    try:
+        has_conversation = await page.evaluate(
+            """() => {
+            // Look for conversation message containers
+            const chatSelectors = [
+                '[class*="message-list"]',
+                '[class*="chat-content"]',
+                '[class*="conversation"]',
+                '[class*="msg-list"]',
+                '[class*="im-message"]',
+                '[class*="chat-msg"]',
+                '[class*="chat-record"]',
+            ];
+
+            // System/tip patterns that should NOT count as existing conversation
+            const systemPatterns = [
+                '还不是好友', '添加好友', '发送好友申请', '对方未回复',
+                '以上是打招呼内容', '暂无消息', '开始聊天', '你们已经是好友',
+                '系统消息', '温馨提示', '安全提示', '注意事项',
+                '开启招呼语', '求职意向', '目前情况', '竞业点',
+                '欢迎联系', '不感兴趣',
+            ];
+
+            const isSystemText = (text) => {
+                const t = text.trim();
+                if (t.length < 5) return true;  // Too short to be a real message
+                return systemPatterns.some(p => t.includes(p));
+            };
+
+            for (const sel of chatSelectors) {
+                const container = document.querySelector(sel);
+                if (!container) continue;
+
+                // Strategy 1: Look for message bubble elements
+                const bubbleSelectors = [
+                    '[class*="msg-item"]', '[class*="message-item"]',
+                    '[class*="bubble"]', '[class*="chat-item"]',
+                    '[class*="msg-bubble"]', '[class*="chat-bubble"]',
+                ];
+                for (const bSel of bubbleSelectors) {
+                    const bubbles = container.querySelectorAll(bSel);
+                    // Filter out system/tip bubbles
+                    let realMessageCount = 0;
+                    for (const bubble of bubbles) {
+                        const text = bubble.textContent.trim();
+                        if (text.length > 5 && !isSystemText(text)) {
+                            realMessageCount++;
+                        }
+                    }
+                    if (realMessageCount > 0) {
+                        return true;
+                    }
+                }
+
+                // Strategy 2: If no bubble selectors matched, check direct children
+                // that look like message blocks (not system tips)
+                const children = container.children;
+                let realChildCount = 0;
+                for (const child of children) {
+                    const text = child.textContent.trim();
+                    // Must have meaningful content and not be a system message
+                    if (text.length > 10 && !isSystemText(text)) {
+                        // Check it's not a timestamp-only or status-only element
+                        if (child.querySelector('img[class*="avatar"]') || text.length > 20) {
+                            realChildCount++;
+                        }
+                    }
+                }
+                if (realChildCount > 0) {
+                    return true;
+                }
+            }
+            return false;
+        }"""
+        )
+
+        if has_conversation:
+            logger.info(f"Existing conversation detected for {maimai_id}")
+        return has_conversation
+
+    except Exception as e:
+        # Conservative: assume conversation exists to avoid duplicate messages.
+        # The caller logs this as "cancelled" in the audit DB.
+        logger.warning(
+            f"Conversation check failed for {maimai_id}: {e} — skipping to avoid potential duplicate"
+        )
+        return True
+
+
+def _get_candidate_info(db_manager, maimai_id: str) -> Optional[Dict]:
+    """Get candidate info from database."""
+    with db_manager.session_scope() as session:
+        candidate = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+        if candidate:
+            return {
+                "name": candidate.name,
+                "title": candidate.title,
+                "company": candidate.company,
+            }
+        return None
+
+
+def _log_message(db_manager, maimai_id: str, template_name: str, content: str, status: str) -> None:
+    """Log message to database. Creates a minimal Candidate if needed for FK."""
+    try:
+        with db_manager.session_scope() as session:
+            # Ensure candidate exists for FK constraint
+            existing = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+            if not existing:
+                session.add(Candidate(maimai_id=maimai_id))
+                session.flush()
+
+            message = Message(
+                candidate_maimai_id=maimai_id,
+                template_name=template_name,
+                content=content,
+                status=status,
+                sent_at=datetime.now(timezone.utc) if status == "sent" else None,
+            )
+            session.add(message)
+            logger.debug(f"Logged message to {maimai_id}: {status}")
+    except Exception as e:
+        logger.warning(
+            f"AUDIT FAILURE: Failed to log message to {maimai_id} (status={status}): {e}. "
+            f"This candidate may be re-messaged on next run."
+        )
+        # For sent messages, audit failure is critical — re-raise to prevent
+        # silent duplicate messaging on the next pipeline run.
+        if status == "sent":
+            raise
+
+
+# ---------------------------------------------------------------------------
+# Enterprise inline messaging (Path B)
+# ---------------------------------------------------------------------------
+
+
+async def _close_enterprise_popup(page: Page) -> None:
+    """Close popup/modal that appears after sending a message in enterprise flow."""
+    config = get_config()
+
+    # Try close popup image first
+    close_img_sel = config.get_selector("enterprise.close_popup_img")
+    try:
+        close_img = await page.wait_for_selector(close_img_sel, timeout=3000)
+        if close_img:
+            await close_img.click()
+            await page.wait_for_timeout(500)
+    except Exception as e:
+        logger.debug(f"Popup close skipped: {e}")
+
+    # Try close modal button
+    close_modal_sel = config.get_selector("enterprise.close_modal")
+    try:
+        close_btn = await page.wait_for_selector(close_modal_sel, timeout=2000)
+        if close_btn:
+            await close_btn.click()
+            await page.wait_for_timeout(500)
+    except Exception as e:
+        logger.debug(f"Modal close skipped: {e}")
+
+
+async def send_message_enterprise_inline(
+    page: Page,
+    content: str,
+    config=None,
+) -> bool:
+    """Send a message inline on the enterprise recruitment page.
+
+    This operates on the current visible candidate card — clicks "立即沟通",
+    types the message in the textarea, clicks "发送后留在此页", and closes
+    the popup.
+
+    Args:
+        page: Playwright page on the enterprise results page
+        content: Message content to send
+        config: Config instance (loaded if None)
+
+    Returns:
+        True if message was sent successfully
+    """
+    if config is None:
+        config = get_config()
+
+    try:
+        # Click 立即沟通
+        chat_sel = config.get_selector("enterprise.chat_now_button")
+        chat_btn = await page.wait_for_selector(chat_sel, timeout=5000)
+        if not chat_btn:
+            logger.warning("Enterprise: 立即沟通 button not found")
+            return False
+
+        await human_click(page, chat_sel)
+        await async_random_delay("action")
+
+        # Wait for message textarea
+        textarea_sel = config.get_selector("enterprise.message_textarea")
+        textarea = await page.wait_for_selector(textarea_sel, timeout=5000)
+        if not textarea:
+            logger.warning("Enterprise: message textarea not found")
+            return False
+
+        # Clear any default text and type message
+        await textarea.click()
+        select_all_key = "Meta+a" if sys.platform == "darwin" else "Control+a"
+        await page.keyboard.press(select_all_key)
+        await page.keyboard.press("Backspace")
+        await human_type(page, textarea_sel, content)
+        await async_random_delay("action")
+
+        # Click 发送后留在此页
+        send_sel = config.get_selector("enterprise.send_stay_button")
+        send_btn = await page.wait_for_selector(send_sel, timeout=5000)
+        if not send_btn:
+            logger.warning("Enterprise: send button not found")
+            return False
+
+        await human_click(page, send_sel)
+        await async_random_delay("action")
+
+        # Close popup/modal
+        await _close_enterprise_popup(page)
+
+        # Verify message was actually sent
+        verified = await _verify_message_sent(page, content)
+        if not verified:
+            logger.warning("Enterprise: message send could not be verified")
+            return False
+
+        logger.info("Enterprise: message sent and verified inline")
+        return True
+
+    except Exception as e:
+        logger.error(f"Enterprise inline send failed: {e}")
+        return False
+
+
+async def send_message_batch_enterprise(
+    page: Page,
+    candidates: List[dict],
+    template_name: str,
+    common_variables: Dict[str, str],
+    browser: "BrowserManager",
+    skip_messaged: bool = True,
+    skip_confirmation: bool = False,
+) -> Dict[str, Any]:
+    """Batch send messages inline on the enterprise recruitment page (Path B).
+
+    Signature preserved for backward compatibility.
+    """
+    config = get_config()
+    send_one = _make_enterprise_sender(
+        page, config, get_rate_limiter(), get_db_manager(), template_name
+    )
+
+    return await _send_message_batch_common(
+        candidates=candidates,
+        template_name=template_name,
+        common_variables=common_variables,
+        send_one=send_one,
+        batch_config=BatchConfig(
+            mode_label="Enterprise Inline",
+            panel_title="Enterprise Pipeline Summary",
+            progress_description="Sending messages (enterprise)...",
+        ),
+        skip_messaged=skip_messaged,
+        skip_confirmation=skip_confirmation,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Talent Bank inline messaging (Path C)
+# ---------------------------------------------------------------------------
+
+
+async def _find_im_chat_frame(im_page: Page):
+    """Find the chat iframe inside an IM tab page.
+
+    The IM page embeds the actual chat UI in an iframe with URL
+    pattern: /chat?fr=ent&in_iframe=1&...
+
+    Returns:
+        The chat Frame, or None if not found.
+    """
+    for frame in im_page.frames:
+        if "chat?" in frame.url and "in_iframe" in frame.url:
+            return frame
+    return None
+
+
+async def _exchange_in_im_tab(
+    browser: "BrowserManager",
+    config,
+    exchange_phone: bool,
+    exchange_wechat: bool,
+) -> None:
+    """Switch to the IM tab and click exchange phone/WeChat buttons.
+
+    The exchange buttons live inside a chat iframe within the IM tab.
+    Each button is a ``div.tool.normal`` with a ``.tool-text`` child
+    whose text is "交换电话" or "交换微信".  After clicking, the button
+    state changes to ``div.tool.disable`` ("申请中" / "交换中").
+
+    Args:
+        browser: BrowserManager with open IM tab
+        config: Config instance
+        exchange_phone: Click "交换手机"
+        exchange_wechat: Click "交换微信"
+    """
+    # Find the IM tab (URL contains /im, /direct_modal, or /chat paths)
+    im_page = None
+    for p in browser.context.pages:
+        url = p.url.lower()
+        if (
+            "/im" in url or "direct_modal" in url or "/chat" in url or "uh_chat" in url
+        ) and p != browser.page:
+            im_page = p
+            logger.debug(f"Talent bank exchange: found IM tab: {p.url}")
+            break
+
+    if not im_page:
+        all_urls = [p.url for p in browser.context.pages]
+        logger.warning(f"Talent bank exchange: IM tab not found. Open tabs: {all_urls}")
+        return
+
+    try:
+        # Wait for iframe to load
+        await im_page.wait_for_load_state("domcontentloaded", timeout=8000)
+        await im_page.wait_for_timeout(2000)
+
+        chat_frame = await _find_im_chat_frame(im_page)
+        if not chat_frame:
+            logger.warning("Talent bank exchange: chat iframe not found")
+            return
+
+        # Use JS evaluate inside iframe for reliable clicking (Playwright
+        # complex selectors like :has(:text-is()) can silently fail in iframes)
+        async def _click_tool_btn(frame, btn_text: str) -> bool:
+            """Click a div.tool.normal button by its .tool-text content in the iframe."""
+            return await frame.evaluate(
+                """(btnText) => {
+                const tools = document.querySelectorAll('div.tool.normal');
+                for (const tool of tools) {
+                    const textEl = tool.querySelector('.tool-text');
+                    if (textEl && textEl.textContent.trim() === btnText) {
+                        tool.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""",
+                btn_text,
+            )
+
+        if exchange_phone:
+            try:
+                clicked = await _click_tool_btn(chat_frame, "交换手机")
+                if clicked:
+                    logger.info("Talent bank: clicked 交换手机")
+                    await im_page.wait_for_timeout(1500)
+                else:
+                    logger.debug("Talent bank: 交换手机 button not found or disabled")
+            except Exception as e:
+                logger.debug(f"Talent bank: exchange phone failed: {e}")
+
+        if exchange_wechat:
+            try:
+                clicked = await _click_tool_btn(chat_frame, "交换微信")
+                if clicked:
+                    # WeChat exchange shows a confirmation dialog (a.confirm)
+                    await im_page.wait_for_timeout(1500)
+                    confirmed = await chat_frame.evaluate(
+                        """() => {
+                        const btn = document.querySelector('a.confirm');
+                        if (btn) { btn.click(); return true; }
+                        return false;
+                    }"""
+                    )
+                    if confirmed:
+                        logger.info("Talent bank: clicked 交换微信 + confirmed")
+                    else:
+                        logger.info("Talent bank: clicked 交换微信 (no confirm dialog)")
+                    await im_page.wait_for_timeout(1500)
+                else:
+                    logger.debug("Talent bank: 交换微信 button not found or disabled")
+            except Exception as e:
+                logger.debug(f"Talent bank: exchange wechat failed: {e}")
+
+    except Exception as e:
+        logger.error(f"Talent bank exchange error: {e}")
+
+
+async def _close_im_tabs(browser: "BrowserManager", search_page: Page) -> None:
+    """Close all IM tabs, keeping the search page."""
+    try:
+        for p in list(browser.context.pages):
+            if p != search_page and ("im" in p.url or "direct_modal" in p.url):
+                await p.close()
+                await search_page.wait_for_timeout(500)
+    except Exception as e:
+        logger.debug(f"Talent bank: IM tab cleanup: {e}")
+
+
+async def send_message_talent_bank_inline(
+    page: Page,
+    content: str,
+    browser: "BrowserManager",
+    config=None,
+    exchange_phone: bool = False,
+    exchange_wechat: bool = False,
+    chat_btn_handle=None,
+) -> bool:
+    """Send a message inline on the talent bank page, optionally exchange phone/WeChat.
+
+    Clicks "立即沟通" on the current candidate card, optionally fills a custom
+    message in the textarea, then clicks "发送后继续沟通".  A new IM tab opens
+    after sending.  If exchange_phone or exchange_wechat is True, switches to the
+    IM tab and clicks the exchange buttons in the chat iframe before closing.
+
+    Args:
+        page: Playwright page on the talent bank results page
+        content: Message content to send
+        browser: BrowserManager for tab management
+        config: Config instance (loaded if None)
+        exchange_phone: Click "交换电话" in IM tab after sending
+        exchange_wechat: Click "交换微信" in IM tab after sending
+        chat_btn_handle: Pre-located "立即沟通" button element handle (avoids clicking wrong card)
+
+    Returns:
+        True if message was sent successfully
+    """
+    if config is None:
+        config = get_config()
+
+    try:
+        # Click 立即沟通 (use pre-located handle if available to avoid wrong card)
+        if chat_btn_handle:
+            await chat_btn_handle.click()
+        else:
+            chat_sel = config.get_selector("talent_bank.chat_now_button")
+            chat_btn = await page.wait_for_selector(chat_sel, timeout=5000)
+            if not chat_btn:
+                logger.warning("Talent bank: 立即沟通 button not found")
+                return False
+            await human_click(page, chat_sel)
+        await async_random_delay("action")
+
+        # Try to fill custom message in textarea (if dialog has one)
+        textarea_sel = config.get_selector("talent_bank.message_textarea")
+        try:
+            textarea = await page.wait_for_selector(textarea_sel, timeout=3000)
+            if textarea:
+                # Force-set value via native setter to bypass React controlled state
+                # (platform may pre-fill candidate name; fill() can merge instead of replace)
+                await textarea.evaluate(
+                    """(el, text) => {
+                    const setter = Object.getOwnPropertyDescriptor(
+                        HTMLTextAreaElement.prototype, 'value'
+                    ).set;
+                    setter.call(el, '');
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    setter.call(el, text);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }""",
+                    content,
+                )
+                await async_random_delay("action")
+        except Exception:
+            logger.debug(
+                "Talent bank: no message textarea found, platform default greeting will be used"
+            )
+
+        # Click 发送后继续沟通
+        send_sel = config.get_selector("talent_bank.send_continue_button")
+        send_btn = await page.wait_for_selector(send_sel, timeout=5000)
+        if not send_btn:
+            logger.warning("Talent bank: send button not found")
+            return False
+
+        await human_click(page, send_sel)
+        await async_random_delay("action")
+
+        # Wait for IM tab to open (after clicking "发送后继续沟通")
+        im_open_ms = config.get("timings.im_tab_open_wait_ms", 3000)
+        await page.wait_for_timeout(im_open_ms)
+
+        # If expecting exchange but no new tab yet, wait a bit longer
+        if (exchange_phone or exchange_wechat) and len(browser.context.pages) <= 1:
+            logger.debug("Talent bank: no new tab yet, waiting extra 3s for IM tab...")
+            await page.wait_for_timeout(3000)
+
+        # --- Exchange phone/WeChat in the IM tab ---
+        if (exchange_phone or exchange_wechat) and len(browser.context.pages) > 1:
+            await _exchange_in_im_tab(browser, config, exchange_phone, exchange_wechat)
+
+        # Close IM tabs
+        await _close_im_tabs(browser, page)
+
+        # Close any modal/popup on search page
+        close_modal_sel = config.get_selector("talent_bank.close_modal")
+        try:
+            close_btn = await page.wait_for_selector(close_modal_sel, timeout=2000)
+            if close_btn:
+                await close_btn.click()
+                await page.wait_for_timeout(500)
+        except Exception as e:
+            logger.debug(f"Talent bank: close modal best-effort failed: {e}")
+
+        logger.info("Talent bank: message sent inline")
+        return True
+
+    except Exception as e:
+        logger.error(f"Talent bank inline send failed: {e}")
+        return False
+
+
+async def send_message_batch_talent_bank(
+    page: Page,
+    candidates: List[dict],
+    template_name: str,
+    common_variables: Dict[str, str],
+    browser: "BrowserManager",
+    skip_messaged: bool = True,
+    skip_confirmation: bool = False,
+    exchange_phone: bool = False,
+    exchange_wechat: bool = False,
+) -> Dict[str, Any]:
+    """Batch send messages inline on the talent bank page (Path C).
+
+    Signature preserved for backward compatibility.
+    """
+    config = get_config()
+    send_one = _make_talent_bank_sender(
+        page,
+        browser,
+        config,
+        get_rate_limiter(),
+        get_db_manager(),
+        template_name,
+        exchange_phone,
+        exchange_wechat,
+    )
+
+    return await _send_message_batch_common(
+        candidates=candidates,
+        template_name=template_name,
+        common_variables=common_variables,
+        send_one=send_one,
+        batch_config=BatchConfig(
+            mode_label="Talent Bank Inline",
+            panel_title="Talent Bank Pipeline Summary",
+            progress_description="Sending messages (talent bank)...",
+        ),
+        skip_messaged=skip_messaged,
+        skip_confirmation=skip_confirmation,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Recruit Manage inline messaging (Path D)
+# ---------------------------------------------------------------------------
+
+
+async def _exchange_in_recruit_manage_im(
+    im_page: Page,
+    exchange_phone: bool,
+    exchange_wechat: bool,
+) -> None:
+    """Click exchange buttons on the recruit_manage IM tab.
+
+    Unlike talent_bank which uses an iframe, recruit_manage opens a regular
+    /chat page — selectors are simple text matches on the page itself.
+
+    Args:
+        im_page: The IM tab page (URL pattern: /chat?fr=ent&target=...)
+        exchange_phone: Click "交换手机"
+        exchange_wechat: Click "交换微信"
+    """
+    try:
+        await im_page.wait_for_load_state("domcontentloaded", timeout=8000)
+        await im_page.wait_for_timeout(2000)
+
+        if exchange_phone:
+            try:
+                phone_btn = await im_page.wait_for_selector("text='交换手机'", timeout=5000)
+                if phone_btn:
+                    await phone_btn.click()
+                    logger.info("Recruit manage: clicked 交换手机")
+                    await im_page.wait_for_timeout(1500)
+            except Exception as e:
+                logger.debug(f"Recruit manage: exchange phone failed: {e}")
+
+        if exchange_wechat:
+            try:
+                wechat_btn = await im_page.wait_for_selector("text='交换微信'", timeout=5000)
+                if wechat_btn:
+                    await wechat_btn.click()
+                    await im_page.wait_for_timeout(1500)
+                    # WeChat has a confirmation dialog
+                    try:
+                        confirm_btn = await im_page.wait_for_selector("text='确定'", timeout=3000)
+                        if confirm_btn:
+                            await confirm_btn.click()
+                            logger.info("Recruit manage: clicked 交换微信 + confirmed")
+                            await im_page.wait_for_timeout(1000)
+                    except Exception:
+                        logger.info("Recruit manage: clicked 交换微信 (no confirm dialog)")
+            except Exception as e:
+                logger.debug(f"Recruit manage: exchange wechat failed: {e}")
+
+    except Exception as e:
+        logger.error(f"Recruit manage exchange error: {e}")
+
+
+async def send_message_recruit_manage_inline(
+    page: Page,
+    content: str,
+    browser: "BrowserManager",
+    config=None,
+    exchange_phone: bool = False,
+    exchange_wechat: bool = False,
+    chat_btn_handle=None,
+) -> bool:
+    """Send a message inline on the recruit_manage page, optionally exchange.
+
+    Flow: click 立即沟通 → fill textarea → click 发送后继续沟通 →
+    new IM tab opens → exchange phone/wechat → close IM tab.
+
+    The IM tab is a regular /chat page (no iframe), simpler than talent_bank.
+
+    Args:
+        page: Playwright page on the recruit_manage results page
+        content: Message content to send
+        browser: BrowserManager for tab management
+        config: Config instance (loaded if None)
+        exchange_phone: Click "交换手机" in IM tab after sending
+        exchange_wechat: Click "交换微信" in IM tab after sending
+        chat_btn_handle: Pre-located "立即沟通" button handle
+
+    Returns:
+        True if message was sent successfully
+    """
+    if config is None:
+        config = get_config()
+
+    try:
+        # Dismiss pay equity modal and contact purchase modal if present (blocks all clicks)
+        await page.evaluate("""() => {
+            const modal = document.querySelector('.mui-business-pc-pay-equity-modal-wrap');
+            if (modal) modal.remove();
+            const overlay = document.querySelector('#mui-business-pc-pay');
+            if (overlay && overlay.children.length > 0) {
+                overlay.innerHTML = '';
+            }
+            // Close ant-modal (contact purchase promo popup)
+            const antModalClose = document.querySelector('.ant-modal-wrap .ant-modal-close');
+            if (antModalClose) antModalClose.click();
+        }""")
+
+        # Click 立即沟通 (use pre-located handle if available)
+        if chat_btn_handle:
+            await chat_btn_handle.click()
+        else:
+            chat_sel = config.get_selector("recruit_manage.chat_now_button")
+            chat_btn = await page.wait_for_selector(chat_sel, timeout=5000)
+            if not chat_btn:
+                logger.warning("Recruit manage: 立即沟通 button not found")
+                return False
+            await human_click(page, chat_sel)
+        await async_random_delay("action")
+
+        # Fill message in textarea
+        textarea_sel = config.get_selector("recruit_manage.message_textarea")
+        try:
+            textarea = await page.wait_for_selector(textarea_sel, timeout=3000)
+            if textarea:
+                # Force-set value via native setter (React controlled component)
+                await textarea.evaluate(
+                    """(el, text) => {
+                    const setter = Object.getOwnPropertyDescriptor(
+                        HTMLTextAreaElement.prototype, 'value'
+                    ).set;
+                    setter.call(el, '');
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    setter.call(el, text);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }""",
+                    content,
+                )
+                await async_random_delay("action")
+        except Exception:
+            logger.debug(
+                "Recruit manage: no message textarea found, platform default greeting will be used"
+            )
+
+        # Click 发送后继续沟通
+        send_sel = config.get_selector("recruit_manage.send_continue_button")
+        send_btn = await page.wait_for_selector(send_sel, timeout=5000)
+        if not send_btn:
+            logger.warning("Recruit manage: send button not found")
+            return False
+
+        await human_click(page, send_sel)
+        await async_random_delay("action")
+
+        # Wait for IM tab to open
+        im_open_ms = config.get("timings.im_tab_open_wait_ms", 3000)
+        await page.wait_for_timeout(im_open_ms)
+
+        if (exchange_phone or exchange_wechat) and len(browser.context.pages) <= 1:
+            logger.debug("Recruit manage: no new tab yet, waiting extra 3s...")
+            await page.wait_for_timeout(3000)
+
+        # --- Exchange in IM tab (regular page, no iframe) ---
+        if (exchange_phone or exchange_wechat) and len(browser.context.pages) > 1:
+            im_page = None
+            for p in browser.context.pages:
+                url = p.url.lower()
+                if ("/chat" in url or "/im" in url) and p != page:
+                    im_page = p
+                    break
+
+            if im_page:
+                await _exchange_in_recruit_manage_im(im_page, exchange_phone, exchange_wechat)
+            else:
+                logger.warning("Recruit manage: IM tab not found for exchange")
+
+        # Close IM tabs
+        await _close_im_tabs(browser, page)
+
+        logger.info("Recruit manage: message sent inline")
+        return True
+
+    except Exception as e:
+        logger.error(f"Recruit manage inline send failed: {e}")
+        return False
+
+
+def _make_recruit_manage_sender(
+    page: Page,
+    browser: BrowserManager,
+    config,
+    rate_limiter,
+    db_manager,
+    template_name: str,
+    exchange_phone: bool,
+    exchange_wechat: bool,
+) -> Callable[[dict, str], Awaitable[CandidateSendResult]]:
+    """Create a sender callback for recruit_manage inline (Path D)."""
+
+    async def _send(c: dict, content: str) -> CandidateSendResult:
+        # Dismiss pay equity modal before each candidate (may reappear)
+        try:
+            await page.evaluate("""() => {
+                const modal = document.querySelector('.mui-business-pc-pay-equity-modal-wrap');
+                if (modal) modal.remove();
+                const overlay = document.querySelector('#mui-business-pc-pay');
+                if (overlay && overlay.children.length > 0) {
+                    overlay.innerHTML = '';
+                }
+            }""")
+        except Exception:
+            pass
+
+        # Scroll to candidate card and locate its "立即沟通" button
+        chat_btn_handle = None
+        try:
+            name_locator = page.get_by_text(c["name"], exact=False).first
+            await name_locator.scroll_into_view_if_needed(timeout=5000)
+            await async_random_delay("action")
+
+            name_el = await name_locator.element_handle(timeout=3000)
+            if name_el:
+                chat_btn_handle = await page.evaluate_handle(
+                    """(nameEl) => {
+                    let el = nameEl.parentElement;
+                    while (el && el !== document.body) {
+                        const btns = el.querySelectorAll('span, button, a, div');
+                        for (const b of btns) {
+                            if (b.textContent.trim() === '立即沟通' && b.childElementCount <= 1) {
+                                return b;
+                            }
+                        }
+                        el = el.parentElement;
+                    }
+                    return null;
+                }""",
+                    name_el,
+                )
+                if chat_btn_handle:
+                    try:
+                        tag = await chat_btn_handle.evaluate("el => el ? el.tagName : null")
+                        if not tag:
+                            chat_btn_handle = None
+                    except Exception:
+                        chat_btn_handle = None
+        except Exception as e:
+            logger.warning(f"Could not locate card button for '{c['name']}': {e}")
+            chat_btn_handle = None
+
+        success = await send_message_recruit_manage_inline(
+            page,
+            content,
+            browser,
+            config,
+            exchange_phone=exchange_phone,
+            exchange_wechat=exchange_wechat,
+            chat_btn_handle=chat_btn_handle,
+        )
+
+        if success:
+            rate_limiter.log_action(
+                "send_message",
+                {
+                    "maimai_id": c["maimai_id"],
+                    "template": template_name,
+                    "mode": "recruit_manage",
+                },
+            )
+            _log_message(db_manager, c["maimai_id"], template_name, content, "sent")
+            return CandidateSendResult(success=True, status="sent", content=content)
+        else:
+            logger.warning(f"Recruit manage inline send failed for {c['name']} ({c['maimai_id']})")
+            _log_message(db_manager, c["maimai_id"], template_name, content, "failed")
+            return CandidateSendResult(
+                success=False,
+                status="failed",
+                reason="inline send returned False",
+                content=content,
+            )
+
+    return _send
+
+
+async def send_message_batch_recruit_manage(
+    page: Page,
+    candidates: List[dict],
+    template_name: str,
+    common_variables: Dict[str, str],
+    browser: "BrowserManager",
+    skip_messaged: bool = True,
+    skip_confirmation: bool = False,
+    exchange_phone: bool = False,
+    exchange_wechat: bool = False,
+) -> Dict[str, Any]:
+    """Batch send messages inline on the recruit_manage page (Path D)."""
+    config = get_config()
+    send_one = _make_recruit_manage_sender(
+        page,
+        browser,
+        config,
+        get_rate_limiter(),
+        get_db_manager(),
+        template_name,
+        exchange_phone,
+        exchange_wechat,
+    )
+
+    return await _send_message_batch_common(
+        candidates=candidates,
+        template_name=template_name,
+        common_variables=common_variables,
+        send_one=send_one,
+        batch_config=BatchConfig(
+            mode_label="Recruit Manage Inline",
+            panel_title="Recruit Manage Pipeline Summary",
+            progress_description="Sending messages (recruit manage)...",
+        ),
+        skip_messaged=skip_messaged,
+        skip_confirmation=skip_confirmation,
+    )

@@ -1,0 +1,200 @@
+    50→
+    51→
+    52→
+    53→def _is_non_rd_title(title: str) -> bool:
+    54→    """Check if a title indicates a non-R&D role.
+    55→
+    56→    Strict mode: if any non-R&D keyword appears, filter out regardless of
+    57→    whether R&D keywords are also present (e.g. "技术产品经理" is filtered).
+    58→    Returns False (keep) only if title is empty or contains no non-R&D keywords.
+    59→    """
+    60→    if not title:
+    61→        return False
+    62→
+    63→    # Strict: any non-R&D keyword present → filter out (case-insensitive)
+    64→    title_lower = title.lower()
+    65→    if any(kw.lower() in title_lower for kw in NON_RD_KEYWORDS):
+    66→        return True
+    67→
+    68→    return False
+    69→
+    70→
+    71→@dataclass
+    72→class CandidateBasic:
+    73→    """Basic candidate information from search results."""
+    74→    maimai_id: str
+    75→    name: str
+    76→    title: str
+    77→    company: str
+    78→    location: Optional[str] = None
+    79→    profile_url: Optional[str] = None
+    80→    score: Optional[int] = None  # populated by scoring module
+    81→
+    82→
+    83→async def search_candidates(
+    84→    keywords: str,
+    85→    company: Optional[tuple] = None,
+    86→    location: Optional[str] = None,
+    87→    pages: int = 1,
+    88→    start_page: int = 1,
+    89→    browser: Optional[BrowserManager] = None
+    90→) -> List[CandidateBasic]:
+    91→    """
+    92→    Search for candidates on Maimai.
+    93→
+    94→    Args:
+    95→        keywords: Search keywords (e.g., "高级前端工程师")
+    96→        company: Filter by company names, tuple of strings (optional)
+    97→        location: Filter by location (optional)
+    98→        pages: Number of pages to scrape (default 1)
+    99→        start_page: First page number to scrape (default 1)
+   100→        browser: Browser manager instance
+   101→
+   102→    Returns:
+   103→        List of CandidateBasic objects
+   104→
+   105→    Raises:
+   106→        RateLimitExceededError: If rate limit exceeded
+   107→        SelectorNotFoundError: If page elements not found
+   108→    """
+   109→    # Validate inputs
+   110→    validate_keywords(keywords)
+   111→
+   112→    if browser is None:
+   113→        browser = get_browser_manager()
+   114→
+   115→    config = get_config()
+   116→    rate_limiter = get_rate_limiter()
+   117→    db_manager = get_db_manager()
+   118→
+   119→    # Ensure logged in
+   120→    await ensure_logged_in(browser)
+   121→
+   122→    all_candidates: List[CandidateBasic] = []
+   123→    seen_ids: set = set()  # Deduplicate across infinite-scroll extractions
+   124→
+   125→    with Progress(
+   126→        SpinnerColumn(),
+   127→        TextColumn("[progress.description]{task.description}"),
+   128→        console=console
+   129→    ) as progress:
+   130→
+   131→        end_page = start_page + pages
+   132→        for page_num in range(start_page, end_page):
+   133→            task = progress.add_task(f"Searching page {page_num}/{end_page - 1}...", total=None)
+   134→
+   135→            try:
+   136→                # Check rate limit (waits through min-interval)
+   137→                await async_check_rate_limit('search')
+   138→
+   139→                page = browser.page
+   140→
+   141→                if page_num == start_page:
+   142→                    # First page: interactive search (maimai SPA ignores URL query params)
+   143→                    await retry_navigation(page, MAIMAI_SEARCH_URL, wait_until='domcontentloaded')
+   144→                    await asyncio.sleep(1)
+   145→
+   146→                    # Find search input and type keyword
+   147→                    search_input = (
+   148→                        await page.query_selector('input[placeholder="搜索"]')
+   149→                        or await page.query_selector('input[type="search"]')
+   150→                        or await page.query_selector('.search-input input, .header input[type="text"]')
+   151→                    )
+   152→                    if not search_input:
+   153→                        raise SelectorNotFoundError("Search input not found on search center page")
+   154→
+   155→                    await search_input.click()
+   156→                    await search_input.fill(keywords)
+   157→                    await asyncio.sleep(0.5)
+   158→                    await page.keyboard.press('Enter')
+   159→                    await asyncio.sleep(2)
+   160→
+   161→                    # Default tab is 实名动态(feed); switch to 人脉(contacts)
+   162→                    renmai_tab = await page.query_selector(':text-is("人脉")')
+   163→                    if renmai_tab:
+   164→                        await renmai_tab.click()
+   165→                        await asyncio.sleep(2)
+   166→                    else:
+   167→                        logger.warning("Could not find '人脉' tab on search results page")
+   168→                else:
+   169→                    # Subsequent pages: scroll to load more (infinite scroll)
+   170→                    prev_count = await page.evaluate(
+   171→                        'document.querySelectorAll(\'[id^="contactcard_"]\').length'
+   172→                    )
+   173→                    await human_scroll(page, 'down', distance=1500)
+   174→                    # Wait for new cards to load
+   175→                    try:
+   176→                        await page.wait_for_function(
+   177→                            f'''() => {{
+   178→                                const cards = document.querySelectorAll('[id^="contactcard_"]');
+   179→                                return cards.length > {prev_count};
+   180→                            }}''',
+   181→                            timeout=8000,
+   182→                        )
+   183→                    except TimeoutError:
+   184→                        logger.debug(f"No new cards after scroll (had {prev_count})")
+   185→                    except Exception as e:
+   186→                        logger.warning(f"Error waiting for new cards after scroll: {e}")
+   187→
+   188→                # Wait for contactcard elements
+   189→                try:
+   190→                    await page.wait_for_function(
+   191→                        '''() => {
+   192→                            const cards = document.querySelectorAll('[id^="contactcard_"]');
+   193→                            return cards.length >= 1;
+   194→                        }''',
+   195→                        timeout=8000,
+   196→                    )
+   197→                except TimeoutError:
+   198→                    logger.debug("Timed out waiting for contactcard elements, proceeding anyway")
+   199→                except Exception as e:
+   200→                    logger.warning(f"Error waiting for contactcard elements: {e}")
+   201→
+   202→                # Extract candidates from this page
+   203→                candidates = await _extract_search_results(page, config)
+   204→
+   205→                # Deduplicate: infinite scroll re-extracts all visible cards
+   206→                candidates = [c for c in candidates if c.maimai_id not in seen_ids]
+   207→                for c in candidates:
+   208→                    seen_ids.add(c.maimai_id)
+   209→
+   210→                # Anti-detection: human behavior AFTER extraction
+   211→                await check_captcha(page, report_to_rate_limiter=True)
+   212→                await human_scroll(page, 'down', distance=300)
+   213→                await async_random_delay('action')
+   214→
+   215→                if not candidates:
+   216→                    logger.info(f"No results found on page {page_num}")
+   217→                    await browser.screenshot(f"search_debug_page{page_num}")
+   218→                    progress.update(task, description=f"Page {page_num}: No results")
+   219→                    # Allow one empty page (could be transient), break on second consecutive
+   220→                    if page_num > start_page and not all_candidates:
+   221→                        # First page had no results either — genuinely empty
+   222→                        break
+   223→                    continue
+   224→
+   225→                # Filter out non-R&D roles
+   226→                before_rd_filter = len(candidates)
+   227→                candidates = [c for c in candidates if not _is_non_rd_title(c.title)]
+   228→                rd_filtered = before_rd_filter - len(candidates)
+   229→                if rd_filtered > 0:
+   230→                    logger.info(f"Filtered out {rd_filtered} non-R&D candidates")
+   231→
+   232→                # Apply filters if specified
+   233→                if company:
+   234→                    company_lower = [cn.lower() for cn in company]
+   235→                    candidates = [c for c in candidates if c.company and any(cn in c.company.lower() for cn in company_lower)]
+   236→
+   237→                if location:
+   238→                    candidates = [c for c in candidates if c.location and location.lower() in c.location.lower()]
+   239→
+   240→                all_candidates.extend(candidates)
+   241→                progress.update(task, description=f"Page {page_num}: Found {len(candidates)} candidates")
+   242→
+   243→                # Log the action
+   244→                rate_limiter.log_action('search', {
+   245→                    'keywords': keywords,
+   246→                    'page': page_num,
+   247→                    'results': len(candidates)
+   248→                })
+   249→

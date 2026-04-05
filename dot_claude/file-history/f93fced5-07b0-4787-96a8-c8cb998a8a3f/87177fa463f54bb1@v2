@@ -1,0 +1,505 @@
+# 脉脉半自动招聘助手
+
+基于 Python 的 CLI 工具，帮助招聘人员在脉脉平台上半自动化地搜索候选人、提取简历信息和发送招聘消息。
+
+## 功能特性
+
+- **浏览器自动化**：基于 Patchright（Playwright 去检测分支）+ 真实 Chrome，多层反检测（Emunium 人类行为模拟、Ghost Cursor 鼠标轨迹算法、Stealth JS、Chrome 131-136 UA）
+- **候选人搜索**：支持分页、多关键词和多公司筛选、地点/主页链接提取、基于哈希的稳定 ID 生成
+- **简历提取**：提取候选人详细信息（教育经历、工作经历、技能）
+- **半自动消息发送**：强制人工确认后发送，支持发送验证和已有对话检测
+- **Pipeline 模式**：一条命令完成搜索 + 批量发送，支持预览、确认、断点续传和候选人评分
+- **消息模板校验**：发送前验证所有变量，防止发送包含 `{undefined}` 的错误消息，支持 `--preview` 预览模式
+- **智能候选人过滤**：自动过滤低质量候选人（无真实 ID、信息不完整、HR/猎头），可通过 `--auto-filter` 控制
+- **候选人评分**：按职级、公司层级和关键词相关性自动排序
+- **自动数据库备份**：Pipeline 完成后自动备份，保留最近 7 天备份，位于 `data/backups/`
+- **增强错误提示**：明确的错误类型和解决方案（登录失败、验证码阻塞、配额用尽等）
+- **速率限制**：可配置的速率限制，带自适应节流（验证码/错误时自动降速）
+- **仿人延迟**：对数正态分布延迟，带疲劳模拟、随机分心暂停和时段感知
+- **验证码检测**：自动检测验证码元素，暂停等待人工处理，并上报给自适应速率限制器
+- **Pipeline 续传**：基于断点的中断恢复（`--resume`）
+- **网络容错**：导航失败时自动重试 + 指数退避
+- **数据导出**：导出候选人数据为 Excel 或 CSV 格式
+- **会话管理**：持久化的登录会话
+- **数据库追踪**：SQLite 数据库，使用安全的会话管理记录所有候选人交互
+
+## 项目状态
+
+**核心功能已实现并完成测试。** 登录、搜索、简历提取、消息发送和导出模块均可正常使用。
+
+**最新改进（v0.4.0）** - 2026-03-01：
+- ✅ **Web UI 精简** - 5 页合并为 2 页（主页 + 数据页），降低使用复杂度
+- ✅ **智能模式切换** - 选模板自动切换 Pipeline 模式，不选则为 Search 模式
+- ✅ **实时日志面板** - 带时间戳的逐步进展日志（成功/失败/警告颜色区分）
+- ✅ **状态栏操作指引** - Browser 未连接或未登录时显示具体解决步骤
+- ✅ **自动 CDP 连接** - Auth 接口自动尝试连接 Chrome，无需手动触发
+
+**v0.2.1 改进**：
+- ✅ Web 服务层稳定性增强（修复 contextvars 泄漏、竞态条件、内存泄漏）
+- ✅ 确认流程三层防护（Event + data + Lock）
+- ✅ 任务队列自动清理机制
+- ✅ 异步安全性全面优化
+
+详见 [PROPOSAL.md](PROPOSAL.md) 获取完整技术方案和实现路线图。
+
+## 环境要求
+
+- Python 3.10 或更高版本
+- Chrome 浏览器（Patchright 自动安装，或使用本地已安装的 Chrome）
+- 脉脉账号
+
+## 安装
+
+### 1. 克隆仓库
+
+```bash
+git clone <repository-url>
+cd maimai-assistant
+```
+
+### 2. 创建虚拟环境
+
+```bash
+python -m venv venv
+source venv/bin/activate  # Windows 系统: venv\Scripts\activate
+```
+
+### 3. 安装依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. 安装浏览器
+
+```bash
+patchright install chrome   # 推荐：使用真实 Chrome，反检测效果最佳
+# 或: patchright install chromium
+```
+
+### 5. 初始化数据库
+
+```bash
+python scripts/setup_db.py
+```
+
+## 配置
+
+配置文件位于 `config/` 目录下：
+
+- `settings.json` - 通用设置（速率限制、延迟、路径）
+- `selectors.json` - 页面元素选择器（需要更新为实际的脉脉选择器）
+- `message_templates.json` - 招聘消息模板
+
+**⚠️ 重要提示**：使用前，请使用 Chrome 开发者工具更新 `selectors.json` 中的实际脉脉页面选择器。
+
+## 使用方法
+
+本项目提供两种使用方式：
+
+### 方式一：Web 服务（推荐团队使用）
+
+**适用场景**：多人协作、浏览器访问、实时进度监控
+
+```bash
+# 1. 启动 Chrome（CDP 模式，手动登录脉脉）
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+    --remote-debugging-port=9222 \
+    --user-data-dir=/tmp/chrome-debug-profile
+
+# 2. 启动 Web 服务
+python -m src.web.app --host 0.0.0.0 --port 8000
+
+# 3. 浏览器访问
+# 本机: http://localhost:8000
+# 局域网: http://<your-ip>:8000
+```
+
+**功能**（v0.4.0 精简为 2 页）：
+- 🏠 **主页 `/`** — 状态栏 + 统一表单（Search / Pipeline 智能切换）+ 实时日志
+- 📊 **数据页 `/data`** — Candidates / Messages 标签页切换
+- 📈 实时进度推送（WebSocket）
+- 🔗 自动连接 Chrome CDP，状态异常时显示操作指引
+
+**注意**：CLI 和 Web 不能同时运行（共享同一个 Chrome）。
+
+---
+
+### 方式二：CLI 命令行（推荐个人使用）
+
+**适用场景**：单人使用、脚本化、自动化任务
+
+#### 初始登录（首次使用）
+
+```bash
+maimai login
+```
+
+这会打开浏览器窗口，手动登录脉脉后会话将自动保存以供后续使用。
+
+#### 搜索候选人
+
+```bash
+# 单关键词搜索
+python src/cli/main.py search -k "高级前端工程师" --max-pages 3
+
+# 按公司筛选
+python src/cli/main.py search -k "前端工程师" -c "阿里巴巴" -p 2
+
+# 按多个公司筛选
+python src/cli/main.py search -k "前端工程师" -c "阿里巴巴" -c "字节跳动" -p 2
+
+# 多关键词搜索（分别搜索，结果自动去重）
+python src/cli/main.py search -k "前端工程师" -k "React开发" -k "Vue工程师" -p 2
+
+# 搜索并直接导出
+python src/cli/main.py search -k "前端工程师" -k "全栈工程师" -p 3 -e results.xlsx
+```
+
+#### 查看候选人简历
+
+```bash
+python src/cli/main.py profile <maimai_id>
+```
+
+#### 发送消息（需确认）
+
+```bash
+# 使用模板发送（需要交互式确认）
+python src/cli/main.py message <maimai_id> -t greeting
+
+# 预览消息内容，不发送
+python src/cli/main.py message <maimai_id> -t greeting --preview
+```
+
+#### Pipeline：搜索 + 批量发送消息
+
+```bash
+# 🆕 预览模式：查看前 3 条消息，验证模板变量
+python src/cli/main.py pipeline \
+  -k "前端工程师" \
+  -t greeting \
+  -v "recruiter_name=张三" \
+  --preview
+
+# 搜索并批量发送消息（自动过滤低质量候选人）
+python src/cli/main.py pipeline \
+  -k "前端工程师" -k "React开发" \
+  -t greeting \
+  -v "recruiter_name=张三" \
+  -v "recruiter_company=XX科技" \
+  -v "target_position=高级前端工程师" \
+  -v "salary_range=40-60K" \
+  -p 2
+
+# 试运行（仅搜索，不发送消息）
+python src/cli/main.py pipeline -k "前端工程师" -t greeting \
+  -v "recruiter_name=张三" --dry-run -p 1
+
+# 关闭自动过滤（保留所有候选人，包括 HR）
+python src/cli/main.py pipeline -k "前端工程师" -t greeting \
+  -v "recruiter_name=张三" --no-auto-filter -p 1
+
+# 按公司和地点筛选
+python src/cli/main.py pipeline -k "前端工程师" -t greeting \
+  -v "recruiter_name=张三" -c "字节跳动" -l "北京" -p 2
+
+# 按多个公司筛选
+python src/cli/main.py pipeline -k "研发" -t greeting \
+  -v "recruiter_name=张三" -c "亚马逊" -c "快手" -p 3
+
+# 分批翻页：每搜索 2 页后发送一批消息，交替进行
+python src/cli/main.py pipeline -k "前端工程师" -t greeting \
+  -v "recruiter_name=张三" -p 10 --batch-pages 2
+
+# 从上次断点恢复中断的 pipeline
+python src/cli/main.py pipeline --resume
+
+# 包含已发送过消息的候选人
+python src/cli/main.py pipeline -k "前端工程师" -t greeting \
+  -v "recruiter_name=张三" --no-skip-messaged -p 1
+```
+
+Pipeline 会自动对候选人按相关性评分排序后再发送消息。每批处理完成后保存进度断点，支持崩溃恢复。
+
+#### 导出数据
+
+```bash
+# 导出为 Excel（默认）
+python src/cli/main.py export -o candidates.xlsx
+
+# 导出为 CSV
+python src/cli/main.py export -o candidates.csv -f csv
+
+# 导出时不包含消息记录
+python src/cli/main.py export -o candidates.xlsx --no-messages
+```
+
+#### 系统状态与数据查询（🆕 v0.3.0）
+
+```bash
+# 🆕 查看系统状态（Chrome 连接、登录、配额、今日统计、数据库概况）
+python src/cli/main.py status
+
+# 🆕 查看最近添加的候选人
+python src/cli/main.py recent          # 默认显示 10 位
+python src/cli/main.py recent -n 20    # 显示 20 位
+
+# 🆕 查找重复的候选人
+python src/cli/main.py duplicates
+```
+
+#### 数据管理
+
+```bash
+# 🆕 手动备份数据库
+python scripts/backup_data.py
+# 备份位置: data/backups/maimai_YYYYMMDD_HHMMSS.db
+# Pipeline 完成后会自动备份
+
+# 查看可用消息模板
+python src/cli/main.py templates
+
+# 清除会话并退出登录
+python src/cli/main.py logout
+
+# 获取帮助
+python src/cli/main.py --help
+python src/cli/main.py search --help
+```
+
+## 速率限制
+
+为防止账号封禁，以下默认速率限制已启用（可在 `config/settings.json` 中配置）：
+
+- **搜索**：每小时 20 次，每天 100 次
+- **查看简历**：每小时 30 次，每天 150 次
+- **发送消息**：每小时 10 次，每天 50 次
+- **最小间隔**：任意操作之间至少 30 秒
+
+**自适应节流**：检测到验证码或错误时，限制会自动收紧：
+- 30 分钟内 1 次验证码：容量降至 70%
+- 2 次验证码：降至 50%
+- 3 次及以上：降至 30%
+
+使用 `python src/cli/main.py status` 查看当前节流状态。
+
+## 项目结构
+
+```
+maimai-assistant/
+├── config/              # 配置文件
+├── data/                # 数据目录（已 gitignore）
+│   ├── maimai.db       # SQLite 数据库
+│   ├── .session/       # 浏览器会话
+│   ├── exports/        # 导出文件
+│   └── logs/           # 应用日志
+├── src/                # 源代码
+│   ├── core/           # 核心基础设施（浏览器、会话、反检测）
+│   ├── modules/        # 功能模块（登录、搜索、简历、消息、导出）
+│   ├── models/         # 数据库模型（session_scope 上下文管理器）
+│   ├── utils/          # 工具类（配置、速率限制、重试、延迟、断点、评分、验证）
+│   ├── cli/            # CLI 接口
+│   ├── web/            # Web 服务（FastAPI + Jinja2 + WebSocket）
+│   ├── templates/      # HTML 模板（index.html, data.html）
+│   ├── static/         # 静态资源（CSS, JS）
+│   └── exceptions/     # 自定义异常
+├── tests/              # 测试套件
+└── scripts/            # 工具脚本
+```
+
+## 开发
+
+### 运行测试
+
+```bash
+pytest
+```
+
+### 代码格式化
+
+```bash
+black src/ tests/
+```
+
+### 代码检查
+
+```bash
+ruff check src/ tests/
+```
+
+### 类型检查
+
+```bash
+mypy src/
+```
+
+## 已实现模块
+
+| 模块 | 文件 | 状态 |
+|------|------|------|
+| 反检测 | `src/core/anti_detection.py` | 已实现（Patchright + Emunium + Ghost Cursor + Stealth JS） |
+| 会话管理 | `src/core/session.py` | 已实现 |
+| 浏览器自动化 | `src/core/browser.py` | 已实现（Patchright + 真实 Chrome） |
+| 登录（手动） | `src/modules/auth.py` | 已实现（验证码检测） |
+| 候选人搜索 | `src/modules/search.py` | 已实现（哈希 ID、地点/链接提取、验证码、重试） |
+| 简历提取 | `src/modules/profile.py` | 已实现（异步速率限制、重试） |
+| 消息发送 | `src/modules/message.py` | 已实现（发送验证、对话检测、批量、外键安全） |
+| 数据导出 | `src/modules/export.py` | 已实现 |
+| 导航重试 | `src/utils/retry.py` | 已实现（tenacity，3 次尝试） |
+| 自适应速率限制 | `src/utils/rate_limiter.py` | 已实现（可配置限制、验证码触发节流） |
+| 仿人延迟 | `src/utils/delays.py` | 已实现（对数正态、疲劳、分心、时段感知） |
+| Pipeline 断点 | `src/utils/checkpoint.py` | 已实现（保存/恢复中断的 pipeline） |
+| 候选人评分 | `src/utils/scoring.py` | 已实现（职级、公司层级、关键词相关性） |
+| 数据库会话管理 | `src/models/database.py` | 已实现（session_scope 上下文管理器） |
+
+详见 [PROPOSAL.md](PROPOSAL.md) 获取原始设计方案。
+
+## 重要说明
+
+### 法律与合规
+
+- 本工具设计为半自动化操作，需要人工监督
+- 使用前请查阅脉脉服务条款
+- 存储/使用候选人数据前请获取适当授权
+- 使用保守的速率限制以避免账号受限
+
+### 选择器维护
+
+脉脉网站结构可能随时变化，需要更新选择器。当选择器失效时：
+
+1. 使用 Chrome 开发者工具检查页面
+2. 更新 `config/selectors.json` 中的选择器
+3. 在正式使用前充分测试
+
+### 会话管理
+
+- 会话通常持续 1-7 天
+- 收到会话过期错误时重新运行 `maimai login`
+- 会话文件保存在 `data/.session/` 目录
+
+## 常见问题排查
+
+### "Selector not found" 错误
+
+使用实际的脉脉页面结构更新 `config/selectors.json` 中的选择器。
+
+### 检测到验证码
+
+工具会自动检测验证码元素并显示详细提示：
+
+```
+检测到验证码阻塞!
+请在浏览器窗口中完成验证，然后按回车继续
+
+提示: 如果频繁出现验证码，请尝试:
+  - 降低操作频率 (修改 config/settings.json 中的 rate_limits)
+  - 增加延迟时间 (修改 delays.action_min/action_max)
+  - 等待一段时间后再继续使用
+```
+
+完成验证后按回车继续，系统会自动启用自适应节流。
+
+### 速率限制超出
+
+等待指定时间，或在下一个小时/天的窗口期重试。
+
+### 导航失败
+
+导航调用会自动重试最多 3 次（指数退避）。如果全部重试失败，请检查网络连接。
+
+### 浏览器无法启动
+
+确保已安装 Patchright 浏览器：`patchright install chrome` 或 `patchright install chromium`
+
+### 会话过期
+
+重新运行 `maimai login` 建立新会话。
+
+## 参与贡献
+
+欢迎贡献代码！请：
+
+1. Fork 本仓库
+2. 创建功能分支
+3. 编写代码和测试
+4. 提交 Pull Request
+
+## 许可证
+
+MIT 许可证 - 详见 LICENSE 文件。
+
+## 免责声明
+
+本工具仅用于教育和合法招聘目的。使用者需自行确保遵守：
+
+- 脉脉服务条款
+- 数据隐私法规（GDPR、《个人信息保护法》等）
+- 当地关于自动化数据采集的法律法规
+
+作者不对本工具的滥用承担任何责任。
+
+## 支持
+
+如有问题或疑问：
+
+- 在 GitHub 提交 Issue
+- 查阅 [PROPOSAL.md](PROPOSAL.md) 了解实现细节
+- 查看 `docs/` 目录下的文档（如有）
+
+---
+
+**当前版本**：0.4.0（稳定版）
+**最后更新**：2026-03-01
+
+## 更新日志
+
+### v0.4.0 (2026-03-01) - Web UI 精简
+
+Web 界面从 5 页精简为 2 页，降低使用复杂度：
+
+1. **主页 `/`** — 合并 Dashboard + Search + Pipeline
+   - 顶部状态栏：Browser / Login / Queue 一行显示，状态异常时显示操作指引
+   - 统一表单：Template 下拉选 "Search only" 为搜索模式，选模板为 Pipeline 模式
+   - 实时日志面板：带时间戳，成功/失败/警告颜色区分
+
+2. **数据页 `/data`** — 合并 Candidates + Messages
+   - Tab 标签页切换，含搜索、分页、导出功能
+
+3. **自动 CDP 连接** — Auth 接口自动尝试连接 Chrome，页面加载即检测状态
+4. **旧 URL 301 重定向** — `/search`、`/pipeline`、`/candidates`、`/messages` 自动跳转
+
+### v0.3.0 (2026-02-28) - 用户体验增强
+
+针对个人/小团队使用场景的核心改进：
+
+1. **消息模板校验和预览**
+   - 发送前验证所有模板变量
+   - `--preview` 参数预览前 3 条消息
+   - 防止发送包含 `{undefined}` 的错误消息
+
+2. **自动数据库备份**
+   - Pipeline 完成后自动备份
+   - 保留最近 7 天备份
+   - 位置：`data/backups/maimai_YYYYMMDD_HHMMSS.db`
+
+3. **增强的错误提示**
+   - `LoginRequiredError`: 详细的登录步骤
+   - `CaptchaBlockedError`: 验证��处理建议
+   - `QuotaExhaustedError`: 配额用尽的替代方案
+
+4. **新增 CLI 命令**
+   - `status`: 查看系统状态（连接、登录、配额、统计）
+   - `recent`: 查看最近添加的候选人
+   - `duplicates`: 查找重复候选人
+
+5. **智能候选人过滤**
+   - 自动过滤无真实 ID 的候选人
+   - 自动过滤信息不完整的候选人
+   - 自动排除 HR/猎头
+   - `--auto-filter/--no-auto-filter` 控制开关
+
+### v0.2.1 (2026-02-14)
+- Web 服务层稳定性增强
+- 修复 contextvars 泄漏、竞态条件
+- 任务队列自动清理机制

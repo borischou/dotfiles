@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}状态 — Boss Assistant{% endblock %}
+{% block header %}Rate Limit 状态{% endblock %}
+
+{% block content %}
+<section>
+    {% if throttle_factor < 1.0 %}
+    <p><mark>自适应限速激活: {{ "%.1f"|format(throttle_factor) }}x（最近检测到验证码或错误）</mark></p>
+    {% else %}
+    <p>限速正常 (1.0x)</p>
+    {% endif %}
+
+    <table>
+        <thead>
+            <tr>
+                <th>操作类型</th>
+                <th>小时已用</th>
+                <th>小时限额</th>
+                <th>小时剩余</th>
+                <th>日已用</th>
+                <th>日限额</th>
+                <th>日剩余</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for action in actions %}
+            <tr>
+                <td>{{ action.action_type }}</td>
+                <td>{{ action.hourly.used }}</td>
+                <td>{{ action.hourly.limit }}</td>
+                <td>{{ action.hourly.remaining }}</td>
+                <td>{{ action.daily.used }}</td>
+                <td>{{ action.daily.limit }}</td>
+                <td>{{ action.daily.remaining }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

@@ -1,0 +1,112 @@
+"""FastAPI application entry point.
+
+Usage:
+    python -m src.web.app [--host 0.0.0.0] [--port 8000] [--cdp http://localhost:9222]
+"""
+
+import argparse
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from loguru import logger
+
+from src.web.task_queue import TaskQueue
+from src.web.progress import Broadcaster
+from src.web.deps import init_singletons
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup / shutdown lifecycle."""
+    # Initialize singletons
+    queue = TaskQueue()
+    broadcaster = Broadcaster()
+    init_singletons(queue, broadcaster)
+
+    # Store on app.state for templates/ws access
+    app.state.queue = queue
+    app.state.broadcaster = broadcaster
+
+    # Start task queue worker
+    await queue.start()
+
+    # Initialize database (triggers WAL mode + migrations)
+    from src.models.database import get_db_manager
+    get_db_manager()
+
+    logger.info("Web service started")
+    yield
+
+    # Shutdown
+    await queue.stop()
+    logger.info("Web service stopped")
+
+
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    app = FastAPI(
+        title="Maimai Assistant",
+        description="Semi-automated recruitment assistant for Maimai",
+        version="1.0.0",
+        lifespan=lifespan,
+    )
+
+    # --- Static files & templates ---
+    project_root = Path(__file__).parent.parent
+    static_dir = project_root / "static"
+    templates_dir = project_root / "templates"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    templates_dir.mkdir(parents=True, exist_ok=True)
+
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # Store templates on app state for routers to access
+    app.state.templates = Jinja2Templates(directory=str(templates_dir))
+
+    # --- Register API routers ---
+    from src.web.routers import auth, search, candidates, message, pipeline, templates, status, export, ws
+
+    app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+    app.include_router(search.router, prefix="/api", tags=["search"])
+    app.include_router(candidates.router, prefix="/api", tags=["candidates"])
+    app.include_router(message.router, prefix="/api", tags=["message"])
+    app.include_router(pipeline.router, prefix="/api", tags=["pipeline"])
+    app.include_router(templates.router, prefix="/api", tags=["templates"])
+    app.include_router(status.router, prefix="/api", tags=["status"])
+    app.include_router(export.router, prefix="/api", tags=["export"])
+    app.include_router(ws.router, tags=["websocket"])
+
+    # --- Page routes (Jinja2 HTML) ---
+    from src.web.routers import pages
+    app.include_router(pages.router, tags=["pages"])
+
+    return app
+
+
+# Module-level app instance for uvicorn
+app = create_app()
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    parser = argparse.ArgumentParser(description="Maimai Assistant Web Service")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host")
+    parser.add_argument("--port", type=int, default=8000, help="Bind port")
+    parser.add_argument("--cdp", default=None, help="Chrome CDP endpoint")
+    args = parser.parse_args()
+
+    if args.cdp:
+        from src.core.browser import get_browser_manager
+        get_browser_manager().set_cdp_endpoint(args.cdp)
+
+    uvicorn.run(
+        "src.web.app:app",
+        host=args.host,
+        port=args.port,
+        reload=False,
+        log_level="info",
+    )

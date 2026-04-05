@@ -1,0 +1,191 @@
+     1→"""Authentication module for Boss直聘 login.
+     2→
+     3→In CDP mode, the user logs in manually in their own Chrome before running
+     4→CLI commands. This module verifies login status and provides guidance
+     5→if the user is not logged in.
+     6→"""
+     7→
+     8→import asyncio
+     9→from typing import Optional
+    10→
+    11→from patchright.async_api import Page
+    12→from loguru import logger
+    13→from rich.console import Console
+    14→from rich.panel import Panel
+    15→
+    16→from src.core.browser import BrowserManager, get_browser_manager
+    17→from src.utils.captcha import check_captcha
+    18→from src.utils.retry import retry_navigation
+    19→from src.exceptions.errors import SessionExpiredError
+    20→
+    21→console = Console()
+    22→
+    23→
+    24→async def login(browser: Optional[BrowserManager] = None) -> bool:
+    25→    """
+    26→    Verify login status in CDP-connected Chrome.
+    27→
+    28→    In CDP mode, the user is expected to already be logged in to Boss直聘.
+    29→    If not, instructions are printed for manual login in the browser.
+    30→
+    31→    Args:
+    32→        browser: Browser manager instance (uses global if None)
+    33→
+    34→    Returns:
+    35→        True if logged in
+    36→    """
+    37→    if browser is None:
+    38→        browser = get_browser_manager()
+    39→
+    40→    # Connect to Chrome via CDP
+    41→    page = await browser.start()
+    42→
+    43→    # Check if already logged in
+    44→    if await check_login_status(page):
+    45→        console.print("[green]Already logged in to Boss直聘![/green]")
+    46→        # Save session as backup
+    47→        await browser.save_session()
+    48→        return True
+    49→
+    50→    # Not logged in — guide the user
+    51→    console.print(Panel(
+    52→        "[bold]Not Logged In[/bold]\n\n"
+    53→        "Please log in to Boss直聘 in your Chrome browser:\n"
+    54→        "1. Go to https://www.zhipin.com/web/user/?ka=header-login in Chrome\n"
+    55→        "2. Scan QR code with Boss直聘 app, OR\n"
+    56→        "3. Enter phone number and verification code\n\n"
+    57→        "[dim]Then wait here, login will be detected automatically.[/dim]",
+    58→        title="Boss直聘 Login",
+    59→        border_style="cyan"
+    60→    ))
+    61→
+    62→    # Poll for login (user may log in while we wait)
+    63→    max_wait_seconds = 300  # 5 minutes timeout
+    64→    poll_interval = 3
+    65→    elapsed = 0
+    66→
+    67→    console.print("[dim]Waiting for login... (timeout: 5 minutes)[/dim]")
+    68→
+    69→    while elapsed < max_wait_seconds:
+    70→        await asyncio.sleep(poll_interval)
+    71→        elapsed += poll_interval
+    72→
+    73→        # Check for captcha
+    74→        await check_captcha(page)
+    75→
+    76→        if await check_login_status(page):
+    77→            console.print("[green]Login successful![/green]")
+    78→            await browser.save_session()
+    79→            console.print("[green]Session saved as backup[/green]")
+    80→            return True
+    81→
+    82→    console.print("[red]Login timeout. Please log in manually and try again.[/red]")
+    83→    return False
+    84→
+    85→
+    86→async def check_login_status(page: Page) -> bool:
+    87→    """
+    88→    Check if user is currently logged in to Boss直聘 by navigating to a
+    89→    protected page and observing whether Boss直聘 redirects to the login page.
+    90→
+    91→    Args:
+    92→        page: Playwright page instance
+    93→
+    94→    Returns:
+    95→        True if logged in (no redirect to login page)
+    96→    """
+    97→    try:
+    98→        # Navigate to a protected page that requires authentication.
+    99→        # The Boss search page reliably triggers server-side auth checks.
+   100→        protected_url = "https://www.zhipin.com/web/chat/search"
+   101→        await retry_navigation(page, protected_url, wait_until='domcontentloaded')
+   102→
+   103→        # Wait for any redirects to settle
+   104→        await page.wait_for_timeout(3000)
+   105→
+   106→        # Check 1: URL-based detection - did we get redirected to login?
+   107→        final_url = page.url
+   108→        if 'login' in final_url.lower() or 'signin' in final_url.lower():
+   109→            logger.info(f"Login status check: logged_in=False, detail=redirected_to_login (url={final_url})")
+   110→            return False
+   111→
+   112→        # Check 2: Page content detection - look for login form elements
+   113→        is_login_page = await page.evaluate("""
+   114→            () => {
+   115→                const bodyText = document.body ? document.body.innerText : '';
+   116→                const loginIndicators = [
+   117→                    '欢迎登录',
+   118→                    '扫码登录',
+   119→                    '密码登录',
+   120→                    '短信登录',
+   121→                    '请输入手机号',
+   122→                    '获取验证码',
+   123→                    '微信登录',
+   124→                    '登录/注册'
+   125→                ];
+   126→                for (const indicator of loginIndicators) {
+   127→                    if (bodyText.includes(indicator)) {
+   128→                        return { is_login: true, matched: indicator };
+   129→                    }
+   130→                }
+   131→
+   132→                // Also check for login form elements in DOM
+   133→                const loginForm = document.querySelector(
+   134→                    'input[type="tel"], input[placeholder*="手机"], ' +
+   135→                    '[class*="qrcode"], [class*="scan-login"], ' +
+   136→                    '[class*="login-form"], [class*="sign-form"]'
+   137→                );
+   138→                if (loginForm) {
+   139→                    return { is_login: true, matched: 'login_form_element' };
+   140→                }
+   141→
+   142→                return { is_login: false, matched: null };
+   143→            }
+   144→        """)
+   145→
+   146→        if is_login_page.get('is_login', False):
+   147→            detail = is_login_page.get('matched', 'unknown')
+   148→            logger.info(f"Login status check: logged_in=False, detail=login_page_detected ({detail})")
+   149→            return False
+   150→
+   151→        logger.info(f"Login status check: logged_in=True, detail=protected_page_accessible (url={final_url})")
+   152→        return True
+   153→
+   154→    except Exception as e:
+   155→        logger.error(f"Error checking login status: {e}")
+   156→        return False
+   157→
+   158→
+   159→async def ensure_logged_in(browser: Optional[BrowserManager] = None) -> bool:
+   160→    """
+   161→    Ensure user is logged in, prompting for login if needed.
+   162→
+   163→    Args:
+   164→        browser: Browser manager instance
+   165→
+   166→    Returns:
+   167→        True if logged in (existing or new login)
+   168→
+   169→    Raises:
+   170→        SessionExpiredError: If login fails
+   171→    """
+   172→    if browser is None:
+   173→        browser = get_browser_manager()
+   174→
+   175→    # Connect to Chrome via CDP if not already connected
+   176→    if not browser.is_running:
+   177→        await browser.start()
+   178→
+   179→    # Check login status
+   180→    if browser.page:
+   181→        if await check_login_status(browser.page):
+   182→            return True
+   183→
+   184→    # Not logged in — guide user
+   185→    console.print("[yellow]Not logged in. Please log in to Boss直聘 in your Chrome browser.[/yellow]")
+   186→
+   187→    if await login(browser):
+   188→        return True
+   189→
+   190→    raise SessionExpiredError("Not logged in to Boss直聘. Please log in manually in Chrome and try again.")
+   191→

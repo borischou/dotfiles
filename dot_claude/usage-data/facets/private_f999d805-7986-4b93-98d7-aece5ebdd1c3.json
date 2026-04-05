@@ -1,0 +1,18 @@
+{
+  "underlying_goal": "Fix the web-based candidate search feature in the maimai-assistant project, which was returning no results regardless of search keywords",
+  "goal_categories": {
+    "bug_fix": 1,
+    "restart_service": 1
+  },
+  "outcome": "fully_achieved",
+  "user_satisfaction_counts": {
+    "likely_satisfied": 1
+  },
+  "claude_helpfulness": "essential",
+  "session_type": "single_task",
+  "friction_counts": {},
+  "friction_detail": "",
+  "primary_success": "good_debugging",
+  "brief_summary": "User reported that web-based keyword search couldn't find any candidates; Claude systematically diagnosed the root cause (SPA timing window issue where results disappeared before extraction), fixed the code, verified all tests passed, and restarted the service.",
+  "session_id": "f999d805-7986-4b93-98d7-aece5ebdd1c3"
+}

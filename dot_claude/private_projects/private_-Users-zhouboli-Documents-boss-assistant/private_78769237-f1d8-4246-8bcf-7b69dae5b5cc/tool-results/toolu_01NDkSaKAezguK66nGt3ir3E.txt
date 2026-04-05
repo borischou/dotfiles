@@ -1,0 +1,537 @@
+     1→"""Profile extraction module for Maimai.
+     2→
+     3→Extracts detailed candidate information from profile pages
+     4→including education, work experience, and skills.
+     5→"""
+     6→
+     7→from dataclasses import dataclass, asdict, field
+     8→from typing import List, Optional, Dict, Any
+     9→
+    10→from patchright.async_api import Page
+    11→from loguru import logger
+    12→from rich.console import Console
+    13→from rich.panel import Panel
+    14→
+    15→from src.core.browser import BrowserManager, get_browser_manager
+    16→from src.core.anti_detection import human_scroll
+    17→from src.modules.auth import ensure_logged_in
+    18→from src.utils.config import get_config
+    19→from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+    20→from src.utils.delays import async_random_delay
+    21→from src.utils.retry import retry_navigation
+    22→from src.utils.validators import validate_maimai_id
+    23→from src.models.database import Candidate, get_db_manager
+    24→from src.exceptions.errors import ExtractionError
+    25→
+    26→console = Console()
+    27→
+    28→# Maimai profile URL template
+    29→MAIMAI_PROFILE_URL = "https://maimai.cn/contact/detail/{maimai_id}"
+    30→
+    31→
+    32→@dataclass
+    33→class Education:
+    34→    """Education history entry."""
+    35→    school: str
+    36→    degree: Optional[str] = None
+    37→    major: Optional[str] = None
+    38→    start_year: Optional[str] = None
+    39→    end_year: Optional[str] = None
+    40→
+    41→
+    42→@dataclass
+    43→class WorkExperience:
+    44→    """Work experience entry."""
+    45→    company: str
+    46→    title: str
+    47→    start_date: Optional[str] = None
+    48→    end_date: Optional[str] = None
+    49→    description: Optional[str] = None
+    50→
+    51→
+    52→@dataclass
+    53→class CandidateDetail:
+    54→    """Detailed candidate profile information."""
+    55→    maimai_id: str
+    56→    name: str
+    57→    title: str
+    58→    company: str
+    59→    location: Optional[str] = None
+    60→    profile_url: Optional[str] = None
+    61→    experience_years: Optional[str] = None
+    62→    education: List[Education] = field(default_factory=list)
+    63→    work_experience: List[WorkExperience] = field(default_factory=list)
+    64→    skills: List[str] = field(default_factory=list)
+    65→    basic_info: Dict[str, Any] = field(default_factory=dict)
+    66→
+    67→
+    68→async def extract_profile(
+    69→    maimai_id: str,
+    70→    browser: Optional[BrowserManager] = None
+    71→) -> CandidateDetail:
+    72→    """
+    73→    Extract detailed profile for a candidate.
+    74→
+    75→    Args:
+    76→        maimai_id: Maimai user ID
+    77→        browser: Browser manager instance
+    78→
+    79→    Returns:
+    80→        CandidateDetail with full profile information
+    81→
+    82→    Raises:
+    83→        RateLimitExceededError: If rate limit exceeded
+    84→        ExtractionError: If profile extraction fails
+    85→    """
+    86→    # Validate input
+    87→    validate_maimai_id(maimai_id)
+    88→
+    89→    if browser is None:
+    90→        browser = get_browser_manager()
+    91→
+    92→    config = get_config()
+    93→    rate_limiter = get_rate_limiter()
+    94→    db_manager = get_db_manager()
+    95→
+    96→    # Ensure logged in
+    97→    await ensure_logged_in(browser)
+    98→
+    99→    # Check rate limit (waits through min-interval)
+   100→    await async_check_rate_limit('view_profile')
+   101→
+   102→    console.print(f"[cyan]Extracting profile for ID: {maimai_id}...[/cyan]")
+   103→
+   104→    try:
+   105→        page = browser.page
+   106→        profile_url = MAIMAI_PROFILE_URL.format(maimai_id=maimai_id)
+   107→
+   108→        # Navigate to profile
+   109→        await retry_navigation(page, profile_url, wait_until='domcontentloaded')
+   110→
+   111→        # Wait for page load
+   112→        await async_random_delay('page_load')
+   113→
+   114→        # Simulate human behavior - scroll to load content
+   115→        await human_scroll(page, 'down', distance=400)
+   116→        await async_random_delay('action')
+   117→
+   118→        # Extract profile data
+   119→        profile = await _extract_profile_data(page, maimai_id, profile_url, config)
+   120→
+   121→        # Log the action
+   122→        rate_limiter.log_action('view_profile', {
+   123→            'maimai_id': maimai_id,
+   124→            'name': profile.name
+   125→        })
+   126→
+   127→        # Update database
+   128→        _update_candidate_in_db(db_manager, profile)
+   129→
+   130→        # Display summary
+   131→        _display_profile_summary(profile)
+   132→
+   133→        return profile
+   134→
+   135→    except Exception as e:
+   136→        logger.error(f"Error extracting profile: {e}")
+   137→        await browser.screenshot(f"profile_error_{maimai_id}")
+   138→        raise ExtractionError(f"Failed to extract profile for {maimai_id}: {e}")
+   139→
+   140→
+   141→async def _extract_profile_data(
+   142→    page: Page,
+   143→    maimai_id: str,
+   144→    profile_url: str,
+   145→    config
+   146→) -> CandidateDetail:
+   147→    """
+   148→    Extract all profile data from page.
+   149→
+   150→    Args:
+   151→        page: Playwright page instance
+   152→        maimai_id: Candidate's Maimai ID
+   153→        profile_url: Profile URL
+   154→        config: Config instance
+   155→
+   156→    Returns:
+   157→        CandidateDetail object
+   158→    """
+   159→    # Extract basic info
+   160→    name = await _extract_text(page, [
+   161→        config.get_selector('profile.name'),
+   162→        'h1[class*="name"]',
+   163→        '.profile-name',
+   164→        'h1',
+   165→    ])
+   166→
+   167→    title = await _extract_text(page, [
+   168→        config.get_selector('profile.title'),
+   169→        '[class*="current-title"]',
+   170→        '[class*="position"]',
+   171→        '.job-title',
+   172→    ])
+   173→
+   174→    company = await _extract_text(page, [
+   175→        config.get_selector('profile.company'),
+   176→        '[class*="current-company"]',
+   177→        '[class*="company-name"]',
+   178→        '.company',
+   179→    ])
+   180→
+   181→    location = await _extract_text(page, [
+   182→        config.get_selector('profile.location'),
+   183→        '[class*="location"]',
+   184→        '[class*="city"]',
+   185→    ])
+   186→
+   187→    experience_years = await _extract_text(page, [
+   188→        config.get_selector('profile.experience_years'),
+   189→        '[class*="experience"]',
+   190→        '[class*="years"]',
+   191→    ])
+   192→
+   193→    # Extract education
+   194→    education = await _extract_education(page, config)
+   195→
+   196→    # Extract work experience
+   197→    work_experience = await _extract_work_experience(page, config)
+   198→
+   199→    # Extract skills
+   200→    skills = await _extract_skills(page, config)
+   201→
+   202→    # Build basic info dict
+   203→    basic_info = {
+   204→        'experience_years': experience_years,
+   205→    }
+   206→
+   207→    return CandidateDetail(
+   208→        maimai_id=maimai_id,
+   209→        name=name or "Unknown",
+   210→        title=title or "",
+   211→        company=company or "",
+   212→        location=location,
+   213→        profile_url=profile_url,
+   214→        experience_years=experience_years,
+   215→        education=education,
+   216→        work_experience=work_experience,
+   217→        skills=skills,
+   218→        basic_info=basic_info
+   219→    )
+   220→
+   221→
+   222→async def _extract_text(parent, selectors: List[str]) -> Optional[str]:
+   223→    """
+   224→    Try multiple selectors to extract text content from a parent (Page or Element).
+   225→
+   226→    Args:
+   227→        parent: Playwright Page or ElementHandle to query within
+   228→        selectors: List of selectors to try
+   229→
+   230→    Returns:
+   231→        Extracted text or None
+   232→    """
+   233→    for selector in selectors:
+   234→        try:
+   235→            elem = await parent.query_selector(selector)
+   236→            if elem:
+   237→                text = await elem.inner_text()
+   238→                text = text.strip()
+   239→                if text:
+   240→                    return text
+   241→        except Exception:
+   242→            continue
+   243→    return None
+   244→
+   245→
+   246→async def _find_section(page: Page, section_selectors: List[str]) -> Optional[Any]:
+   247→    """Find a section element on page using multiple selectors.
+   248→
+   249→    Args:
+   250→        page: Playwright page instance
+   251→        section_selectors: List of CSS selectors to try
+   252→
+   253→    Returns:
+   254→        Found element or None
+   255→    """
+   256→    for selector in section_selectors:
+   257→        try:
+   258→            section = await page.query_selector(selector)
+   259→            if section:
+   260→                return section
+   261→        except Exception:
+   262→            continue
+   263→    return None
+   264→
+   265→
+   266→async def _find_items(section, item_selectors: List[str]) -> list:
+   267→    """Find items within a section using multiple selectors.
+   268→
+   269→    Args:
+   270→        section: Parent element to query within
+   271→        item_selectors: List of CSS selectors to try
+   272→
+   273→    Returns:
+   274→        List of found elements (may be empty)
+   275→    """
+   276→    for selector in item_selectors:
+   277→        items = await section.query_selector_all(selector)
+   278→        if items:
+   279→            return items
+   280→    return []
+   281→
+   282→
+   283→async def _extract_education(page: Page, config) -> List[Education]:
+   284→    """Extract education history from profile."""
+   285→    education_list = []
+   286→
+   287→    try:
+   288→        section = await _find_section(page, [
+   289→            config.get_selector('profile.education_section'),
+   290→            '[class*="education"]',
+   291→            '[class*="edu-section"]',
+   292→            '#education',
+   293→        ])
+   294→        if not section:
+   295→            logger.debug("Education section not found")
+   296→            return education_list
+   297→
+   298→        items = await _find_items(section, [
+   299→            config.get_selector('profile.education_item'),
+   300→            '[class*="edu-item"]',
+   301→            '[class*="education-item"]',
+   302→            '.timeline-item',
+   303→        ])
+   304→
+   305→        for item in items:
+   306→            try:
+   307→                school = await _extract_text(item, [
+   308→                    '[class*="school"]', '[class*="name"]', 'h4', '.title'
+   309→                ])
+   310→                degree = await _extract_text(item, [
+   311→                    '[class*="degree"]', '[class*="level"]'
+   312→                ])
+   313→                major = await _extract_text(item, [
+   314→                    '[class*="major"]', '[class*="field"]'
+   315→                ])
+   316→                date_text = await _extract_text(item, [
+   317→                    '[class*="date"]', '[class*="time"]', '.period'
+   318→                ])
+   319→
+   320→                start_year, end_year = _parse_date_range(date_text)
+   321→
+   322→                if school:
+   323→                    education_list.append(Education(
+   324→                        school=school,
+   325→                        degree=degree,
+   326→                        major=major,
+   327→                        start_year=start_year,
+   328→                        end_year=end_year
+   329→                    ))
+   330→            except Exception as e:
+   331→                logger.debug(f"Error extracting education item: {e}")
+   332→                continue
+   333→
+   334→    except Exception as e:
+   335→        logger.debug(f"Error extracting education section: {e}")
+   336→
+   337→    return education_list
+   338→
+   339→
+   340→async def _extract_work_experience(page: Page, config) -> List[WorkExperience]:
+   341→    """Extract work experience from profile."""
+   342→    work_list = []
+   343→
+   344→    try:
+   345→        section = await _find_section(page, [
+   346→            config.get_selector('profile.work_experience_section'),
+   347→            '[class*="work-exp"]',
+   348→            '[class*="experience"]',
+   349→            '[class*="career"]',
+   350→            '#experience',
+   351→        ])
+   352→        if not section:
+   353→            logger.debug("Work experience section not found")
+   354→            return work_list
+   355→
+   356→        items = await _find_items(section, [
+   357→            config.get_selector('profile.work_experience_item'),
+   358→            '[class*="exp-item"]',
+   359→            '[class*="work-item"]',
+   360→            '.timeline-item',
+   361→        ])
+   362→
+   363→        for item in items:
+   364→            try:
+   365→                company = await _extract_text(item, [
+   366→                    '[class*="company"]', '[class*="org"]', '.company-name'
+   367→                ])
+   368→                title = await _extract_text(item, [
+   369→                    '[class*="title"]', '[class*="position"]', '.job-title'
+   370→                ])
+   371→                date_text = await _extract_text(item, [
+   372→                    '[class*="date"]', '[class*="time"]', '.period'
+   373→                ])
+   374→                description = await _extract_text(item, [
+   375→                    '[class*="desc"]', '[class*="description"]', '.content'
+   376→                ])
+   377→
+   378→                start_date, end_date = _parse_date_range(date_text)
+   379→
+   380→                if company and title:
+   381→                    work_list.append(WorkExperience(
+   382→                        company=company,
+   383→                        title=title,
+   384→                        start_date=start_date,
+   385→                        end_date=end_date,
+   386→                        description=description
+   387→                    ))
+   388→            except Exception as e:
+   389→                logger.debug(f"Error extracting work item: {e}")
+   390→                continue
+   391→
+   392→    except Exception as e:
+   393→        logger.debug(f"Error extracting work experience section: {e}")
+   394→
+   395→    return work_list
+   396→
+   397→
+   398→async def _extract_skills(page: Page, config) -> List[str]:
+   399→    """Extract skills from profile."""
+   400→    skills = []
+   401→
+   402→    try:
+   403→        section = await _find_section(page, [
+   404→            config.get_selector('profile.skills_section'),
+   405→            '[class*="skills"]',
+   406→            '[class*="skill-section"]',
+   407→            '#skills',
+   408→        ])
+   409→        if not section:
+   410→            # Try to find skill tags directly on page
+   411→            section = page
+   412→
+   413→        tags = await _find_items(section, [
+   414→            config.get_selector('profile.skill_tag'),
+   415→            '[class*="skill-tag"]',
+   416→            '[class*="skill-item"]',
+   417→            '.tag',
+   418→        ])
+   419→
+   420→        for tag in tags:
+   421→            try:
+   422→                text = await tag.inner_text()
+   423→                text = text.strip()
+   424→                if text and text not in skills:
+   425→                    skills.append(text)
+   426→            except Exception:
+   427→                continue
+   428→
+   429→    except Exception as e:
+   430→        logger.debug(f"Error extracting skills: {e}")
+   431→
+   432→    return skills
+   433→
+   434→
+   435→
+   436→
+   437→def _parse_date_range(date_text: Optional[str]) -> tuple:
+   438→    """
+   439→    Parse date range string into start and end dates.
+   440→
+   441→    Args:
+   442→        date_text: Date text like "2020-2023" or "2020.01 - 至今"
+   443→
+   444→    Returns:
+   445→        Tuple of (start_date, end_date)
+   446→    """
+   447→    if not date_text:
+   448→        return None, None
+   449→
+   450→    import re
+   451→
+   452→    # Common patterns
+   453→    patterns = [
+   454→        r'(\d{4})[.\-/年]?\s*[-–至到]\s*(\d{4}|至今|现在|present)',
+   455→        r'(\d{4})[.\-/](\d{1,2})?\s*[-–至到]\s*(\d{4}|至今|现在|present)',
+   456→    ]
+   457→
+   458→    for pattern in patterns:
+   459→        match = re.search(pattern, date_text, re.IGNORECASE)
+   460→        if match:
+   461→            groups = match.groups()
+   462→            start = groups[0]
+   463→            end = groups[-1]
+   464→            if end in ['至今', '现在', 'present']:
+   465→                end = 'present'
+   466→            return start, end
+   467→
+   468→    return None, None
+   469→
+   470→
+   471→def _update_candidate_in_db(db_manager, profile: CandidateDetail) -> None:
+   472→    """Update candidate record in database with full profile."""
+   473→    try:
+   474→        with db_manager.session_scope() as session:
+   475→            candidate = session.query(Candidate).filter_by(
+   476→                maimai_id=profile.maimai_id
+   477→            ).first()
+   478→
+   479→            if candidate:
+   480→                candidate.name = profile.name
+   481→                candidate.title = profile.title
+   482→                candidate.company = profile.company
+   483→                candidate.location = profile.location
+   484→                candidate.profile_url = profile.profile_url
+   485→                candidate.basic_info = profile.basic_info
+   486→                candidate.education = [asdict(e) for e in profile.education]
+   487→                candidate.work_experience = [asdict(w) for w in profile.work_experience]
+   488→                candidate.skills = profile.skills
+   489→            else:
+   490→                candidate = Candidate(
+   491→                    maimai_id=profile.maimai_id,
+   492→                    name=profile.name,
+   493→                    title=profile.title,
+   494→                    company=profile.company,
+   495→                    location=profile.location,
+   496→                    profile_url=profile.profile_url,
+   497→                    basic_info=profile.basic_info,
+   498→                    education=[asdict(e) for e in profile.education],
+   499→                    work_experience=[asdict(w) for w in profile.work_experience],
+   500→                    skills=profile.skills
+   501→                )
+   502→                session.add(candidate)
+   503→
+   504→            logger.debug(f"Updated candidate {profile.maimai_id} in database")
+   505→
+   506→    except Exception as e:
+   507→        logger.error(f"Failed to update candidate in database: {e}")
+   508→
+   509→
+   510→def _display_profile_summary(profile: CandidateDetail) -> None:
+   511→    """Display profile summary in terminal."""
+   512→    edu_str = ""
+   513→    if profile.education:
+   514→        edu = profile.education[0]
+   515→        edu_str = f"\n  Education: {edu.school}"
+   516→        if edu.degree:
+   517→            edu_str += f" ({edu.degree})"
+   518→
+   519→    work_str = ""
+   520→    if profile.work_experience:
+   521→        work = profile.work_experience[0]
+   522→        work_str = f"\n  Experience: {work.title} @ {work.company}"
+   523→
+   524→    skills_str = ""
+   525→    if profile.skills:
+   526→        skills_str = f"\n  Skills: {', '.join(profile.skills[:5])}"
+   527→        if len(profile.skills) > 5:
+   528→            skills_str += f" (+{len(profile.skills) - 5} more)"
+   529→
+   530→    console.print(Panel(
+   531→        f"[bold]{profile.name}[/bold]\n"
+   532→        f"  {profile.title} @ {profile.company}"
+   533→        f"{edu_str}{work_str}{skills_str}",
+   534→        title=f"Profile: {profile.maimai_id}",
+   535→        border_style="green"
+   536→    ))
+   537→

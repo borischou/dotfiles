@@ -1,0 +1,22 @@
+  1548→
+  1549→        logger.info(f"Talent bank extraction found {len(candidates_data)} candidates")
+  1550→
+  1551→        for data in candidates_data:
+  1552→            if data.get("name"):
+  1553→                candidates.append(CandidateBasic(
+  1554→                    maimai_id=data.get("maimai_id", ""),
+  1555→                    name=data.get("name", ""),
+  1556→                    title=data.get("title", ""),
+  1557→                    company=data.get("company", ""),
+  1558→                    location=data.get("location", ""),
+  1559→                    profile_url=data.get("profile_url", ""),
+  1560→                ))
+  1561→
+  1562→        candidates = [c for c in candidates if c.name not in PREMIUM_PLACEHOLDER_NAMES]
+  1563→        logger.info(f"Talent bank: extracted {len(candidates)} candidates from page")
+  1564→
+  1565→    except Exception as e:
+  1566→        logger.error(f"Error extracting talent bank results: {e}")
+  1567→
+  1568→    return candidates
+  1569→

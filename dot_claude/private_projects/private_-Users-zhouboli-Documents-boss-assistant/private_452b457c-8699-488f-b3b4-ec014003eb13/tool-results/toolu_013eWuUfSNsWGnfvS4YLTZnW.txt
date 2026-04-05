@@ -1,0 +1,314 @@
+     1→"""Browser manager for Playwright automation.
+     2→
+     3→Provides a singleton browser manager that connects to an existing Chrome
+     4→instance via CDP (Chrome DevTools Protocol). Supports multi-tab management
+     5→for workflows that open new tabs.
+     6→"""
+     7→
+     8→import asyncio
+     9→import threading
+    10→from pathlib import Path
+    11→from typing import List, Optional
+    12→from datetime import datetime
+    13→
+    14→from patchright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
+    15→from loguru import logger
+    16→
+    17→from src.utils.config import get_config, Config
+    18→from src.core.session import SessionManager, get_session_manager
+    19→from src.exceptions.errors import BrowserError
+    20→
+    21→
+    22→class BrowserManager:
+    23→    """
+    24→    Singleton browser manager for Boss直聘 automation.
+    25→
+    26→    Connects to a user-managed Chrome instance via CDP endpoint.
+    27→    The user starts Chrome with --remote-debugging-port=9222 and logs in
+    28→    manually. This manager connects/disconnects without closing Chrome.
+    29→    """
+    30→
+    31→    _instance: Optional['BrowserManager'] = None
+    32→    _lock: Optional[asyncio.Lock] = None
+    33→    _lock_loop = None
+    34→    _init_lock: threading.Lock = threading.Lock()
+    35→
+    36→    def __new__(cls, **kwargs):
+    37→        with cls._init_lock:
+    38→            if cls._instance is None:
+    39→                cls._instance = super().__new__(cls)
+    40→                cls._instance._initialized = False
+    41→            return cls._instance
+    42→
+    43→    def __init__(
+    44→        self,
+    45→        config: Optional[Config] = None,
+    46→        session_manager: Optional[SessionManager] = None,
+    47→    ):
+    48→        if self._initialized:
+    49→            return
+    50→
+    51→        self._playwright: Optional[Playwright] = None
+    52→        self._browser: Optional[Browser] = None
+    53→        self._context: Optional[BrowserContext] = None
+    54→        self._page: Optional[Page] = None
+    55→        self._primary_page: Optional[Page] = None
+    56→        self._opened_tabs: List[Page] = []
+    57→        self._session_manager: SessionManager = session_manager or get_session_manager()
+    58→        self._config: Config = config or get_config()
+    59→        self._cdp_endpoint: Optional[str] = None
+    60→        self._owned_page: bool = False
+    61→        self._initialized = True
+    62→
+    63→    @property
+    64→    def is_running(self) -> bool:
+    65→        """Check if browser is currently connected."""
+    66→        return self._browser is not None and self._browser.is_connected()
+    67→
+    68→    @property
+    69→    def page(self) -> Optional[Page]:
+    70→        """Get current page instance."""
+    71→        return self._page
+    72→
+    73→    @property
+    74→    def context(self) -> Optional[BrowserContext]:
+    75→        """Get current browser context."""
+    76→        return self._context
+    77→
+    78→    @classmethod
+    79→    def _ensure_lock(cls):
+    80→        """Lazily create the asyncio.Lock inside a running event loop.
+    81→
+    82→        Always recreates the lock when called from a different event loop
+    83→        than the one that created it. Python 3.10+ removed the _loop
+    84→        attribute from asyncio primitives, so we track the loop ourselves.
+    85→        """
+    86→        try:
+    87→            loop = asyncio.get_running_loop()
+    88→        except RuntimeError:
+    89→            loop = None
+    90→        if cls._lock is None or (loop and getattr(cls, '_lock_loop', None) is not loop):
+    91→            cls._lock = asyncio.Lock()
+    92→            cls._lock_loop = loop
+    93→
+    94→    @classmethod
+    95→    async def reset_instance(cls) -> None:
+    96→        """Reset the singleton instance, closing any existing connection.
+    97→
+    98→        Used by Web service when Chrome process is restarted and a fresh
+    99→        connection is needed.
+   100→        """
+   101→        with cls._init_lock:
+   102→            if cls._instance is not None:
+   103→                try:
+   104→                    await cls._instance._close_internal()
+   105→                except Exception:
+   106→                    pass
+   107→                cls._instance = None
+   108→                cls._lock = None
+   109→                cls._lock_loop = None
+   110→
+   111→        global _browser_manager
+   112→        _browser_manager = None
+   113→
+   114→    def set_cdp_endpoint(self, endpoint: str) -> None:
+   115→        """Override CDP endpoint (e.g. from CLI --cdp flag)."""
+   116→        self._cdp_endpoint = endpoint
+   117→
+   118→    async def start(self) -> Page:
+   119→        """
+   120→        Connect to Chrome via CDP and return a page.
+   121→
+   122→        Returns:
+   123→            Configured Playwright page instance
+   124→
+   125→        Raises:
+   126→            BrowserError: If connection fails
+   127→        """
+   128→        self._ensure_lock()
+   129→        async with self._lock:
+   130→            if self.is_running:
+   131→                logger.debug("Browser already connected, returning existing page")
+   132→                return self._page
+   133→
+   134→            try:
+   135→                endpoint = self._cdp_endpoint or self._config.get(
+   136→                    'browser.cdp_endpoint', 'http://localhost:9222'
+   137→                )
+   138→                timeout = self._config.get('browser.timeout', 30000)
+   139→
+   140→                logger.info(f"Connecting to Chrome via CDP: {endpoint}")
+   141→
+   142→                self._playwright = await async_playwright().start()
+   143→                self._browser = await self._playwright.chromium.connect_over_cdp(endpoint)
+   144→
+   145→                contexts = self._browser.contexts
+   146→                if contexts:
+   147→                    self._context = contexts[0]
+   148→                else:
+   149→                    logger.warning("No existing context found, creating new one")
+   150→                    self._context = await self._browser.new_context()
+   151→
+   152→                self._context.set_default_timeout(timeout)
+   153→
+   154→                pages = self._context.pages
+   155→                if pages:
+   156→                    self._page = pages[0]
+   157→                    self._owned_page = False
+   158→                    logger.info(f"Reusing existing tab: {self._page.url}")
+   159→                else:
+   160→                    self._page = await self._context.new_page()
+   161→                    self._owned_page = True
+   162→                    logger.info("Created new tab")
+   163→
+   164→                self._primary_page = self._page
+   165→                self._opened_tabs = []
+   166→
+   167→                logger.info("Connected to Chrome via CDP successfully")
+   168→                return self._page
+   169→
+   170→            except Exception as e:
+   171→                logger.error(f"Failed to connect to Chrome via CDP: {e}")
+   172→                await self._close_internal()
+   173→                raise BrowserError(
+   174→                    f"Failed to connect to Chrome via CDP at {endpoint}. "
+   175→                    f"Make sure Chrome is running with --remote-debugging-port=9222. "
+   176→                    f"Error: {e}"
+   177→                )
+   178→
+   179→    async def close(self) -> None:
+   180→        """Disconnect from Chrome via CDP. Does NOT close the user's Chrome."""
+   181→        self._ensure_lock()
+   182→        async with self._lock:
+   183→            await self._close_internal()
+   184→
+   185→    async def _close_internal(self) -> None:
+   186→        """Actual cleanup logic."""
+   187→        try:
+   188→            for tab in self._opened_tabs:
+   189→                try:
+   190→                    if not tab.is_closed():
+   191→                        await tab.close()
+   192→                except Exception as e:
+   193→                    logger.debug(f"Error closing tab during cleanup: {e}")
+   194→            self._opened_tabs = []
+   195→
+   196→            if self._page and self._owned_page:
+   197→                try:
+   198→                    await self._page.close()
+   199→                except Exception as e:
+   200→                    logger.debug(f"Error closing page during cleanup: {e}")
+   201→            self._page = None
+   202→            self._primary_page = None
+   203→            self._owned_page = False
+   204→
+   205→            self._context = None
+   206→
+   207→            if self._browser:
+   208→                try:
+   209→                    await self._browser.close()
+   210→                except Exception as e:
+   211→                    logger.error(f"Error closing browser connection: {e}")
+   212→                finally:
+   213→                    self._browser = None
+   214→
+   215→            if self._playwright:
+   216→                try:
+   217→                    await self._playwright.stop()
+   218→                except Exception as e:
+   219→                    logger.error(f"Error stopping Playwright: {e}")
+   220→                finally:
+   221→                    self._playwright = None
+   222→
+   223→            logger.info("Disconnected from Chrome (browser stays open)")
+   224→
+   225→        except Exception as e:
+   226→            logger.error(f"Error disconnecting from Chrome: {e}")
+   227→
+   228→    async def wait_for_new_tab(self, timeout: int = 10000) -> Page:
+   229→        """Wait for a click-triggered new tab, apply stealth, and switch to it."""
+   230→        if not self._context:
+   231→            raise BrowserError("No active context for wait_for_new_tab")
+   232→
+   233→        try:
+   234→            new_page = await self._context.wait_for_event(
+   235→                "page", timeout=timeout
+   236→            )
+   237→            await new_page.wait_for_load_state("domcontentloaded")
+   238→            self._opened_tabs.append(new_page)
+   239→            self._page = new_page
+   240→            logger.info(f"New tab captured: {new_page.url}")
+   241→            return new_page
+   242→        except Exception as e:
+   243→            raise BrowserError(f"No new tab opened within {timeout}ms: {e}")
+   244→
+   245→    def switch_to_primary_tab(self) -> Page:
+   246→        """Switch back to the original (primary) tab."""
+   247→        if not self._primary_page or self._primary_page.is_closed():
+   248→            raise BrowserError("Primary tab is not available")
+   249→
+   250→        self._page = self._primary_page
+   251→        logger.debug(f"Switched to primary tab: {self._page.url}")
+   252→        return self._page
+   253→
+   254→    async def close_current_tab(self) -> Page:
+   255→        """Close the current active tab and switch to the previous one."""
+   256→        if not self._page:
+   257→            raise BrowserError("No active page to close")
+   258→
+   259→        if self._page == self._primary_page:
+   260→            raise BrowserError("Cannot close the primary tab")
+   261→
+   262→        closing = self._page
+   263→        try:
+   264→            if closing in self._opened_tabs:
+   265→                self._opened_tabs.remove(closing)
+   266→            await closing.close()
+   267→        except Exception as e:
+   268→            logger.warning(f"Error closing tab: {e}")
+   269→
+   270→        if self._context and self._context.pages:
+   271→            self._page = self._context.pages[-1]
+   272→        else:
+   273→            self._page = self._primary_page
+   274→
+   275→        logger.debug(f"Closed tab, switched to: {self._page.url if self._page else 'none'}")
+   276→        return self._page
+   277→
+   278→    async def save_session(self) -> None:
+   279→        """Save current session to disk (backup of cookies)."""
+   280→        if self._context:
+   281→            await self._session_manager.save(self._context)
+   282→        else:
+   283→            logger.warning("No active context to save session from")
+   284→
+   285→    async def screenshot(self, name: str = None) -> str:
+   286→        """Take a screenshot of current page."""
+   287→        if not self._page:
+   288→            raise BrowserError("No active page for screenshot")
+   289→
+   290→        screenshot_dir = Path(self._config.get('data.screenshot_dir', 'data/screenshots'))
+   291→        screenshot_dir.mkdir(parents=True, exist_ok=True)
+   292→
+   293→        if name is None:
+   294→            name = datetime.now().strftime('%Y%m%d_%H%M%S')
+   295→
+   296→        filepath = screenshot_dir / f"{name}.png"
+   297→
+   298→        await self._page.screenshot(path=str(filepath), full_page=True)
+   299→        logger.info(f"Screenshot saved: {filepath}")
+   300→
+   301→        return str(filepath)
+   302→
+   303→
+   304→# Global browser manager instance
+   305→_browser_manager: Optional[BrowserManager] = None
+   306→
+   307→
+   308→def get_browser_manager() -> BrowserManager:
+   309→    """Get global browser manager instance."""
+   310→    global _browser_manager
+   311→    if _browser_manager is None:
+   312→        _browser_manager = BrowserManager()
+   313→    return _browser_manager
+   314→

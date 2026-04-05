@@ -1,0 +1,179 @@
+"""Database models and setup using SQLAlchemy."""
+
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+from sqlalchemy import (
+    Column, Integer, String, Text, DateTime, JSON,
+    ForeignKey, create_engine, Index, CheckConstraint
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.pool import StaticPool
+from loguru import logger
+
+from src.utils.config import get_config
+
+Base = declarative_base()
+
+
+def _utcnow():
+    """Return timezone-aware UTC now."""
+    return datetime.now(timezone.utc)
+
+
+class Candidate(Base):
+    """Candidate model - stores candidate profile information."""
+
+    __tablename__ = 'candidates'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    boss_id = Column(String(50), unique=True, nullable=False, index=True)
+    name = Column(String(100))
+    title = Column(String(200))
+    company = Column(String(200))
+    location = Column(String(100))
+    salary_expect = Column(String(100))      # Boss直聘: expected salary
+    work_years = Column(String(50))           # Boss直聘: work years
+    education_level = Column(String(50))      # Boss直聘: education level
+    profile_url = Column(Text)
+
+    # JSON fields for structured data
+    basic_info = Column(JSON)
+    education = Column(JSON)
+    work_experience = Column(JSON)
+    skills = Column(JSON)
+
+    # Metadata
+    first_seen = Column(DateTime, default=_utcnow)
+    last_updated = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    source_search = Column(Text)
+
+    # Relationships
+    messages = relationship("Message", back_populates="candidate")
+
+    def __repr__(self):
+        return f"<Candidate(boss_id='{self.boss_id}', name='{self.name}', company='{self.company}')>"
+
+
+class Message(Base):
+    """Message model - stores sent messages to candidates."""
+
+    __tablename__ = 'messages'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    candidate_boss_id = Column(String(50), ForeignKey('candidates.boss_id'), index=True)
+    template_name = Column(String(100))
+    content = Column(Text, nullable=False)
+    status = Column(String(20), CheckConstraint("status IN ('sent', 'failed', 'cancelled')"))
+    sent_at = Column(DateTime)
+    created_at = Column(DateTime, default=_utcnow)
+
+    # Relationships
+    candidate = relationship("Candidate", back_populates="messages")
+
+    def __repr__(self):
+        return f"<Message(id={self.id}, candidate_id='{self.candidate_boss_id}', status='{self.status}')>"
+
+
+class SearchHistory(Base):
+    """Search history model - tracks all searches performed."""
+
+    __tablename__ = 'search_history'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    criteria = Column(JSON)
+    results_count = Column(Integer, default=0)
+    executed_at = Column(DateTime, default=_utcnow, index=True)
+
+    def __repr__(self):
+        return f"<SearchHistory(id={self.id}, results={self.results_count}, date='{self.executed_at}')>"
+
+
+class ActionLog(Base):
+    """Action log model - tracks all actions for rate limiting."""
+
+    __tablename__ = 'action_logs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    action_type = Column(String(50), nullable=False)
+    timestamp = Column(DateTime, default=_utcnow, nullable=False)
+    details = Column(JSON)
+
+    __table_args__ = (
+        Index('idx_action_logs_type_time', 'action_type', 'timestamp'),
+    )
+
+    def __repr__(self):
+        return f"<ActionLog(id={self.id}, type='{self.action_type}', time='{self.timestamp}')>"
+
+
+class DatabaseManager:
+    """Database manager for initialization and session management."""
+
+    def __init__(self, db_path: Optional[str] = None):
+        if db_path is None:
+            config = get_config()
+            db_path = config.get('data.database_path', 'data/boss.db')
+
+        db_file = Path(db_path)
+        db_file.parent.mkdir(parents=True, exist_ok=True)
+
+        self.db_path = db_path
+        # StaticPool uses a single connection — safe for single-threaded CLI usage.
+        # If concurrent async tasks are introduced, switch to NullPool or QueuePool.
+        self.engine = create_engine(
+            f'sqlite:///{db_path}',
+            echo=False,
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        self.Session = sessionmaker(bind=self.engine)
+
+        self.init_db()
+        logger.info(f"Database initialized at: {db_path}")
+
+    def init_db(self):
+        """Create all tables and run pending migrations."""
+        Base.metadata.create_all(self.engine)
+        logger.info("Database tables created successfully")
+
+        from src.models.migrations import run_migrations
+        run_migrations(self.engine)
+
+    @contextmanager
+    def session_scope(self):
+        """Provide a transactional scope with auto commit/rollback/close."""
+        session = self.Session()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def drop_all(self):
+        """Drop all tables (use with caution!)."""
+        Base.metadata.drop_all(self.engine)
+        logger.warning("All database tables dropped")
+
+
+# Global database manager instance
+_db_manager = None
+
+
+def get_db_manager() -> DatabaseManager:
+    """Get global database manager instance."""
+    global _db_manager
+    if _db_manager is None:
+        _db_manager = DatabaseManager()
+    return _db_manager
+
+
+def reset_db_manager() -> None:
+    """Reset global database manager (for testing)."""
+    global _db_manager
+    _db_manager = None

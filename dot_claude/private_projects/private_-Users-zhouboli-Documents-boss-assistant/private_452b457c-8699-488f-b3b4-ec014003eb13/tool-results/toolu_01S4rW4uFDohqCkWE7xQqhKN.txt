@@ -1,0 +1,68 @@
+     1→"""Tests for configuration module."""
+     2→
+     3→import pytest
+     4→from src.utils.config import Config
+     5→from src.exceptions.errors import ConfigurationError
+     6→
+     7→
+     8→def test_config_loads_successfully():
+     9→    """Test that configuration loads without errors."""
+    10→    config = Config()
+    11→    assert config._settings is not None
+    12→    assert config._selectors is not None
+    13→    assert config._message_templates is not None
+    14→
+    15→
+    16→def test_config_get_setting():
+    17→    """Test getting settings with dot notation."""
+    18→    config = Config()
+    19→    timeout = config.get('browser.timeout')
+    20→    assert isinstance(timeout, int)
+    21→
+    22→
+    23→def test_config_get_nonexistent_setting():
+    24→    """Test getting non-existent setting returns default."""
+    25→    config = Config()
+    26→    value = config.get('nonexistent.key', 'default_value')
+    27→    assert value == 'default_value'
+    28→
+    29→
+    30→def test_config_get_selector():
+    31→    """Test getting selectors."""
+    32→    config = Config()
+    33→    selector = config.get_selector('search.search_input')
+    34→    assert isinstance(selector, str)
+    35→
+    36→
+    37→def test_config_get_nonexistent_selector():
+    38→    """Test getting non-existent selector raises error."""
+    39→    config = Config()
+    40→    with pytest.raises(ConfigurationError):
+    41→        config.get_selector('nonexistent.selector')
+    42→
+    43→
+    44→def test_config_list_templates():
+    45→    """Test listing message templates."""
+    46→    config = Config()
+    47→    templates = config.list_templates()
+    48→    assert isinstance(templates, list)
+    49→    assert len(templates) > 0
+    50→    assert 'greeting' in templates
+    51→
+    52→
+    53→def test_config_get_template():
+    54→    """Test getting a message template."""
+    55→    config = Config()
+    56→    template = config.get_template('greeting')
+    57→    assert isinstance(template, dict)
+    58→    assert 'name' in template
+    59→    assert 'content' in template
+    60→    assert 'variables' in template
+    61→
+    62→
+    63→def test_config_get_nonexistent_template():
+    64→    """Test getting non-existent template raises error."""
+    65→    config = Config()
+    66→    with pytest.raises(ConfigurationError):
+    67→        config.get_template('nonexistent_template')
+    68→

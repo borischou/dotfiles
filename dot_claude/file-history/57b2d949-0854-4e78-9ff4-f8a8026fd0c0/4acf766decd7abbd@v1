@@ -1,0 +1,112 @@
+# CLAUDE.md
+
+## Project Overview
+
+脉脉半自动招聘助手。通过 CDP 连接用户 Chrome，自动化搜索、提取、触达候选人。CLI 单人终端使用。
+
+## Quick Start
+
+```bash
+pip install -r requirements.txt
+patchright install chrome
+python scripts/setup_db.py
+
+# 1. 启动 Chrome（手动登录脉脉）
+make chrome            # 默认单账号
+# 或多账号：make chrome-alice / make chrome-bob
+
+# 2. CLI
+python src/cli/main.py --help
+python src/cli/main.py search -k "前端" -p 2
+python src/cli/main.py pipeline -k "前端" -t greeting -p 2
+python src/cli/main.py pipeline -k "算法" -t ganlin -m talent_bank --min-years 5 --exchange-phone -p 2
+python src/cli/main.py pipeline -k "安卓" -t jd_live -m recruit_manage -c "TMDJ" --min-years 3 -p 1 -y
+
+# 多账号并行（两个终端各跑一个）
+python src/cli/main.py --profile alice pipeline -k "前端" -t greeting -m talent_bank -p 2
+python src/cli/main.py --profile bob pipeline -k "安卓" -t jd_live -m recruit_manage -p 1
+```
+
+## Architecture
+
+```
+CLI (Click)
+    ↓
+Modules    → src/modules/ (auth, search, profile, message, export)
+Services   → src/services/pipeline.py (SearchMode: SEARCH_CENTER | ENTERPRISE | TALENT_BANK | RECRUIT_MANAGE)
+Core       → src/core/ (browser CDP singleton, session, anti_detection)
+Infra      → SQLAlchemy (WAL mode) + config (3 JSON) + utils (rate_limiter, delays, retry)
+```
+
+### 四种搜索路径
+
+| 路径 | CLI 参数 | 入口 | 消息发送 | 特有功能 |
+|------|---------|------|---------|---------|
+| 搜索中心 (Path A) | `-m search_center` | 首页搜索框 | 跳转聊天页 | 地点筛选 |
+| 企业直聘 (Path B) | `-m enterprise` | "招聘"按钮→新 tab | tab 内联发送 | 公司 UI 筛选 |
+| 人才银行 (Path C) | `-m talent_bank` | "招人"→"搜索" tab | SPA 内联发送 | `--min-years`、`--exchange-phone/wechat` |
+| 招聘管理 (Path D) | `-m recruit_manage` | "招聘管理"→search_v2 | 内联发送→IM tab 交换 | 年限多选、公司 preset tags |
+
+## Multi-Profile（多账号并行）
+
+`--profile` 参数隔离数据目录和 CDP 端口，两个终端各跑一个账号：
+
+```bash
+make chrome-alice   # port 9222, /tmp/chrome-profile-alice
+make chrome-bob     # port 9223, /tmp/chrome-profile-bob
+```
+
+- 数据隔离：`data/profiles/{name}/`（DB、logs、session、checkpoints 各自独立）
+- 配置覆盖：`data/profiles/{name}/settings.json` 可选，deep merge 到全局 config
+- 不传 `--profile` 时完全向后兼容
+
+## Key Constraints
+
+- **CDP 模式** — 连接用户 Chrome（`--remote-debugging-port=9222`），`close()` 只断开不关浏览器
+- **DB** — `session_scope()` 上下文管理器；WAL 模式
+- **asyncio** — CLI 用 `asyncio.run()`
+- **Rate limit** — `config/settings.json` 可配，自适应降速
+- **Python 3.9+**
+
+## Config
+
+- `config/settings.json` — 运行时配置（浏览器、延迟、路径）
+- `config/selectors.json` — CSS 选择器（主要提取逻辑用 `page.evaluate()`）
+- `config/message_templates.json` — 消息模板 + 变量替换
+
+## Testing
+
+```bash
+pytest --cov=src tests/
+black src/ tests/ && ruff check src/ tests/ && mypy src/
+```
+
+## Claude 快捷招聘
+
+用户说"帮我招人"时，Claude 执行以下流程：
+
+1. **预检**: 确认 Chrome CDP 连接 + 登录状态
+2. **确认参数**: 职位、地点、经验、公司、模板
+3. **执行**: `make pipeline K=... T=... M=... C=... L=... MAX=... P=...`
+
+### 常用参数组合
+
+| 场景 | 命令 |
+|------|------|
+| 京东直播招安卓（大厂+北京+10年内） | `make pipeline K="安卓" T=jd_live M=recruit_manage C=TMDJ L="北京" MAX=10 P=2` |
+| 京东直播招前端（大厂+北京+10年内） | `make pipeline K="前端" T=jd_live M=recruit_manage C=TMDJ L="北京" MAX=10 P=2` |
+| 高阶人才 P9+（5年+经验） | `make pipeline K="算法" T=ganlin M=talent_bank MIN=5 P=2` |
+
+### 模板说明
+
+| 模板 | 内容 |
+|------|------|
+| `jd_live` | "您好，我这里是京东直播的业务，想聊聊看吗" |
+| `ganlin` | 京东零售高阶人才招聘（P9+，汇报CTO-1） |
+| `greeting` | 通用猎头问候 |
+| `hello` | 简单"你好" |
+
+### 公司标签
+
+- `TMDJ` — 头条/美团/滴滴/京东（大厂预设）
+- 也可直接用公司名如 `阿里`、`腾讯`

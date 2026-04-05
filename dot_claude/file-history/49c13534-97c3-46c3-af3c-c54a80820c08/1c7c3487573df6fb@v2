@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Boss Assistant{% endblock %}
+{% block header %}Dashboard{% endblock %}
+
+{% block content %}
+<section>
+    <h2>系统状态</h2>
+    <p>
+        <span class="status-dot {{ 'online' if chrome_healthy else 'offline' }}"></span>
+        Chrome: {{ "运行中" if chrome_healthy else "未连接" }}
+    </p>
+    <p>
+        <span class="status-dot {{ 'warning' if pipeline_busy else 'online' }}"></span>
+        Pipeline: {{ "运行中 (" + pipeline_task_id + ")" if pipeline_busy else "空闲" }}
+    </p>
+    {% if throttle_factor < 1.0 %}
+    <p>
+        <span class="status-dot warning"></span>
+        自适应限速: {{ "%.1f"|format(throttle_factor) }}x
+    </p>
+    {% endif %}
+
+    <div hx-get="/auth/status" hx-trigger="load" hx-swap="innerHTML">
+        <em>检查登录状态...</em>
+    </div>
+</section>
+
+<section>
+    <h2>今日统计</h2>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ total_candidates }}</div>
+            <div class="stat-label">总候选人</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ today_searches }}</div>
+            <div class="stat-label">今日搜索</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ today_messages }}</div>
+            <div class="stat-label">今日消息</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ total_messages_sent }}</div>
+            <div class="stat-label">累计发送</div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <h2>快捷操作</h2>
+    <p>
+        <a href="/search" role="button">搜索候选人</a>
+        <a href="/pipeline" role="button">运行 Pipeline</a>
+        <a href="/candidates" role="button">查看候选人</a>
+    </p>
+</section>
+{% endblock %}

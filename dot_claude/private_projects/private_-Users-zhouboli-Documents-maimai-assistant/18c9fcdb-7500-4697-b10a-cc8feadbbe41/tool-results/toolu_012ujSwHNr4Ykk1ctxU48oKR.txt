@@ -1,0 +1,500 @@
+  1049→
+  1050→    try:
+  1051→        candidates_data = await page.evaluate('''() => {
+  1052→            const candidates = [];
+  1053→            const seenIds = new Set();
+  1054→
+  1055→            // Enterprise talent cards typically have a structured layout
+  1056→            // Try multiple selectors for the card containers
+  1057→            const cardSelectors = [
+  1058→                '[class*="talent-card"]',
+  1059→                '[class*="candidate-card"]',
+  1060→                '[class*="recommend-card"]',
+  1061→                '[class*="talent-item"]',
+  1062→                '[class*="card-wrap"]',
+  1063→            ];
+  1064→
+  1065→            let cards = [];
+  1066→            for (const sel of cardSelectors) {
+  1067→                cards = document.querySelectorAll(sel);
+  1068→                if (cards.length > 0) break;
+  1069→            }
+  1070→
+  1071→            // Fallback: find cards by avatar image pattern (same as search_center)
+  1072→            if (cards.length === 0) {
+  1073→                const images = document.querySelectorAll('img');
+  1074→                const foundCards = [];
+  1075→
+  1076→                for (const img of images) {
+  1077→                    const rect = img.getBoundingClientRect();
+  1078→                    if (rect.width > 100 || rect.height > 100) continue;
+  1079→                    if (rect.width < 30 || rect.height < 30) continue;
+  1080→
+  1081→                    let card = img.parentElement;
+  1082→                    for (let i = 0; i < 8 && card; i++) {
+  1083→                        const cardRect = card.getBoundingClientRect();
+  1084→                        if (cardRect.width > 200 && cardRect.height > 80) {
+  1085→                            break;
+  1086→                        }
+  1087→                        card = card.parentElement;
+  1088→                    }
+  1089→                    if (card) foundCards.push(card);
+  1090→                }
+  1091→                cards = foundCards;
+  1092→            }
+  1093→
+  1094→            for (const card of cards) {
+  1095→                const textParts = [];
+  1096→                const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT, null, false);
+  1097→                while (walker.nextNode()) {
+  1098→                    const text = walker.currentNode.textContent.trim();
+  1099→                    if (text && text.length > 0 && text.length < 100) {
+  1100→                        textParts.push(text);
+  1101→                    }
+  1102→                }
+  1103→
+  1104→                let name = '';
+  1105→                let company = '';
+  1106→                let title = '';
+  1107→
+  1108→                const skipPatterns = [
+  1109→                    /^立即沟通$/,
+  1110→                    /^不合适$/,
+  1111→                    /^感兴趣$/,
+  1112→                    /^不感兴趣$/,
+  1113→                    /^(\\d+\\s*)?年/,
+  1114→                    /^[|｜·]$/,
+  1115→                    /^在线|^离线|^活跃/,
+  1116→                ];
+  1117→
+  1118→                const isSkippable = (text) => {
+  1119→                    return skipPatterns.some(p => p.test(text));
+  1120→                };
+  1121→
+  1122→                for (let i = 0; i < textParts.length; i++) {
+  1123→                    const part = textParts[i];
+  1124→                    if (isSkippable(part)) continue;
+  1125→
+  1126→                    if (!name && part.length >= 2 && part.length <= 15) {
+  1127→                        if (/^[\\u4e00-\\u9fa5a-zA-Z·\\s]+$/.test(part)) {
+  1128→                            name = part;
+  1129→                            continue;
+  1130→                        }
+  1131→                    }
+  1132→
+  1133→                    if (name && !company && part.length > 1) {
+  1134→                        company = part;
+  1135→                        continue;
+  1136→                    }
+  1137→
+  1138→                    if (name && company && !title && part.length > 1) {
+  1139→                        title = part;
+  1140→                        break;
+  1141→                    }
+  1142→                }
+  1143→
+  1144→                if (!name) continue;
+  1145→
+  1146→                const idSource = (name || '') + '|' + (company || '') + '|' + (title || '');
+  1147→                let hash = 0;
+  1148→                for (let j = 0; j < idSource.length; j++) {
+  1149→                    const ch = idSource.charCodeAt(j);
+  1150→                    hash = ((hash << 5) - hash) + ch;
+  1151→                    hash = hash & hash;
+  1152→                }
+  1153→                const maimaiId = 'mm_' + Math.abs(hash).toString(16).padStart(8, '0');
+  1154→
+  1155→                if (seenIds.has(maimaiId)) continue;
+  1156→                seenIds.add(maimaiId);
+  1157→
+  1158→                // Try to extract profile URL
+  1159→                let profileUrl = '';
+  1160→                const links = card.querySelectorAll('a[href]');
+  1161→                for (const link of links) {
+  1162→                    const href = link.getAttribute('href') || '';
+  1163→                    if (href.includes('/profile/detail') || href.includes('/contact/detail/') || href.includes('dstu=') || href.includes('egid=')) {
+  1164→                        profileUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+  1165→                        break;
+  1166→                    }
+  1167→                }
+  1168→
+  1169→                candidates.push({
+  1170→                    name: name,
+  1171→                    title: title || '',
+  1172→                    company: company || '',
+  1173→                    maimai_id: maimaiId,
+  1174→                    profile_url: profileUrl,
+  1175→                    location: '',
+  1176→                });
+  1177→            }
+  1178→
+  1179→            return candidates;
+  1180→        }''')
+  1181→
+  1182→        logger.info(f"Enterprise extraction found {len(candidates_data)} candidates")
+  1183→
+  1184→        for data in candidates_data:
+  1185→            if data.get("name"):
+  1186→                candidates.append(CandidateBasic(
+  1187→                    maimai_id=data.get("maimai_id", ""),
+  1188→                    name=data.get("name", ""),
+  1189→                    title=data.get("title", ""),
+  1190→                    company=data.get("company", ""),
+  1191→                    location=data.get("location", ""),
+  1192→                    profile_url=data.get("profile_url", ""),
+  1193→                ))
+  1194→
+  1195→        # Filter out premium placeholders
+  1196→        candidates = [c for c in candidates if c.name not in PREMIUM_PLACEHOLDER_NAMES]
+  1197→
+  1198→        logger.info(f"Enterprise: extracted {len(candidates)} candidates from page")
+  1199→
+  1200→    except Exception as e:
+  1201→        logger.error(f"Error extracting enterprise results: {e}")
+  1202→
+  1203→    return candidates
+  1204→
+  1205→
+  1206→# ---------------------------------------------------------------------------
+  1207→# Talent Bank recruitment path (Path C)
+  1208→# ---------------------------------------------------------------------------
+  1209→
+  1210→TALENT_BANK_ENTRY_URL = "https://maimai.cn/ent/v41/index"
+  1211→
+  1212→
+  1213→async def search_candidates_talent_bank(
+  1214→    keywords: str,
+  1215→    company: Optional[tuple] = None,
+  1216→    pages: int = 1,
+  1217→    browser: Optional[BrowserManager] = None,
+  1218→    min_years: Optional[int] = None,
+  1219→) -> List[CandidateBasic]:
+  1220→    """Search for candidates via the talent bank path.
+  1221→
+  1222→    Unlike enterprise search which opens a new tab, talent bank navigates
+  1223→    the current tab in-place.  No tab cleanup is needed.
+  1224→
+  1225→    Flow:
+  1226→    1. Navigate to enterprise entry -> click "招人" -> click "搜索" tab
+  1227→    2. Input keywords in search box -> Enter
+  1228→    3. Extract candidates from results
+  1229→    4. For additional pages, scroll to trigger infinite scroll
+  1230→
+  1231→    Args:
+  1232→        keywords: Search keywords
+  1233→        company: Filter by company names (optional)
+  1234→        pages: Number of scroll-pages to extract
+  1235→        browser: Browser manager instance
+  1236→
+  1237→    Returns:
+  1238→        List of CandidateBasic objects
+  1239→    """
+  1240→    validate_keywords(keywords)
+  1241→
+  1242→    if browser is None:
+  1243→        browser = get_browser_manager()
+  1244→
+  1245→    config = get_config()
+  1246→    rate_limiter = get_rate_limiter()
+  1247→    db_manager = get_db_manager()
+  1248→
+  1249→    await ensure_logged_in(browser)
+  1250→
+  1251→    all_candidates: List[CandidateBasic] = []
+  1252→    seen_ids: set = set()
+  1253→
+  1254→    with Progress(
+  1255→        SpinnerColumn(),
+  1256→        TextColumn("[progress.description]{task.description}"),
+  1257→        console=console,
+  1258→    ) as progress:
+  1259→        task = progress.add_task("Opening talent bank...", total=None)
+  1260→
+  1261→        try:
+  1262→            await async_check_rate_limit("search")
+  1263→
+  1264→            page = browser.page
+  1265→
+  1266→            # Step 1: Navigate to talent bank entry
+  1267→            progress.update(task, description="Navigating to talent bank...")
+  1268→            await retry_navigation(page, TALENT_BANK_ENTRY_URL, wait_until="domcontentloaded")
+  1269→            await async_random_delay("page_load")
+  1270→
+  1271→            # Click "招人" to enter talent bank
+  1272→            entry_sel = config.get_selector("talent_bank.entry_button")
+  1273→            entry_btn = await page.wait_for_selector(entry_sel, timeout=8000)
+  1274→            if not entry_btn:
+  1275→                raise SelectorNotFoundError(f"Could not find talent bank entry: {entry_sel}")
+  1276→            await entry_btn.click()
+  1277→            await async_random_delay("page_load")
+  1278→
+  1279→            # Wait for talent bank URL
+  1280→            try:
+  1281→                await page.wait_for_url(
+  1282→                    lambda url: "recruit/talents" in url,
+  1283→                    timeout=15000,
+  1284→                )
+  1285→            except Exception:
+  1286→                logger.warning(f"Talent bank URL not matched, current: {page.url}")
+  1287→
+  1288→            # Click "搜索" tab
+  1289→            search_tab_sel = config.get_selector("talent_bank.search_tab")
+  1290→            search_tab = await page.wait_for_selector(search_tab_sel, timeout=5000)
+  1291→            if search_tab:
+  1292→                await search_tab.click()
+  1293→                await async_random_delay("page_load")
+  1294→
+  1295→            # Step 1.5: Set work years filter if requested
+  1296→            if min_years:
+  1297→                progress.update(task, description=f"Setting year filter: {min_years}+...")
+  1298→                try:
+  1299→                    year_filter = await page.wait_for_selector("text=工作年限", timeout=5000)
+  1300→                    if year_filter:
+  1301→                        await year_filter.click()
+  1302→                        await async_random_delay("action")
+  1303→                        # Map min_years to dropdown option
+  1304→                        if min_years >= 10:
+  1305→                            option_text = "10年以上"
+  1306→                        elif min_years >= 5:
+  1307→                            option_text = "5-10年"
+  1308→                        elif min_years >= 3:
+  1309→                            option_text = "3-5年"
+  1310→                        else:
+  1311→                            option_text = "1-3年"
+  1312→                        opt = await page.wait_for_selector(f"text={option_text}", timeout=3000)
+  1313→                        if opt:
+  1314→                            await opt.click()
+  1315→                            await async_random_delay("page_load")
+  1316→                            logger.info(f"Set work years filter: {option_text}")
+  1317→                except Exception as e:
+  1318→                    logger.warning(f"Failed to set year filter: {e}")
+  1319→
+  1320→            # Step 2: Input keywords and search
+  1321→            progress.update(task, description=f"Searching: {keywords}")
+  1322→
+  1323→            search_input_sel = config.get_selector("talent_bank.search_input")
+  1324→            await page.wait_for_selector(search_input_sel, timeout=8000)
+  1325→            await human_type(page, search_input_sel, keywords)
+  1326→            await async_random_delay("action")
+  1327→            await page.keyboard.press("Enter")
+  1328→            await async_random_delay("page_load")
+  1329→
+  1330→            # Wait for results to load
+  1331→            await page.wait_for_timeout(3000)
+  1332→            await check_captcha(page, report_to_rate_limiter=True)
+  1333→
+  1334→            # Step 3: Extract candidates (with pagination via scroll)
+  1335→            for page_num in range(1, pages + 1):
+  1336→                progress.update(task, description=f"Extracting page {page_num}/{pages}...")
+  1337→
+  1338→                candidates = await _extract_talent_bank_results(page)
+  1339→
+  1340→                # Deduplicate across scroll pages
+  1341→                candidates = [c for c in candidates if c.maimai_id not in seen_ids]
+  1342→                for c in candidates:
+  1343→                    seen_ids.add(c.maimai_id)
+  1344→
+  1345→                if not candidates:
+  1346→                    logger.info(f"No talent bank results on page {page_num}")
+  1347→                    break
+  1348→
+  1349→                # Filter non-R&D roles
+  1350→                before_filter = len(candidates)
+  1351→                candidates = [c for c in candidates if not _is_non_rd_title(c.title)]
+  1352→                filtered = before_filter - len(candidates)
+  1353→                if filtered > 0:
+  1354→                    logger.info(f"Filtered out {filtered} non-R&D candidates")
+  1355→
+  1356→                # Apply company filter if specified
+  1357→                if company:
+  1358→                    company_lower = [cn.lower() for cn in company]
+  1359→                    candidates = [c for c in candidates if c.company and any(cn in c.company.lower() for cn in company_lower)]
+  1360→
+  1361→                all_candidates.extend(candidates)
+  1362→                progress.update(task, description=f"Page {page_num}: Found {len(candidates)} candidates")
+  1363→
+  1364→                rate_limiter.log_action("search", {
+  1365→                    "keywords": keywords,
+  1366→                    "page": page_num,
+  1367→                    "results": len(candidates),
+  1368→                    "mode": "talent_bank",
+  1369→                })
+  1370→
+  1371→                try:
+  1372→                    _save_candidates_to_db(db_manager, candidates, keywords)
+  1373→                except Exception as e:
+  1374→                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+  1375→
+  1376→                # Scroll for next page (infinite scroll)
+  1377→                if page_num < pages:
+  1378→                    await human_scroll(page, "down", distance=800)
+  1379→                    await async_random_delay("page_load")
+  1380→                    await page.wait_for_timeout(2000)
+  1381→
+  1382→        except Exception as e:
+  1383→            logger.error(f"Talent bank search error: {e}")
+  1384→            await browser.screenshot("talent_bank_search_error")
+  1385→            progress.update(task, description=f"Error: {str(e)[:40]}")
+  1386→
+  1387→    _log_search_history(db_manager, keywords, company, None, pages, len(all_candidates))
+  1388→
+  1389→    console.print(f"[green]Talent bank search complete. Found {len(all_candidates)} candidates.[/green]")
+  1390→    return all_candidates
+  1391→
+  1392→
+  1393→async def _extract_talent_bank_results(page: Page) -> List[CandidateBasic]:
+  1394→    """Extract candidate information from talent bank results page.
+  1395→
+  1396→    The talent bank UI uses the same enterprise card layout.
+  1397→    Uses JS-based extraction tailored to the talent bank cards.
+  1398→
+  1399→    Args:
+  1400→        page: Playwright page instance on the talent bank results page
+  1401→
+  1402→    Returns:
+  1403→        List of CandidateBasic objects
+  1404→    """
+  1405→    candidates = []
+  1406→
+  1407→    try:
+  1408→        await page.wait_for_load_state("networkidle", timeout=10000)
+  1409→    except Exception:
+  1410→        pass
+  1411→
+  1412→    try:
+  1413→        candidates_data = await page.evaluate('''() => {
+  1414→            const candidates = [];
+  1415→            const seenIds = new Set();
+  1416→
+  1417→            // Find cards by "立即沟通" button proximity
+  1418→            const chatBtns = [...document.querySelectorAll('[class*="btn"]')].filter(
+  1419→                b => b.textContent?.trim() === '立即沟通'
+  1420→            );
+  1421→            const foundCards = new Set();
+  1422→            for (const btn of chatBtns) {
+  1423→                let card = btn.parentElement;
+  1424→                for (let i = 0; i < 8 && card; i++) {
+  1425→                    const rect = card.getBoundingClientRect();
+  1426→                    if (rect.width > 200 && rect.height > 80) break;
+  1427→                    card = card.parentElement;
+  1428→                }
+  1429→                if (card) foundCards.add(card);
+  1430→            }
+  1431→            const cards = Array.from(foundCards);
+  1432→
+  1433→            for (const card of cards) {
+  1434→                // Extract structured data using class-based selectors
+  1435→                // Name: bold span (font-weight-bold color-stress)
+  1436→                const nameEl = card.querySelector('[class*="font-weight-bold"][class*="color-stress"]');
+  1437→                const name = nameEl?.textContent?.trim() || '';
+  1438→                if (!name) continue;
+  1439→
+  1440→                // Collect all text nodes with parent info
+  1441→                const nodes = [];
+  1442→                const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT, null, false);
+  1443→                while (walker.nextNode()) {
+  1444→                    const text = walker.currentNode.textContent.trim();
+  1445→                    if (text && text.length > 0 && text.length < 200) {
+  1446→                        nodes.push({
+  1447→                            text,
+  1448→                            cls: walker.currentNode.parentElement?.className || '',
+  1449→                            tag: walker.currentNode.parentElement?.tagName || '',
+  1450→                        });
+  1451→                    }
+  1452→                }
+  1453→
+  1454→                // Years of experience: "N年" pattern
+  1455→                let years = '';
+  1456→                for (const n of nodes) {
+  1457→                    if (/^\d+年$/.test(n.text)) { years = n.text; break; }
+  1458→                }
+  1459→
+  1460→                // Location: from demographic spans (after years, before 期望)
+  1461→                let location = '';
+  1462→                for (const n of nodes) {
+  1463→                    // Location pattern: Chinese city/district names
+  1464→                    if (/^[\u4e00-\u9fa5]{2,8}$/.test(n.text) &&
+  1465→                        !n.cls.includes('font-weight-bold') &&
+  1466→                        !n.cls.includes('tag___') &&
+  1467→                        !n.cls.includes('occTag') &&
+  1468→                        !/^(本科|硕士|博士|大专|MBA|EMBA)$/.test(n.text) &&
+  1469→                        !/^(在线|离线|急求职|今日活跃|立即沟通|不合适|发送后继续沟通)$/.test(n.text)) {
+  1470→                        // Check if this looks like a location (has district suffix or province+city)
+  1471→                        if (/[区市省县]$/.test(n.text) || /^(北京|上海|广东|浙江|江苏|四川|湖北|安徽|福建|天津|重庆)/.test(n.text)) {
+  1472→                            location = n.text;
+  1473→                            break;
+  1474→                        }
+  1475→                    }
+  1476→                }
+  1477→
+  1478→                // Company & title: from work experience section
+  1479→                // Pattern: date_start + date_end + company + · + title
+  1480→                let company = '';
+  1481→                let title = '';
+  1482→                const datePattern = /^\d{4}\.\d{1,2}$/;
+  1483→                for (let i = 0; i < nodes.length; i++) {
+  1484→                    if (datePattern.test(nodes[i].text) && nodes[i].cls.includes('min-w-')) {
+  1485→                        // Found a date range start, skip date nodes
+  1486→                        let j = i + 1;
+  1487→                        // Skip "- 至今" or "- 2024.06"
+  1488→                        while (j < nodes.length && (nodes[j].text === '-' || nodes[j].text.startsWith('- ') || datePattern.test(nodes[j].text))) {
+  1489→                            j++;
+  1490→                        }
+  1491→                        // Next non-separator text is company
+  1492→                        if (j < nodes.length && nodes[j].text !== '·') {
+  1493→                            company = nodes[j].text;
+  1494→                            // Look for title after separator
+  1495→                            for (let k = j + 1; k < nodes.length && k <= j + 5; k++) {
+  1496→                                if (nodes[k].text === '·') continue;
+  1497→                                if (/^\d{4}\.\d{1,2}$/.test(nodes[k].text)) break;
+  1498→                                // Collect title parts (may be split by search highlights)
+  1499→                                const titleParts = [];
+  1500→                                for (let m = k; m < nodes.length && m <= k + 4; m++) {
+  1501→                                    if (nodes[m].text === '·' || /^\d{4}\.\d{1,2}$/.test(nodes[m].text)) break;
+  1502→                                    if (/至今/.test(nodes[m].text) || nodes[m].cls.includes('min-w-')) break;
+  1503→                                    if (nodes[m].tag === 'MARK' || nodes[m].tag === 'SPAN') {
+  1504→                                        titleParts.push(nodes[m].text);
+  1505→                                    } else break;
+  1506→                                }
+  1507→                                title = titleParts.join('');
+  1508→                                if (title.length > 30) title = title.substring(0, 30);
+  1509→                                break;
+  1510→                            }
+  1511→                            break;  // Use first (most recent) work experience
+  1512→                        }
+  1513→                    }
+  1514→                }
+  1515→
+  1516→                // ID generation
+  1517→                const idSource = (name || '') + '|' + (company || '') + '|' + (title || '');
+  1518→                let hash = 0;
+  1519→                for (let j = 0; j < idSource.length; j++) {
+  1520→                    const ch = idSource.charCodeAt(j);
+  1521→                    hash = ((hash << 5) - hash) + ch;
+  1522→                    hash = hash & hash;
+  1523→                }
+  1524→                const maimaiId = 'mm_' + Math.abs(hash).toString(16).padStart(8, '0');
+  1525→                if (seenIds.has(maimaiId)) continue;
+  1526→                seenIds.add(maimaiId);
+  1527→
+  1528→                // Profile URL
+  1529→                let profileUrl = '';
+  1530→                const links = card.querySelectorAll('a[href]');
+  1531→                for (const link of links) {
+  1532→                    const href = link.getAttribute('href') || '';
+  1533→                    if (href.includes('/profile/detail') || href.includes('/contact/detail/') || href.includes('dstu=') || href.includes('egid=')) {
+  1534→                        profileUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+  1535→                        break;
+  1536→                    }
+  1537→                }
+  1538→
+  1539→                candidates.push({
+  1540→                    name, title: title || '', company: company || '',
+  1541→                    maimai_id: maimaiId, profile_url: profileUrl,
+  1542→                    location: location || '', years: years || '',
+  1543→                });
+  1544→            }
+  1545→
+  1546→            return candidates;
+  1547→        }''')
+  1548→

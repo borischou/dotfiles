@@ -1,0 +1,197 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+Maimai Semi-Automated Recruitment Assistant - A Python tool for semi-automating candidate search, profile extraction, and outreach on Maimai (脉脉), China's professional networking platform. Supports two access modes: CLI (single user, terminal) and Web Service (2-5 人团队, 浏览器访问). Both模式共享底层模块。
+
+## Build & Development Commands
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+patchright install chrome   # Uses real Chrome for better anti-detection
+# Or: patchright install chromium
+
+# Initialize database (creates SQLite tables)
+python scripts/setup_db.py
+
+# Start Chrome with remote debugging (required for both CLI and Web)
+# Chrome 144+ requires --user-data-dir to avoid conflicts with existing Chrome instances
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile
+# Then log in to Maimai manually in that Chrome window
+```
+
+### Web Service (recommended for team use)
+
+```bash
+# Start web service (after Chrome is running and logged in)
+python -m src.web.app --host 0.0.0.0 --port 8000
+
+# Options:
+python -m src.web.app --port 8080                          # Custom port
+python -m src.web.app --cdp http://localhost:9333           # Custom CDP endpoint
+
+# Access:
+#   Local:  http://localhost:8000
+#   LAN:    http://<mac-ip>:8000  (teammates access via this URL)
+```
+
+**Web UI pages:**
+
+| Page | URL | Description |
+|------|-----|-------------|
+| Dashboard | `/` | Connection status, task queue, recent activity |
+| Search | `/search` | Search form with real-time WebSocket progress |
+| Pipeline | `/pipeline` | Search + batch message with candidate confirmation |
+| Candidates | `/candidates` | Paginated candidate list, search/filter, export |
+| Messages | `/messages` | Message history |
+
+**API endpoints (for programmatic access):**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/auth/status` | Chrome connection & login status |
+| POST | `/api/search` | Submit search task (returns task_id) |
+| GET | `/api/candidates` | List candidates (paginated) |
+| GET | `/api/messages` | List message history (paginated) |
+| POST | `/api/message` | Send single message (queued) |
+| POST | `/api/message/batch` | Batch send (queued) |
+| POST | `/api/pipeline` | Start pipeline: search + message (queued) |
+| POST | `/api/pipeline/{id}/confirm` | Confirm candidate selection |
+| GET | `/api/templates` | List message templates |
+| GET | `/api/status` | System status (browser, queue, throttle) |
+| GET | `/api/queue` | Task queue status |
+| GET | `/api/task/{id}` | Task detail & result |
+| GET | `/api/tasks` | Recent tasks |
+| POST | `/api/export` | Export candidates (xlsx/csv download) |
+| WS | `/ws/task/{id}` | Real-time progress for a specific task |
+| WS | `/ws/global` | All task events (dashboard use) |
+
+### CLI (single user)
+
+```bash
+# Run CLI (connects to Chrome via CDP)
+python src/cli/main.py --help
+python src/cli/main.py login                    # Verify login status via CDP
+python src/cli/main.py search -k "前端工程师" -p 2  # Search candidates
+python src/cli/main.py search -k "前端" -k "后端" -p 2  # Multi-keyword search
+python src/cli/main.py search -k "前端" -c "字节" -c "快手" -p 2  # Multi-company filter
+python src/cli/main.py profile <maimai_id>       # View profile
+python src/cli/main.py message <id> -t greeting  # Send message
+python src/cli/main.py export -o out.xlsx        # Export data
+python src/cli/main.py pipeline -k "前端" -t greeting -v "recruiter_name=张三" -p 2  # Search + batch message
+python src/cli/main.py pipeline -k "前端" -k "后端" -t greeting --dry-run  # Pipeline preview only
+python src/cli/main.py pipeline -k "研发" -c "亚马逊" -c "快手" -t greeting -p 3  # Multi-company filter
+python src/cli/main.py pipeline -k "前端" -t greeting -p 10 -b 2  # Batch: search 2 pages, send, repeat
+python src/cli/main.py pipeline --resume                         # Resume interrupted pipeline
+python src/cli/main.py templates                 # List templates
+python src/cli/main.py status                    # Rate limit status
+python src/cli/main.py logout                    # Clear session backup
+python src/cli/main.py --cdp http://localhost:9333 search -k "前端" -p 1  # Custom CDP port
+```
+
+**Note:** CLI and Web不能同时运行 (共享同一个 Chrome CDP 连接)。
+
+### Testing & Code Quality
+
+```bash
+pytest                      # Run all tests
+pytest --cov=src tests/    # With coverage
+black src/ tests/          # Format code
+ruff check src/ tests/     # Lint
+mypy src/                  # Type check
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Access Layer                                                    │
+│  ┌──────────────────┐   ┌──────────────────────────────────┐    │
+│  │ CLI (Click)       │   │ Web (FastAPI + Jinja2)           │    │
+│  │ src/cli/main.py   │   │ src/web/app.py                   │    │
+│  │                   │   │ ├── routers/ (REST + WebSocket)  │    │
+│  │                   │   │ ├── task_queue.py (serial queue)  │    │
+│  │                   │   │ └── progress.py (WS broadcaster) │    │
+│  └────────┬─────────┘   └──────────────┬───────────────────┘    │
+│           │                             │                        │
+│           └──────────┬──────────────────┘                        │
+│                      ↓                                           │
+│  Feature Modules  →  src/modules/ (auth, search, profile,       │
+│                      message, export)                            │
+│                      ↓                                           │
+│  Services         →  src/services/pipeline.py                    │
+│                      ↓                                           │
+│  Core             →  src/core/ (browser, session, anti_detection)│
+│                      ↓                                           │
+│  ┌──────────────┬────────────┬─────────────────┐                 │
+│  │ Database      │ Config     │ Utilities        │                │
+│  │ (SQLAlchemy   │ (3 JSON)   │ (rate_limiter,   │                │
+│  │  + WAL mode)  │            │  delays, retry)  │                │
+│  └──────────────┴────────────┴─────────────────┘                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Core infrastructure** (in `src/core/`):
+- `browser.py` - Singleton BrowserManager connecting to user's Chrome via CDP (`connect_over_cdp`), reuses existing context/page, lazy asyncio.Lock, `is_connected` property for status checks. Disconnect-only close (Chrome stays open).
+- `session.py` - SessionManager for save/load cookies via Patchright storage_state
+- `anti_detection.py` - Multi-layer anti-detection: Patchright (undetectable automation), Emunium (human-like click/type), Ghost Cursor algorithm (Fitts's Law + cubic Bezier mouse trajectories with sigmoid easing and micro-overshoot), stealth JS, Chrome 131-136 UA strings
+
+**Web layer** (in `src/web/`):
+- `app.py` - FastAPI application with lifespan (queue/broadcaster init), static file serving, Jinja2 templates, router registration
+- `task_queue.py` - Async serial task queue (`asyncio.PriorityQueue`), ensures one browser operation at a time. Priorities: HIGH (status checks) > NORMAL (search, message) > LOW (pipeline). Coroutine factory pattern avoids coroutine reuse. Supports `confirmation_event` for pipeline manual mode.
+- `progress.py` - WebSocket broadcaster (task-specific + global subscriptions) + `contextvars`-based `emit_progress()` for injecting progress callbacks into existing modules without coupling. CLI mode: context var is None, calls are silently ignored.
+- `deps.py` - FastAPI dependency injection (browser, db, queue, broadcaster singletons)
+- `schemas.py` - Pydantic request/response models for all API endpoints
+- `routers/` - REST endpoints (auth, search, candidates, message, pipeline, templates, status, export) + WebSocket endpoints (task-specific, global) + HTML page routes
+
+**Feature modules** (in `src/modules/`):
+- `auth.py` - CDP login verification (user logs in manually in Chrome), captcha detection/pause
+- `search.py` - Candidate search with JS-based extraction (name+company+title hash IDs, location, profile URL), multi-keyword support, multi-company filtering, pagination, captcha detection with adaptive throttle reporting
+- `profile.py` - Profile extraction (education, work experience, skills), async rate limiting
+- `message.py` - Template rendering with variable substitution, questionary-based confirmation (unsafe_ask for async compatibility), batch sending with single rate-limit check, auto-creates Candidate records for FK integrity, message send verification, existing conversation detection, `emit_progress` for web progress reporting
+- `export.py` - Dual-format export (Excel with openpyxl formatting / CSV)
+
+**Services** (in `src/services/`):
+- `pipeline.py` - Search-and-message orchestration, supports default (all-at-once) and batched modes, `emit_progress` at search/send key points for web progress tracking
+
+**Utilities** (in `src/utils/`):
+- `config.py` - Singleton config loader with dot-notation access (e.g., `config.get('browser.headless')`)
+- `rate_limiter.py` - Database-backed rate limiting with configurable limits from `settings.json`, adaptive throttling (auto-reduces limits on captcha/error detection)
+- `delays.py` - Human-like delays using log-normal distribution, fatigue simulation (delays increase over session), random distraction pauses, time-of-day awareness
+- `retry.py` - Navigation retry with tenacity (3 attempts, exponential backoff) for `page.goto()` calls
+- `checkpoint.py` - Pipeline checkpoint save/load for resume capability (`--resume` flag)
+- `scoring.py` - Candidate scoring by title seniority, company tier, and keyword relevance for priority-based messaging
+- `validators.py` - Input validation for IDs, keywords, URLs, file paths
+- `logger.py` - Loguru-based logging with rotation
+
+**Frontend** (in `src/templates/` + `src/static/`):
+- Jinja2 HTML templates (base, index, search, pipeline, candidates, messages) with PicoCSS
+- Vanilla JS: WebSocket client with auto-reconnect (`ws.js`), pipeline interaction (`pipeline.js`), common utilities (`app.js`)
+
+**Database** (`src/models/database.py`): SQLAlchemy ORM with 5 tables - Candidates, Messages, SearchHistory, ActionLogs, WebTasks. `QueuePool` + WAL mode for concurrent read support. `DatabaseManager.session_scope()` context manager for safe session handling (auto commit/rollback/close).
+
+## Configuration Files
+
+- `config/settings.json` - Runtime settings (browser, delays, paths)
+- `config/selectors.json` - CSS selectors for Maimai pages (**PLACEHOLDERS - must be updated with actual selectors**)
+- `config/message_templates.json` - 5 message templates with variable substitution
+
+## Key Constraints
+
+- **CDP connection mode** - tool connects to user's Chrome via `--remote-debugging-port=9222`; user manages Chrome lifecycle and login; `close()` disconnects without killing Chrome
+- **CLI and Web are mutually exclusive** - both use the same Chrome CDP connection; run one at a time
+- **Browser is a serial resource** - all browser operations go through `TaskQueue` in web mode; one operation at a time, queued by priority
+- **Rate limits are configurable** via `config/settings.json` with adaptive throttling (auto-reduces on captcha/error)
+- **Selectors updated** - JS-based extraction uses avatar image detection rather than CSS selectors; `selectors.json` has real Maimai selectors but primary extraction is via `page.evaluate()`
+- **Python 3.9+** required
+- Message confirmation in CLI uses questionary; in Web uses WebSocket `awaiting_confirmation` event + `POST /api/pipeline/{id}/confirm`
+- **Captcha handling** - search and login flows auto-detect captcha elements and pause for manual resolution
+- **Navigation retries** - all `page.goto()` calls go through `retry_navigation()` (tenacity, 3 attempts, exponential backoff)
+- **DB sessions** - use `db_manager.session_scope()` context manager for all DB operations (auto commit/rollback/close); avoid manual `get_session()` / `commit()` / `close()` patterns. Database uses QueuePool + WAL mode for concurrent read support.
+- **asyncio** - CLI uses `asyncio.run()`; Web shares FastAPI's event loop; within async code use `asyncio.get_running_loop()` (never `get_event_loop()`)
+- **Search IDs** - prefer real user IDs from `contactcard_{user_id}` DOM elements (format: `mm_{user_id}`), falling back to `hash(name + company + title)`; DB dedup also checks name+company
+- **Progress callbacks** - `emit_progress()` from `src/web/progress.py` uses `contextvars` — safe to call from anywhere; does nothing in CLI mode (context var is None)
+- **Web task queue** - all browser-touching API endpoints return `{task_id}` immediately; results come via WebSocket or polling `GET /api/task/{id}`

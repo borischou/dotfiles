@@ -1,0 +1,203 @@
+     1→     1→"""Database models and setup using SQLAlchemy."""
+     2→     2→
+     3→     3→from contextlib import contextmanager
+     4→     4→from datetime import datetime, timezone
+     5→     5→from pathlib import Path
+     6→     6→from typing import Optional
+     7→     7→
+     8→     8→from sqlalchemy import (
+     9→     9→    Column, Integer, String, Text, DateTime, JSON,
+    10→    10→    ForeignKey, create_engine, Index, CheckConstraint
+    11→    11→)
+    12→    12→from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+    13→    13→from sqlalchemy.pool import NullPool
+    14→    14→from loguru import logger
+    15→    15→
+    16→    16→from src.utils.config import get_config
+    17→    17→
+    18→    18→Base = declarative_base()
+    19→    19→
+    20→    20→
+    21→    21→def _utcnow():
+    22→    22→    """Return timezone-aware UTC now."""
+    23→    23→    return datetime.now(timezone.utc)
+    24→    24→
+    25→    25→
+    26→    26→class Candidate(Base):
+    27→    27→    """Candidate model - stores candidate profile information."""
+    28→    28→
+    29→    29→    __tablename__ = 'candidates'
+    30→    30→
+    31→    31→    id = Column(Integer, primary_key=True, autoincrement=True)
+    32→    32→    boss_id = Column(String(50), unique=True, nullable=False, index=True)
+    33→    33→    name = Column(String(100))
+    34→    34→    title = Column(String(200))
+    35→    35→    company = Column(String(200))
+    36→    36→    location = Column(String(100))
+    37→    37→    salary_expect = Column(String(100))      # Boss直聘: expected salary
+    38→    38→    work_years = Column(String(50))           # Boss直聘: work years
+    39→    39→    education_level = Column(String(50))      # Boss直聘: education level
+    40→    40→    profile_url = Column(Text)
+    41→    41→
+    42→    42→    # JSON fields for structured data
+    43→    43→    basic_info = Column(JSON)
+    44→    44→    education = Column(JSON)
+    45→    45→    work_experience = Column(JSON)
+    46→    46→    skills = Column(JSON)
+    47→    47→
+    48→    48→    # Metadata
+    49→    49→    first_seen = Column(DateTime, default=_utcnow)
+    50→    50→    last_updated = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    51→    51→    source_search = Column(Text)
+    52→    52→
+    53→    53→    # Relationships
+    54→    54→    messages = relationship("Message", back_populates="candidate")
+    55→    55→
+    56→    56→    def __repr__(self):
+    57→    57→        return f"<Candidate(boss_id='{self.boss_id}', name='{self.name}', company='{self.company}')>"
+    58→    58→
+    59→    59→
+    60→    60→class Message(Base):
+    61→    61→    """Message model - stores sent messages to candidates."""
+    62→    62→
+    63→    63→    __tablename__ = 'messages'
+    64→    64→
+    65→    65→    id = Column(Integer, primary_key=True, autoincrement=True)
+    66→    66→    candidate_boss_id = Column(String(50), ForeignKey('candidates.boss_id'), index=True)
+    67→    67→    template_name = Column(String(100))
+    68→    68→    content = Column(Text, nullable=False)
+    69→    69→    status = Column(String(20), CheckConstraint("status IN ('sent', 'failed', 'cancelled')"))
+    70→    70→    sent_at = Column(DateTime)
+    71→    71→    created_at = Column(DateTime, default=_utcnow)
+    72→    72→
+    73→    73→    # Relationships
+    74→    74→    candidate = relationship("Candidate", back_populates="messages")
+    75→    75→
+    76→    76→    def __repr__(self):
+    77→    77→        return f"<Message(id={self.id}, candidate_id='{self.candidate_boss_id}', status='{self.status}')>"
+    78→    78→
+    79→    79→
+    80→    80→class SearchHistory(Base):
+    81→    81→    """Search history model - tracks all searches performed."""
+    82→    82→
+    83→    83→    __tablename__ = 'search_history'
+    84→    84→
+    85→    85→    id = Column(Integer, primary_key=True, autoincrement=True)
+    86→    86→    criteria = Column(JSON)
+    87→    87→    results_count = Column(Integer, default=0)
+    88→    88→    executed_at = Column(DateTime, default=_utcnow, index=True)
+    89→    89→
+    90→    90→    def __repr__(self):
+    91→    91→        return f"<SearchHistory(id={self.id}, results={self.results_count}, date='{self.executed_at}')>"
+    92→    92→
+    93→    93→
+    94→    94→class ActionLog(Base):
+    95→    95→    """Action log model - tracks all actions for rate limiting."""
+    96→    96→
+    97→    97→    __tablename__ = 'action_logs'
+    98→    98→
+    99→    99→    id = Column(Integer, primary_key=True, autoincrement=True)
+   100→   100→    action_type = Column(String(50), nullable=False)
+   101→   101→    timestamp = Column(DateTime, default=_utcnow, nullable=False)
+   102→   102→    details = Column(JSON)
+   103→   103→
+   104→   104→    __table_args__ = (
+   105→   105→        Index('idx_action_logs_type_time', 'action_type', 'timestamp'),
+   106→   106→    )
+   107→   107→
+   108→   108→    def __repr__(self):
+   109→   109→        return f"<ActionLog(id={self.id}, type='{self.action_type}', time='{self.timestamp}')>"
+   110→   110→
+   111→   111→
+   112→   112→class PipelineRun(Base):
+   113→   113→    """Pipeline run history — tracks each pipeline execution."""
+   114→   114→
+   115→   115→    __tablename__ = 'pipeline_runs'
+   116→   116→
+   117→   117→    id = Column(Integer, primary_key=True, autoincrement=True)
+   118→   118→    task_id = Column(String(50), unique=True, nullable=False, index=True)
+   119→   119→    status = Column(
+   120→   120→        String(20),
+   121→   121→        CheckConstraint("status IN ('running', 'completed', 'cancelled', 'failed')"),
+   122→   122→        default='running',
+   123→   123→    )
+   124→   124→    keywords = Column(JSON)
+   125→   125→    template_name = Column(String(100))
+   126→   126→    params = Column(JSON)
+   127→   127→    result = Column(JSON)
+   128→   128→    started_at = Column(DateTime, default=_utcnow)
+   129→   129→    finished_at = Column(DateTime, nullable=True)
+   130→   130→
+   131→   131→    def __repr__(self):
+   132→   132→        return f"<PipelineRun(task_id='{self.task_id}', status='{self.status}')>"
+   133→   133→
+   134→   134→
+   135→   135→class DatabaseManager:
+   136→   136→    """Database manager for initialization and session management."""
+   137→   137→
+   138→   138→    def __init__(self, db_path: Optional[str] = None):
+   139→   139→        if db_path is None:
+   140→   140→            config = get_config()
+   141→   141→            db_path = config.get('data.database_path', 'data/boss.db')
+   142→   142→
+   143→   143→        db_file = Path(db_path)
+   144→   144→        db_file.parent.mkdir(parents=True, exist_ok=True)
+   145→   145→
+   146→   146→        self.db_path = db_path
+   147→   147→        # NullPool: each session gets a fresh connection, safe for
+   148→   148→        # concurrent Web + background task access to SQLite.
+   149→   149→        self.engine = create_engine(
+   150→   150→            f'sqlite:///{db_path}',
+   151→   151→            echo=False,
+   152→   152→            poolclass=NullPool,
+   153→   153→            connect_args={"check_same_thread": False},
+   154→   154→        )
+   155→   155→        self.Session = sessionmaker(bind=self.engine)
+   156→   156→
+   157→   157→        self.init_db()
+   158→   158→        logger.info(f"Database initialized at: {db_path}")
+   159→   159→
+   160→   160→    def init_db(self):
+   161→   161→        """Create all tables and run pending migrations."""
+   162→   162→        Base.metadata.create_all(self.engine)
+   163→   163→        logger.info("Database tables created successfully")
+   164→   164→
+   165→   165→        from src.models.migrations import run_migrations
+   166→   166→        run_migrations(self.engine)
+   167→   167→
+   168→   168→    @contextmanager
+   169→   169→    def session_scope(self):
+   170→   170→        """Provide a transactional scope with auto commit/rollback/close."""
+   171→   171→        session = self.Session()
+   172→   172→        try:
+   173→   173→            yield session
+   174→   174→            session.commit()
+   175→   175→        except Exception:
+   176→   176→            session.rollback()
+   177→   177→            raise
+   178→   178→        finally:
+   179→   179→            session.close()
+   180→   180→
+   181→   181→    def drop_all(self):
+   182→   182→        """Drop all tables (use with caution!)."""
+   183→   183→        Base.metadata.drop_all(self.engine)
+   184→   184→        logger.warning("All database tables dropped")
+   185→   185→
+   186→   186→
+   187→   187→# Global database manager instance
+   188→   188→_db_manager = None
+   189→   189→
+   190→   190→
+   191→   191→def get_db_manager() -> DatabaseManager:
+   192→   192→    """Get global database manager instance."""
+   193→   193→    global _db_manager
+   194→   194→    if _db_manager is None:
+   195→   195→        _db_manager = DatabaseManager()
+   196→   196→    return _db_manager
+   197→   197→
+   198→   198→
+   199→   199→def reset_db_manager() -> None:
+   200→   200→    """Reset global database manager (for testing)."""
+   201→   201→    global _db_manager
+   202→   202→    _db_manager = None
+   203→   203→

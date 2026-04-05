@@ -1,0 +1,104 @@
+     1→"""Message module for sending messages to candidates.
+     2→
+     3→Handles message template rendering, interactive confirmation,
+     4→and message sending with full audit trail.
+     5→"""
+     6→
+     7→import asyncio
+     8→from datetime import datetime
+     9→from typing import Any, Dict, List, Optional
+    10→
+    11→import questionary
+    12→from patchright.async_api import Page
+    13→from loguru import logger
+    14→from rich.console import Console
+    15→from rich.panel import Panel
+    16→from rich.text import Text
+    17→
+    18→from src.core.browser import BrowserManager, get_browser_manager
+    19→from src.core.anti_detection import human_type, human_click
+    20→from src.modules.auth import ensure_logged_in
+    21→from src.utils.config import get_config
+    22→from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+    23→from src.utils.delays import async_random_delay
+    24→from src.utils.retry import retry_navigation
+    25→from src.utils.validators import validate_maimai_id, validate_template_variables
+    26→from src.models.database import Candidate, Message, get_db_manager
+    27→from src.exceptions.errors import (
+    28→    PermanentFailureError,
+    29→    RateLimitExceededError,
+    30→    ValidationError,
+    31→)
+    32→
+    33→console = Console()
+    34→
+    35→# Maimai profile URL (fallback)
+    36→MAIMAI_PROFILE_URL = "https://maimai.cn/contact/detail/{maimai_id}"
+    37→
+    38→# Maimai chat URL - navigate directly to chat page
+    39→MAIMAI_CHAT_URL = "https://maimai.cn/bizmember/uh_chat_pc?u2={user_id}&from=pc_web_search&fr=profile"
+    40→
+    41→
+    42→def _extract_user_id(profile_url: str) -> Optional[str]:
+    43→    """Extract dstu/user_id from a Maimai profile URL for direct chat navigation.
+    44→
+    45→    Only returns IDs that are known to work with the chat URL (u2= parameter).
+    46→    Query-param IDs (dstu, u2, egid) are reliable for chat navigation.
+    47→    Path-based IDs (/contact/detail/xxx) are NOT the same as chat user IDs
+    48→    and should not be used for direct chat URL construction.
+    49→    """
+    50→    from urllib.parse import urlparse, parse_qs
+    51→    parsed = urlparse(profile_url)
+    52→    params = parse_qs(parsed.query)
+    53→    # Only use query parameter IDs — these are confirmed to work with uh_chat_pc
+    54→    for key in ('dstu', 'u2', 'egid'):
+    55→        if key in params:
+    56→            return params[key][0]
+    57→    return None
+    58→
+    59→
+    60→async def _navigate_to_chat(
+    61→    page: Page,
+    62→    profile_url: Optional[str],
+    63→    config,
+    64→    browser: BrowserManager,
+    65→    maimai_id: str,
+    66→    interactive: bool = False,
+    67→    discovered_selectors=None,
+    68→) -> bool:
+    69→    """Navigate to the chat page for a candidate.
+    70→
+    71→    Tries in order:
+    72→    1. Extract user_id from profile_url query params → direct chat URL
+    73→    2. Navigate to profile_url, extract user_id from redirected URL → direct chat URL
+    74→    3. Click chat button on profile page as fallback
+    75→
+    76→    If no profile_url is provided, looks up the candidate's profile_url from DB.
+    77→
+    78→    Args:
+    79→        page: Playwright page instance
+    80→        profile_url: Candidate's profile URL (may be None)
+    81→        config: Config instance
+    82→        browser: Browser manager instance
+    83→        maimai_id: Candidate's Maimai ID
+    84→        interactive: Enable interactive selector discovery
+    85→        discovered_selectors: Shared DiscoveredSelectors instance
+    86→
+    87→    Returns:
+    88→        True if successfully navigated to chat page
+    89→    """
+    90→    db_manager = get_db_manager()
+    91→
+    92→    # Resolve profile URL from DB if not provided
+    93→    if not profile_url:
+    94→        with db_manager.session_scope() as session:
+    95→            db_candidate = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+    96→            profile_url = db_candidate.profile_url if db_candidate else None
+    97→
+    98→        if not profile_url:
+    99→            raise PermanentFailureError(f"No profile URL for {maimai_id}")
+   100→
+
+<system-reminder>
+Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+</system-reminder>

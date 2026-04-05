@@ -1,0 +1,28 @@
+     1→"""Status route — GET /status (rate limit dashboard)."""
+     2→
+     3→from fastapi import APIRouter, Request
+     4→
+     5→from src.web.app import templates
+     6→from src.utils.rate_limiter import get_rate_limiter
+     7→
+     8→router = APIRouter()
+     9→
+    10→
+    11→@router.get("/")
+    12→async def status_page(request: Request):
+    13→    """Display rate limit quota status."""
+    14→    rate_limiter = get_rate_limiter()
+    15→
+    16→    actions = []
+    17→    for action_type in ['search', 'view_profile', 'send_message']:
+    18→        quota = rate_limiter.get_quota_status(action_type)
+    19→        actions.append(quota)
+    20→
+    21→    throttle = rate_limiter.throttle_factor
+    22→
+    23→    return templates.TemplateResponse("status.html", {
+    24→        "request": request,
+    25→        "actions": actions,
+    26→        "throttle_factor": throttle,
+    27→    })
+    28→

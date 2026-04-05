@@ -1,0 +1,1166 @@
+     1→"""Search module for finding candidates on Maimai.
+     2→
+     3→Handles candidate search with filters, pagination,
+     4→and extraction of basic candidate information.
+     5→"""
+     6→
+     7→from dataclasses import dataclass
+     8→from typing import List, Optional
+     9→from urllib.parse import urlencode
+    10→
+    11→from patchright.async_api import Page
+    12→from loguru import logger
+    13→from rich.console import Console
+    14→from rich.progress import Progress, SpinnerColumn, TextColumn
+    15→
+    16→from src.core.browser import BrowserManager, get_browser_manager
+    17→from src.core.anti_detection import human_scroll, human_type
+    18→from src.modules.auth import ensure_logged_in
+    19→from src.utils.config import get_config
+    20→from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+    21→from src.utils.delays import async_random_delay
+    22→from src.utils.retry import retry_navigation
+    23→from src.utils.validators import validate_keywords
+    24→from src.utils.captcha import check_captcha
+    25→from src.models.database import Candidate, SearchHistory, get_db_manager
+    26→from src.exceptions.errors import (
+    27→    BrowserError,
+    28→    SessionExpiredError,
+    29→    SelectorNotFoundError,
+    30→)
+    31→
+    32→console = Console()
+    33→
+    34→
+    35→# Maimai search URL
+    36→MAIMAI_SEARCH_URL = "https://maimai.cn/web/search_center"
+    37→
+    38→# Names indicating paid/premium-only profiles that should be skipped
+    39→PREMIUM_PLACEHOLDER_NAMES = {"脉脉高价值人脉"}
+    40→
+    41→# Keywords indicating non-R&D roles (to be filtered out)
+    42→NON_RD_KEYWORDS = {
+    43→    "销售", "运营", "产品", "市场", "电子商务", "电商",
+    44→    "商务", "品牌", "公关", "客服", "采购", "招商",
+    45→    "人力", "人事", "HR", "hr", "HRBP", "行政",
+    46→    "财务", "会计", "审计", "法务", "法律", "合规",
+    47→    "内容", "编辑", "翻译", "教育", "培训", "教学",
+    48→    "物流", "供应链", "仓储",
+    49→}
+    50→
+    51→
+    52→
+    53→def _is_non_rd_title(title: str) -> bool:
+    54→    """Check if a title indicates a non-R&D role.
+    55→
+    56→    Strict mode: if any non-R&D keyword appears, filter out regardless of
+    57→    whether R&D keywords are also present (e.g. "技术产品经理" is filtered).
+    58→    Returns False (keep) only if title is empty or contains no non-R&D keywords.
+    59→    """
+    60→    if not title:
+    61→        return False
+    62→
+    63→    # Strict: any non-R&D keyword present → filter out
+    64→    if any(kw in title for kw in NON_RD_KEYWORDS):
+    65→        return True
+    66→
+    67→    return False
+    68→
+    69→
+    70→@dataclass
+    71→class CandidateBasic:
+    72→    """Basic candidate information from search results."""
+    73→    maimai_id: str
+    74→    name: str
+    75→    title: str
+    76→    company: str
+    77→    location: Optional[str] = None
+    78→    profile_url: Optional[str] = None
+    79→    score: Optional[int] = None  # populated by scoring module
+    80→
+    81→
+    82→async def search_candidates(
+    83→    keywords: str,
+    84→    company: Optional[tuple] = None,
+    85→    location: Optional[str] = None,
+    86→    pages: int = 1,
+    87→    start_page: int = 1,
+    88→    browser: Optional[BrowserManager] = None
+    89→) -> List[CandidateBasic]:
+    90→    """
+    91→    Search for candidates on Maimai.
+    92→
+    93→    Args:
+    94→        keywords: Search keywords (e.g., "高级前端工程师")
+    95→        company: Filter by company names, tuple of strings (optional)
+    96→        location: Filter by location (optional)
+    97→        pages: Number of pages to scrape (default 1)
+    98→        start_page: First page number to scrape (default 1)
+    99→        browser: Browser manager instance
+   100→
+   101→    Returns:
+   102→        List of CandidateBasic objects
+   103→
+   104→    Raises:
+   105→        RateLimitExceededError: If rate limit exceeded
+   106→        SelectorNotFoundError: If page elements not found
+   107→    """
+   108→    # Validate inputs
+   109→    validate_keywords(keywords)
+   110→
+   111→    if browser is None:
+   112→        browser = get_browser_manager()
+   113→
+   114→    config = get_config()
+   115→    rate_limiter = get_rate_limiter()
+   116→    db_manager = get_db_manager()
+   117→
+   118→    # Ensure logged in
+   119→    await ensure_logged_in(browser)
+   120→
+   121→    all_candidates: List[CandidateBasic] = []
+   122→
+   123→    with Progress(
+   124→        SpinnerColumn(),
+   125→        TextColumn("[progress.description]{task.description}"),
+   126→        console=console
+   127→    ) as progress:
+   128→
+   129→        end_page = start_page + pages
+   130→        for page_num in range(start_page, end_page):
+   131→            task = progress.add_task(f"Searching page {page_num}/{end_page - 1}...", total=None)
+   132→
+   133→            try:
+   134→                # Check rate limit (waits through min-interval)
+   135→                await async_check_rate_limit('search')
+   136→
+   137→                # Build search URL
+   138→                params = {
+   139→                    'type': 'contact',
+   140→                    'query': keywords,
+   141→                    'highlight': 'true'
+   142→                }
+   143→                if page_num > 1:
+   144→                    params['page'] = str(page_num)
+   145→
+   146→                search_url = f"{MAIMAI_SEARCH_URL}?{urlencode(params)}"
+   147→
+   148→                page = browser.page
+   149→
+   150→                # Navigate to search page
+   151→                # URL includes type=contact, which shows 人脉 results directly
+   152→                await retry_navigation(page, search_url, wait_until='domcontentloaded')
+   153→
+   154→                # Wait for result cards to appear (contactcard_ elements).
+   155→                # IMPORTANT: Maimai's SPA strips URL params after ~5-8s and
+   156→                # clears results.  We must extract BEFORE that happens.
+   157→                # Do NOT wait for networkidle or long delays before extraction.
+   158→                try:
+   159→                    await page.wait_for_function(
+   160→                        '''() => {
+   161→                            const cards = document.querySelectorAll('[id^="contactcard_"]');
+   162→                            return cards.length >= 1;
+   163→                        }''',
+   164→                        timeout=8000,
+   165→                    )
+   166→                except TimeoutError:
+   167→                    logger.debug("Timed out waiting for contactcard elements, proceeding anyway")
+   168→                except Exception as e:
+   169→                    logger.warning(f"Error waiting for contactcard elements: {e}")
+   170→
+   171→                # Extract candidates from this page (time-sensitive)
+   172→                candidates = await _extract_search_results(page, config)
+   173→
+   174→                # Anti-detection: human behavior AFTER extraction
+   175→                await check_captcha(page, report_to_rate_limiter=True)
+   176→                await human_scroll(page, 'down', distance=300)
+   177→                await async_random_delay('action')
+   178→
+   179→                if not candidates:
+   180→                    logger.info(f"No results found on page {page_num}")
+   181→                    await browser.screenshot(f"search_debug_page{page_num}")
+   182→                    progress.update(task, description=f"Page {page_num}: No results")
+   183→                    # Allow one empty page (could be transient), break on second consecutive
+   184→                    if page_num > start_page and not all_candidates:
+   185→                        # First page had no results either — genuinely empty
+   186→                        break
+   187→                    continue
+   188→
+   189→                # Filter out non-R&D roles
+   190→                before_rd_filter = len(candidates)
+   191→                candidates = [c for c in candidates if not _is_non_rd_title(c.title)]
+   192→                rd_filtered = before_rd_filter - len(candidates)
+   193→                if rd_filtered > 0:
+   194→                    logger.info(f"Filtered out {rd_filtered} non-R&D candidates")
+   195→
+   196→                # Apply filters if specified
+   197→                if company:
+   198→                    company_lower = [cn.lower() for cn in company]
+   199→                    candidates = [c for c in candidates if any(cn in c.company.lower() for cn in company_lower)]
+   200→
+   201→                if location:
+   202→                    candidates = [c for c in candidates if c.location and location.lower() in c.location.lower()]
+   203→
+   204→                all_candidates.extend(candidates)
+   205→                progress.update(task, description=f"Page {page_num}: Found {len(candidates)} candidates")
+   206→
+   207→                # Log the action
+   208→                rate_limiter.log_action('search', {
+   209→                    'keywords': keywords,
+   210→                    'page': page_num,
+   211→                    'results': len(candidates)
+   212→                })
+   213→
+   214→                # Save candidates to database
+   215→                try:
+   216→                    _save_candidates_to_db(db_manager, candidates, keywords)
+   217→                except Exception as e:
+   218→                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+   219→
+   220→                # Delay before next page
+   221→                if page_num < end_page - 1:
+   222→                    await async_random_delay('page_load')
+   223→
+   224→            except (BrowserError, SessionExpiredError):
+   225→                raise  # Critical errors must propagate
+   226→            except Exception as e:
+   227→                logger.error(f"Error on page {page_num}: {e}")
+   228→                progress.update(task, description=f"Page {page_num}: Error - {str(e)[:30]}")
+   229→                # Take screenshot for debugging
+   230→                await browser.screenshot(f"search_error_page{page_num}")
+   231→                continue
+   232→
+   233→    # Log search to history
+   234→    _log_search_history(db_manager, keywords, company, location, pages, len(all_candidates))
+   235→
+   236→    console.print(f"[green]Search complete. Found {len(all_candidates)} candidates.[/green]")
+   237→    return all_candidates
+   238→
+   239→
+   240→async def _extract_search_results(page: Page, config) -> List[CandidateBasic]:
+   241→    """
+   242→    Extract candidate information from search results page.
+   243→
+   244→    Args:
+   245→        page: Playwright page instance
+   246→        config: Config instance
+   247→
+   248→    Returns:
+   249→        List of CandidateBasic objects
+   250→    """
+   251→    candidates = []
+   252→
+   253→    # NOTE: The caller (search_candidates) already waits for contactcard_
+   254→    # elements before calling this function.  Maimai's SPA strips URL
+   255→    # params within ~5-8s and clears results, so we must NOT add long
+   256→    # waits here (no networkidle, no loading-text polling).
+   257→
+   258→    try:
+   259→        # Strategy: Extract candidates by finding avatar images and their associated text
+   260→        candidates_data = await page.evaluate('''() => {
+   261→            const candidates = [];
+   262→            const seenNames = new Set();
+   263→
+   264→            // Find all images that look like avatars
+   265→            const images = document.querySelectorAll('img');
+   266→
+   267→            for (const img of images) {
+   268→                // Skip large images (probably not avatars)
+   269→                const rect = img.getBoundingClientRect();
+   270→                if (rect.width > 100 || rect.height > 100) continue;
+   271→                if (rect.width < 20 || rect.height < 20) continue;
+   272→
+   273→                // Find parent container (the card)
+   274→                let card = img.parentElement;
+   275→                for (let i = 0; i < 8 && card; i++) {
+   276→                    const cardRect = card.getBoundingClientRect();
+   277→                    // Look for a reasonable card size
+   278→                    if (cardRect.width > 200 && cardRect.height > 50 && cardRect.height < 200) {
+   279→                        break;
+   280→                    }
+   281→                    card = card.parentElement;
+   282→                }
+   283→
+   284→                if (!card) continue;
+   285→
+   286→                // Get all text nodes from card, preserving order
+   287→                const textParts = [];
+   288→                const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT, null, false);
+   289→                while (walker.nextNode()) {
+   290→                    const text = walker.currentNode.textContent.trim();
+   291→                    if (text && text.length > 0 && text.length < 100) {
+   292→                        textParts.push(text);
+   293→                    }
+   294→                }
+   295→
+   296→                // Parse candidate info from text parts
+   297→                // Pattern: Name, Activity time, Company+Position, Industry|Department
+   298→                let name = '';
+   299→                let company = '';
+   300→                let title = '';
+   301→                let industry = '';
+   302→
+   303→                // Compound job title patterns (longer patterns first for greedy match)
+   304→                const jobPatterns = [
+   305→                    // Compound titles with prefix modifiers
+   306→                    /(?:高级|资深|首席|初级|中级|senior|junior|staff|principal|lead)?\s*(?:前端|后端|全栈|web|Web|iOS|Android|Java|Python|Go|C\+\+|PHP|.NET|算法|数据|AI|机器学习|深度学习|NLP|大数据|云计算|DevOps|SRE|安全|测试|嵌入式|移动端|客户端|服务端|区块链|具身智能|自动驾驶|机器人)?\s*(?:工程师|开发|架构师|专家|技术经理|技术总监|技术负责人|Tech\s*Lead)/i,
+   307→                    // Management titles
+   308→                    /(?:技术|产品|运营|市场|销售|人力|财务|行政|项目|研发)?\s*(?:总监|经理|主管|负责人|VP|总裁|副总|合伙人|创始人|董事|CEO|CTO|COO|CFO|CMO|CHO|CIO)/i,
+   309→                    // Other roles
+   310→                    /(?:产品|UI|UX|交互|视觉)?\s*(?:设计师|分析师|顾问|运营|助理|实习生?)/i,
+   311→                ];
+   312→
+   313→                // Patterns for text that should be skipped
+   314→                const skipPatterns = [
+   315→                    /^[+＋]\s*好友$/,          // "+ 好友" button
+   316→                    /^\d+个共同好友$/,           // "1个共同好友" social label
+   317→                    /^共同好友/,                 // "共同好友..." variants
+   318→                    /^已关注$/,                  // "已关注" button
+   319→                    /^添加好友$/,                // "添加好友" button
+   320→                    /^关注$/,                    // "关注" button
+   321→                    /^好友$/,                    // "好友" label
+   322→                    /^[|｜·]$/,                  // separators
+   323→                ];
+   324→
+   325→                const isSkippable = (text) => {
+   326→                    if (skipPatterns.some(p => p.test(text))) return true;
+   327→                    // Activity time
+   328→                    if (/天前|小时前|分钟前|刚刚|活跃|在线/.test(text)) return true;
+   329→                    return false;
+   330→                };
+   331→
+   332→                for (let i = 0; i < textParts.length; i++) {
+   333→                    const part = textParts[i];
+   334→
+   335→                    if (isSkippable(part)) continue;
+   336→
+   337→                    // First short text (2-15 chars, pure CJK/letters) is likely the name
+   338→                    if (!name && part.length >= 2 && part.length <= 15) {
+   339→                        if (/^[\u4e00-\u9fa5a-zA-Z·\s]+$/.test(part)) {
+   340→                            name = part;
+   341→                            continue;
+   342→                        }
+   343→                    }
+   344→
+   345→                    // After name, next substantial text is company+position
+   346→                    if (name && !company && part.length > 2) {
+   347→                        // Try to split company and position using regex patterns
+   348→                        let splitDone = false;
+   349→                        for (const pattern of jobPatterns) {
+   350→                            const match = part.match(pattern);
+   351→                            if (match && match.index > 0) {
+   352→                                company = part.substring(0, match.index).trim();
+   353→                                title = match[0].trim();
+   354→                                splitDone = true;
+   355→                                break;
+   356→                            }
+   357→                        }
+   358→                        if (!splitDone) {
+   359→                            company = part;
+   360→                        }
+   361→                        continue;
+   362→                    }
+   363→
+   364→                    // Next part is industry|department info
+   365→                    if (name && company && !industry && part.length > 2) {
+   366→                        industry = part;
+   367→                        // If title wasn't split from company, use industry as fallback context
+   368→                        if (!title) {
+   369→                            title = industry;
+   370→                        }
+   371→                        break;
+   372→                    }
+   373→                }
+   374→
+   375→                // Skip if no name found or premium placeholder
+   376→                if (!name) continue;
+   377→                if (name === '脉脉高价值人脉') continue;
+   378→
+   379→                // Extract user ID from DOM patterns on card and ancestor elements.
+   380→                // Two patterns exist:
+   381→                //   1. contactcard_{numeric_id} — on ancestors (colleagues layout)
+   382→                //   2. member_entry_{numeric_id} — on descendants (standard layout)
+   383→                let userId = '';
+   384→
+   385→                // Check ancestors for numeric contactcard_{id}
+   386→                let el = card;
+   387→                while (el) {
+   388→                    const elId = el.id || '';
+   389→                    const ccMatch = elId.match(/^contactcard_(\d+)$/);
+   390→                    if (ccMatch) {
+   391→                        userId = ccMatch[1];
+   392→                        break;
+   393→                    }
+   394→                    el = el.parentElement;
+   395→                }
+   396→
+   397→                // Check descendants for member_entry_{id} (most common pattern)
+   398→                if (!userId) {
+   399→                    const meEl = card.querySelector('[id^="member_entry_"]');
+   400→                    if (meEl) {
+   401→                        const meMatch = meEl.id.match(/^member_entry_(\d+)$/);
+   402→                        if (meMatch) {
+   403→                            userId = meMatch[1];
+   404→                        }
+   405→                    }
+   406→                }
+   407→
+   408→                // Also check ancestor descendants for contactcard with numeric ID
+   409→                if (!userId) {
+   410→                    const ccEl = card.querySelector('[id^="contactcard_"]');
+   411→                    if (ccEl) {
+   412→                        const ccMatch = ccEl.id.match(/^contactcard_(\d+)$/);
+   413→                        if (ccMatch) {
+   414→                            userId = ccMatch[1];
+   415→                        }
+   416→                    }
+   417→                }
+   418→
+   419→                // Use real user_id as maimai_id when available, fall back to hash
+   420→                let maimaiId;
+   421→                if (userId) {
+   422→                    maimaiId = 'mm_' + userId;
+   423→                } else {
+   424→                    const idSource = (name || '') + '|' + (company || '') + '|' + (title || '');
+   425→                    let hash = 0;
+   426→                    for (let j = 0; j < idSource.length; j++) {
+   427→                        const ch = idSource.charCodeAt(j);
+   428→                        hash = ((hash << 5) - hash) + ch;
+   429→                        hash = hash & hash; // Convert to 32bit integer
+   430→                    }
+   431→                    maimaiId = 'mm_' + Math.abs(hash).toString(16).padStart(8, '0');
+   432→                }
+   433→
+   434→                // Skip duplicates based on the computed ID
+   435→                if (seenNames.has(maimaiId)) continue;
+   436→                seenNames.add(maimaiId);
+   437→
+   438→                // Build profile URL from user ID when available
+   439→                let profileUrl = '';
+   440→                if (userId) {
+   441→                    profileUrl = 'https://maimai.cn/contact/detail/' + userId + '?dstu=' + userId;
+   442→                }
+   443→
+   444→                // Fallback: extract profile URL from <a> tags inside the card
+   445→                if (!profileUrl) {
+   446→                    let fallbackUrl = '';
+   447→
+   448→                    // First: check <a> ancestors between img and card
+   449→                    let ancestor = img.parentElement;
+   450→                    while (ancestor && ancestor !== card) {
+   451→                        if (ancestor.tagName === 'A' && ancestor.href) {
+   452→                            const href = ancestor.getAttribute('href') || '';
+   453→                            if (href.includes('/profile/detail') || href.includes('/contact/detail/') || href.includes('/u/') || href.includes('egid=') || href.includes('dstu=')) {
+   454→                                profileUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+   455→                                break;
+   456→                            }
+   457→                        }
+   458→                        ancestor = ancestor.parentElement;
+   459→                    }
+   460→
+   461→                    // Second: search all <a> descendants inside the card
+   462→                    if (!profileUrl) {
+   463→                        const links = card.querySelectorAll('a[href]');
+   464→                        for (const link of links) {
+   465→                            const href = link.getAttribute('href') || '';
+   466→                            if (href.includes('/profile/detail') || href.includes('/contact/detail/') || href.includes('/u/') || href.includes('egid=') || href.includes('dstu=')) {
+   467→                                profileUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+   468→                                break;
+   469→                            }
+   470→                            if (!fallbackUrl && href && !href.startsWith('javascript:') && (href.startsWith('/') || href.includes('maimai.cn'))) {
+   471→                                fallbackUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+   472→                            }
+   473→                        }
+   474→                    }
+   475→                    if (!profileUrl && fallbackUrl) {
+   476→                        profileUrl = fallbackUrl;
+   477→                    }
+   478→                }
+   479→
+   480→                // Extract location: look for remaining short text parts after name/company/title
+   481→                // Common patterns: city names like "北京", "上海", "深圳" etc.
+   482→                let location = '';
+   483→                const locationPatterns = /^(北京|上海|广州|深圳|杭州|成都|南京|武汉|西安|苏州|长沙|天津|重庆|郑州|东莞|青岛|大连|宁波|厦门|合肥|佛山|福州|昆明|济南|珠海|无锡|常州|海外|远程|香港|台北|新加坡|美国|日本|韩国|英国|全国|其他)/;
+   484→                for (let i = 0; i < textParts.length; i++) {
+   485→                    const part = textParts[i];
+   486→                    if (part === name || part === company || part === title || part === industry) continue;
+   487→                    if (isSkippable(part)) continue;
+   488→                    if (locationPatterns.test(part) && part.length <= 10) {
+   489→                        location = part;
+   490→                        break;
+   491→                    }
+   492→                }
+   493→
+   494→                candidates.push({
+   495→                    name: name,
+   496→                    title: title || '',
+   497→                    company: company || '',
+   498→                    maimai_id: maimaiId,
+   499→                    profile_url: profileUrl,
+   500→                    location: location,
+   501→                });
+   502→            }
+   503→
+   504→            return candidates;
+   505→        }''')
+   506→
+   507→        logger.info(f"JavaScript extraction found {len(candidates_data)} candidates")
+   508→
+   509→        for data in candidates_data:
+   510→            if data.get('name'):
+   511→                candidates.append(CandidateBasic(
+   512→                    maimai_id=data.get('maimai_id', ''),
+   513→                    name=data.get('name', ''),
+   514→                    title=data.get('title', ''),
+   515→                    company=data.get('company', ''),
+   516→                    location=data.get('location', ''),
+   517→                    profile_url=data.get('profile_url', '')
+   518→                ))
+   519→
+   520→        # For candidates missing profile_url, try extracting from contactcard DOM
+   521→        missing_url = [c for c in candidates if not c.profile_url]
+   522→        if missing_url:
+   523→            logger.info(f"{len(missing_url)} candidates missing profile_url, searching contactcard DOM")
+   524→            for c in missing_url:
+   525→                try:
+   526→                    profile_url = await _click_avatar_for_profile_url(page, c.name, c.company)
+   527→                    if profile_url:
+   528→                        c.profile_url = profile_url
+   529→                except Exception as e:
+   530→                    logger.debug(f"Contactcard lookup failed for '{c.name}': {e}")
+   531→
+   532→        # Fallback: Strategy 1 - Find all profile links directly
+   533→        if not candidates:
+   534→            profile_links = await page.query_selector_all('a[href*="/contact/"], a[href*="/u/"], a[href*="egid="], a[href*="profile"]')
+   535→        else:
+   536→            profile_links = []
+   537→
+   538→        if profile_links and not candidates:
+   539→            logger.debug(f"Found {len(profile_links)} profile links")
+   540→
+   541→            seen_ids = set()
+   542→            for link in profile_links:
+   543→                try:
+   544→                    href = await link.get_attribute('href')
+   545→                    if not href:
+   546→                        continue
+   547→
+   548→                    # Extract maimai_id from URL
+   549→                    maimai_id = None
+   550→                    if '/contact/detail/' in href:
+   551→                        maimai_id = href.split('/contact/detail/')[-1].split('?')[0].split('/')[0]
+   552→                    elif '/u/' in href:
+   553→                        maimai_id = href.split('/u/')[-1].split('?')[0].split('/')[0]
+   554→
+   555→                    if not maimai_id or maimai_id in seen_ids:
+   556→                        continue
+   557→                    seen_ids.add(maimai_id)
+   558→
+   559→                    # Get name from link text
+   560→                    name = await link.inner_text()
+   561→                    name = name.strip()
+   562→                    if not name or len(name) > 50:  # Skip if no name or too long (probably not a name)
+   563→                        continue
+   564→
+   565→                    # Try to get parent container for more info
+   566→                    parent = await link.evaluate_handle('el => el.closest("div, li, article") || el.parentElement.parentElement')
+   567→
+   568→                    title = ""
+   569→                    company = ""
+   570→
+   571→                    if parent:
+   572→                        # Get all text content and try to parse
+   573→                        try:
+   574→                            full_text = await parent.inner_text()
+   575→                            lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+   576→
+   577→                            # Usually: name, then title/company info
+   578→                            for line in lines:
+   579→                                if line == name:
+   580→                                    continue
+   581→                                if '好友' in line or '关注' in line:
+   582→                                    continue
+   583→                                if not title and len(line) < 50:
+   584→                                    title = line
+   585→                                elif not company and len(line) < 50:
+   586→                                    company = line
+   587→                                    break
+   588→                        except Exception:
+   589→                            pass  # Best-effort text parsing; proceed with partial data
+   590→
+   591→                    profile_url = href if href.startswith('http') else f"https://maimai.cn{href}"
+   592→
+   593→                    candidates.append(CandidateBasic(
+   594→                        maimai_id=maimai_id,
+   595→                        name=name,
+   596→                        title=title,
+   597→                        company=company,
+   598→                        profile_url=profile_url
+   599→                    ))
+   600→
+   601→                except Exception as e:
+   602→                    logger.debug(f"Failed to extract from link: {e}")
+   603→                    continue
+   604→
+   605→        # Strategy 2: If no links found, try button-based detection
+   606→        if not candidates:
+   607→            logger.debug("Trying button-based detection")
+   608→            buttons = await page.query_selector_all('button:has-text("好友"), button:has-text("关注")')
+   609→
+   610→            for button in buttons:
+   611→                try:
+   612→                    parent = await button.evaluate_handle('el => el.closest("div, li, article")')
+   613→                    if not parent:
+   614→                        continue
+   615→
+   616→                    # Find link in parent
+   617→                    link = await parent.query_selector('a[href*="/contact"], a[href*="/u/"]')
+   618→                    if link:
+   619→                        href = await link.get_attribute('href')
+   620→                        name = await link.inner_text()
+   621→
+   622→                        maimai_id = None
+   623→                        if '/contact/detail/' in href:
+   624→                            maimai_id = href.split('/contact/detail/')[-1].split('?')[0]
+   625→                        elif '/u/' in href:
+   626→                            maimai_id = href.split('/u/')[-1].split('?')[0]
+   627→
+   628→                        if maimai_id and name:
+   629→                            candidates.append(CandidateBasic(
+   630→                                maimai_id=maimai_id,
+   631→                                name=name.strip(),
+   632→                                title="",
+   633→                                company="",
+   634→                                profile_url=href
+   635→                            ))
+   636→                except Exception:
+   637→                    continue
+   638→
+   639→        # Filter out premium placeholder profiles
+   640→        before_filter = len(candidates)
+   641→        candidates = [c for c in candidates if c.name not in PREMIUM_PLACEHOLDER_NAMES]
+   642→        filtered_count = before_filter - len(candidates)
+   643→        if filtered_count > 0:
+   644→            logger.info(f"Filtered out {filtered_count} premium placeholder profiles")
+   645→
+   646→        logger.info(f"Extracted {len(candidates)} candidates from page")
+   647→
+   648→    except Exception as e:
+   649→        logger.error(f"Error extracting search results: {e}")
+   650→        console.print(f"[yellow]Warning: Search result extraction failed: {e}[/yellow]")
+   651→
+   652→    return candidates
+   653→
+   654→
+   655→def _save_candidates_to_db(db_manager, candidates: List[CandidateBasic], source_search: str) -> None:
+   656→    """
+   657→    Save or update candidates in database.
+   658→
+   659→    Args:
+   660→        db_manager: Database manager instance
+   661→        candidates: List of candidates to save
+   662→        source_search: Search keywords that found these candidates
+   663→    """
+   664→    try:
+   665→        with db_manager.session_scope() as session:
+   666→            # Batch pre-fetch existing candidates to avoid N+1 queries
+   667→            maimai_ids = [c.maimai_id for c in candidates]
+   668→            existing_by_id = {
+   669→                row.maimai_id: row
+   670→                for row in session.query(Candidate).filter(
+   671→                    Candidate.maimai_id.in_(maimai_ids)
+   672→                ).all()
+   673→            }
+   674→
+   675→            # Also batch-fetch by name+company for dedup
+   676→            name_company_pairs = [(c.name, c.company) for c in candidates]
+   677→            from sqlalchemy import tuple_
+   678→            existing_by_name = {}
+   679→            if name_company_pairs:
+   680→                for row in session.query(Candidate).filter(
+   681→                    tuple_(Candidate.name, Candidate.company).in_(name_company_pairs)
+   682→                ).all():
+   683→                    existing_by_name[(row.name, row.company)] = row
+   684→
+   685→            for c in candidates:
+   686→                existing = existing_by_id.get(c.maimai_id)
+   687→                if not existing:
+   688→                    existing = existing_by_name.get((c.name, c.company))
+   689→
+   690→                if existing:
+   691→                    existing.name = c.name
+   692→                    existing.title = c.title
+   693→                    existing.company = c.company
+   694→                    existing.location = c.location
+   695→                    existing.profile_url = c.profile_url
+   696→                else:
+   697→                    candidate = Candidate(
+   698→                        maimai_id=c.maimai_id,
+   699→                        name=c.name,
+   700→                        title=c.title,
+   701→                        company=c.company,
+   702→                        location=c.location,
+   703→                        profile_url=c.profile_url,
+   704→                        source_search=source_search
+   705→                    )
+   706→                    session.add(candidate)
+   707→
+   708→            logger.debug(f"Saved {len(candidates)} candidates to database")
+   709→
+   710→    except Exception as e:
+   711→        logger.error(f"Failed to save candidates to database: {e}")
+   712→        raise
+   713→
+   714→
+   715→def _log_search_history(
+   716→    db_manager,
+   717→    keywords: str,
+   718→    company: Optional[tuple],
+   719→    location: Optional[str],
+   720→    pages: int,
+   721→    results_count: int
+   722→) -> None:
+   723→    """Log search to history table."""
+   724→    try:
+   725→        with db_manager.session_scope() as session:
+   726→            history = SearchHistory(
+   727→                criteria={
+   728→                    'keywords': keywords,
+   729→                    'company': list(company) if company else None,
+   730→                    'location': location,
+   731→                    'pages': pages
+   732→                },
+   733→                results_count=results_count
+   734→            )
+   735→            session.add(history)
+   736→    except Exception as e:
+   737→        logger.error(f"Failed to log search history: {e}")
+   738→
+   739→
+   740→async def _click_avatar_for_profile_url(page: Page, name: str, company: str) -> Optional[str]:
+   741→    """Try to extract profile URL for a candidate from the DOM contactcard pattern.
+   742→
+   743→    Searches the current page for a contactcard element whose parent card
+   744→    contains the candidate's name (and optionally company), then constructs
+   745→    the profile URL from the extracted user ID.
+   746→
+   747→    Args:
+   748→        page: Playwright page on the search results
+   749→        name: Candidate name to match
+   750→        company: Candidate company to help disambiguate
+   751→
+   752→    Returns:
+   753→        Profile URL string, or None if not found
+   754→    """
+   755→    try:
+   756→        user_id = await page.evaluate('''(args) => {
+   757→            const { name, company } = args;
+   758→            // Check contactcard_{numeric_id} ancestors
+   759→            const ccElements = document.querySelectorAll('[id^="contactcard_"]');
+   760→            for (const el of ccElements) {
+   761→                const text = el.textContent || '';
+   762→                if (!text.includes(name)) continue;
+   763→                if (company && !text.includes(company)) continue;
+   764→                const match = el.id.match(/^contactcard_(\\d+)$/);
+   765→                if (match) return match[1];
+   766→            }
+   767→            // Check member_entry_{numeric_id} descendants
+   768→            const meElements = document.querySelectorAll('[id^="member_entry_"]');
+   769→            for (const el of meElements) {
+   770→                // Walk up to find the card containing this member_entry
+   771→                let card = el.parentElement;
+   772→                for (let i = 0; i < 8 && card; i++) {
+   773→                    const text = card.textContent || '';
+   774→                    if (text.includes(name) && (!company || text.includes(company))) {
+   775→                        const match = el.id.match(/^member_entry_(\\d+)$/);
+   776→                        if (match) return match[1];
+   777→                    }
+   778→                    card = card.parentElement;
+   779→                }
+   780→            }
+   781→            return null;
+   782→        }''', {'name': name, 'company': company})
+   783→
+   784→        if user_id:
+   785→            profile_url = f"https://maimai.cn/contact/detail/{user_id}?dstu={user_id}"
+   786→            logger.info(f"Resolved profile_url for '{name}' via contactcard: {profile_url}")
+   787→            return profile_url
+   788→
+   789→        logger.debug(f"No contactcard found for '{name}'")
+   790→        return None
+   791→
+   792→    except Exception as e:
+   793→        logger.debug(f"_click_avatar_for_profile_url error for '{name}': {e}")
+   794→        return None
+   795→
+   796→
+   797→# ---------------------------------------------------------------------------
+   798→# Enterprise recruitment path (Path B)
+   799→# ---------------------------------------------------------------------------
+   800→
+   801→MAIMAI_HOME_URL = "https://maimai.cn"
+   802→ENTERPRISE_URL_MARKER = "ent/talents/discover"
+   803→
+   804→
+   805→async def search_candidates_enterprise(
+   806→    keywords: str,
+   807→    company: Optional[tuple] = None,
+   808→    pages: int = 1,
+   809→    browser: Optional[BrowserManager] = None,
+   810→    keep_tab_open: bool = False,
+   811→) -> List[CandidateBasic]:
+   812→    """Search for candidates via the enterprise recruitment path.
+   813→
+   814→    Flow:
+   815→    1. Switch to primary tab -> navigate to homepage -> click "招聘" tab (opens new tab)
+   816→    2. Wait for enterprise page to load
+   817→    3. Add keyword filter -> submit
+   818→    4. Optionally add company filter
+   819→    5. Extract candidates from enterprise card layout
+   820→    6. For additional pages, scroll to trigger infinite scroll
+   821→    7. Close enterprise tab unless keep_tab_open is True
+   822→
+   823→    Args:
+   824→        keywords: Search keywords
+   825→        company: Filter by company names (optional)
+   826→        pages: Number of scroll-pages to extract
+   827→        browser: Browser manager instance
+   828→        keep_tab_open: If True, leave enterprise tab open (for inline messaging)
+   829→
+   830→    Returns:
+   831→        List of CandidateBasic objects
+   832→    """
+   833→    validate_keywords(keywords)
+   834→
+   835→    if browser is None:
+   836→        browser = get_browser_manager()
+   837→
+   838→    config = get_config()
+   839→    rate_limiter = get_rate_limiter()
+   840→    db_manager = get_db_manager()
+   841→
+   842→    await ensure_logged_in(browser)
+   843→
+   844→    all_candidates: List[CandidateBasic] = []
+   845→    enterprise_tab_opened = False
+   846→
+   847→    with Progress(
+   848→        SpinnerColumn(),
+   849→        TextColumn("[progress.description]{task.description}"),
+   850→        console=console,
+   851→    ) as progress:
+   852→        task = progress.add_task("Opening enterprise recruitment...", total=None)
+   853→
+   854→        try:
+   855→            await async_check_rate_limit("search")
+   856→
+   857→            # Always start from the primary tab to avoid navigating user's open content
+   858→            browser.switch_to_primary_tab()
+   859→            page = browser.page
+   860→
+   861→            # Step 1: Navigate to homepage and click 招聘 tab
+   862→            await retry_navigation(page, MAIMAI_HOME_URL, wait_until="domcontentloaded")
+   863→            await async_random_delay("page_load")
+   864→
+   865→            sel = config.get_selector("enterprise.recruitment_tab")
+   866→            recruitment_tab = await page.wait_for_selector(sel, timeout=5000)
+   867→            if not recruitment_tab:
+   868→                raise SelectorNotFoundError(f"Could not find recruitment tab: {sel}")
+   869→
+   870→            # Click opens a new tab — use BrowserManager API
+   871→            await recruitment_tab.click()
+   872→            page = await browser.wait_for_new_tab(timeout=15000)
+   873→            enterprise_tab_opened = True
+   874→
+   875→            progress.update(task, description="Enterprise page loaded")
+   876→
+   877→            # Wait for the enterprise page URL
+   878→            try:
+   879→                await page.wait_for_url(
+   880→                    lambda url: ENTERPRISE_URL_MARKER in url,
+   881→                    timeout=15000,
+   882→                )
+   883→            except Exception:
+   884→                logger.warning(f"Enterprise URL marker not found, current URL: {page.url}")
+   885→
+   886→            await async_random_delay("action")
+   887→
+   888→            # Step 2: Add keyword
+   889→            progress.update(task, description=f"Adding keyword: {keywords}")
+   890→
+   891→            add_kw_sel = config.get_selector("enterprise.add_keyword_button")
+   892→            add_kw_btn = await page.wait_for_selector(add_kw_sel, timeout=5000)
+   893→            if add_kw_btn:
+   894→                await add_kw_btn.click()
+   895→                await async_random_delay("action")
+   896→
+   897→            kw_input_sel = config.get_selector("enterprise.keyword_input")
+   898→            await page.wait_for_selector(kw_input_sel, timeout=5000)
+   899→            await human_type(page, kw_input_sel, keywords)
+   900→            await async_random_delay("action")
+   901→
+   902→            kw_submit_sel = config.get_selector("enterprise.keyword_submit")
+   903→            submit_btn = await page.wait_for_selector(kw_submit_sel, timeout=3000)
+   904→            if submit_btn:
+   905→                await submit_btn.click()
+   906→                await async_random_delay("page_load")
+   907→
+   908→            # Step 3: Add company filter if specified
+   909→            if company:
+   910→                progress.update(task, description="Adding company filter...")
+   911→                add_co_sel = config.get_selector("enterprise.add_company_button")
+   912→                add_co_btn = await page.wait_for_selector(add_co_sel, timeout=5000)
+   913→                if add_co_btn:
+   914→                    await add_co_btn.click()
+   915→                    await async_random_delay("action")
+   916→
+   917→                co_input_sel = config.get_selector("enterprise.company_input")
+   918→                for co_name in company:
+   919→                    await page.wait_for_selector(co_input_sel, timeout=5000)
+   920→                    await human_type(page, co_input_sel, co_name)
+   921→                    await async_random_delay("action")
+   922→
+   923→                    # Click suggestion dropdown item
+   924→                    try:
+   925→                        suggestion = await page.wait_for_selector(
+   926→                            f"text='{co_name}'", timeout=3000
+   927→                        )
+   928→                        if suggestion:
+   929→                            await suggestion.click()
+   930→                            await async_random_delay("action")
+   931→                    except Exception:
+   932→                        logger.debug(f"Company suggestion not found for: {co_name}")
+   933→
+   934→            # Step 4: Wait for results and extract
+   935→            await page.wait_for_timeout(3000)
+   936→            await check_captcha(page, report_to_rate_limiter=True)
+   937→
+   938→            for page_num in range(1, pages + 1):
+   939→                progress.update(task, description=f"Extracting page {page_num}/{pages}...")
+   940→
+   941→                candidates = await _extract_enterprise_results(page)
+   942→
+   943→                if not candidates:
+   944→                    logger.info(f"No enterprise results on page {page_num}")
+   945→                    break
+   946→
+   947→                # Filter non-R&D roles
+   948→                before_filter = len(candidates)
+   949→                candidates = [c for c in candidates if not _is_non_rd_title(c.title)]
+   950→                filtered = before_filter - len(candidates)
+   951→                if filtered > 0:
+   952→                    logger.info(f"Filtered out {filtered} non-R&D candidates")
+   953→
+   954→                all_candidates.extend(candidates)
+   955→                progress.update(task, description=f"Page {page_num}: Found {len(candidates)} candidates")
+   956→
+   957→                rate_limiter.log_action("search", {
+   958→                    "keywords": keywords,
+   959→                    "page": page_num,
+   960→                    "results": len(candidates),
+   961→                    "mode": "enterprise",
+   962→                })
+   963→
+   964→                try:
+   965→                    _save_candidates_to_db(db_manager, candidates, keywords)
+   966→                except Exception as e:
+   967→                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+   968→
+   969→                # Scroll for next page (infinite scroll)
+   970→                if page_num < pages:
+   971→                    await human_scroll(page, "down", distance=800)
+   972→                    await async_random_delay("page_load")
+   973→                    await page.wait_for_timeout(2000)
+   974→
+   975→        except Exception as e:
+   976→            logger.error(f"Enterprise search error: {e}")
+   977→            await browser.screenshot("enterprise_search_error")
+   978→            progress.update(task, description=f"Error: {str(e)[:40]}")
+   979→        finally:
+   980→            # Close the enterprise tab unless caller wants it open for inline messaging
+   981→            if enterprise_tab_opened and not keep_tab_open:
+   982→                try:
+   983→                    await browser.close_current_tab()
+   984→                except Exception:
+   985→                    pass  # Best-effort cleanup; tab may already be closed
+   986→
+   987→    _log_search_history(db_manager, keywords, company, None, pages, len(all_candidates))
+   988→
+   989→    console.print(f"[green]Enterprise search complete. Found {len(all_candidates)} candidates.[/green]")
+   990→    return all_candidates
+   991→
+   992→
+   993→async def _extract_enterprise_results(page: Page) -> List[CandidateBasic]:
+   994→    """Extract candidate information from enterprise recruitment results page.
+   995→
+   996→    The enterprise UI has a different card layout from search_center.
+   997→    Uses JS-based extraction tailored to the enterprise talent cards.
+   998→
+   999→    Args:
+  1000→        page: Playwright page instance on the enterprise results page
+  1001→
+  1002→    Returns:
+  1003→        List of CandidateBasic objects
+  1004→    """
+  1005→    candidates = []
+  1006→
+  1007→    try:
+  1008→        await page.wait_for_load_state("networkidle", timeout=10000)
+  1009→    except Exception:
+  1010→        pass  # Continue even if networkidle times out
+  1011→
+  1012→    try:
+  1013→        candidates_data = await page.evaluate('''() => {
+  1014→            const candidates = [];
+  1015→            const seenIds = new Set();
+  1016→
+  1017→            // Enterprise talent cards typically have a structured layout
+  1018→            // Try multiple selectors for the card containers
+  1019→            const cardSelectors = [
+  1020→                '[class*="talent-card"]',
+  1021→                '[class*="candidate-card"]',
+  1022→                '[class*="recommend-card"]',
+  1023→                '[class*="talent-item"]',
+  1024→                '[class*="card-wrap"]',
+  1025→            ];
+  1026→
+  1027→            let cards = [];
+  1028→            for (const sel of cardSelectors) {
+  1029→                cards = document.querySelectorAll(sel);
+  1030→                if (cards.length > 0) break;
+  1031→            }
+  1032→
+  1033→            // Fallback: find cards by avatar image pattern (same as search_center)
+  1034→            if (cards.length === 0) {
+  1035→                const images = document.querySelectorAll('img');
+  1036→                const foundCards = [];
+  1037→
+  1038→                for (const img of images) {
+  1039→                    const rect = img.getBoundingClientRect();
+  1040→                    if (rect.width > 100 || rect.height > 100) continue;
+  1041→                    if (rect.width < 30 || rect.height < 30) continue;
+  1042→
+  1043→                    let card = img.parentElement;
+  1044→                    for (let i = 0; i < 8 && card; i++) {
+  1045→                        const cardRect = card.getBoundingClientRect();
+  1046→                        if (cardRect.width > 200 && cardRect.height > 80) {
+  1047→                            break;
+  1048→                        }
+  1049→                        card = card.parentElement;
+  1050→                    }
+  1051→                    if (card) foundCards.push(card);
+  1052→                }
+  1053→                cards = foundCards;
+  1054→            }
+  1055→
+  1056→            for (const card of cards) {
+  1057→                const textParts = [];
+  1058→                const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT, null, false);
+  1059→                while (walker.nextNode()) {
+  1060→                    const text = walker.currentNode.textContent.trim();
+  1061→                    if (text && text.length > 0 && text.length < 100) {
+  1062→                        textParts.push(text);
+  1063→                    }
+  1064→                }
+  1065→
+  1066→                let name = '';
+  1067→                let company = '';
+  1068→                let title = '';
+  1069→
+  1070→                const skipPatterns = [
+  1071→                    /^立即沟通$/,
+  1072→                    /^不合适$/,
+  1073→                    /^感兴趣$/,
+  1074→                    /^不感兴趣$/,
+  1075→                    /^(\\d+\\s*)?年/,
+  1076→                    /^[|｜·]$/,
+  1077→                    /^在线|^离线|^活跃/,
+  1078→                ];
+  1079→
+  1080→                const isSkippable = (text) => {
+  1081→                    return skipPatterns.some(p => p.test(text));
+  1082→                };
+  1083→
+  1084→                for (let i = 0; i < textParts.length; i++) {
+  1085→                    const part = textParts[i];
+  1086→                    if (isSkippable(part)) continue;
+  1087→
+  1088→                    if (!name && part.length >= 2 && part.length <= 15) {
+  1089→                        if (/^[\\u4e00-\\u9fa5a-zA-Z·\\s]+$/.test(part)) {
+  1090→                            name = part;
+  1091→                            continue;
+  1092→                        }
+  1093→                    }
+  1094→
+  1095→                    if (name && !company && part.length > 1) {
+  1096→                        company = part;
+  1097→                        continue;
+  1098→                    }
+  1099→
+  1100→                    if (name && company && !title && part.length > 1) {
+  1101→                        title = part;
+  1102→                        break;
+  1103→                    }
+  1104→                }
+  1105→
+  1106→                if (!name) continue;
+  1107→
+  1108→                const idSource = (name || '') + '|' + (company || '') + '|' + (title || '');
+  1109→                let hash = 0;
+  1110→                for (let j = 0; j < idSource.length; j++) {
+  1111→                    const ch = idSource.charCodeAt(j);
+  1112→                    hash = ((hash << 5) - hash) + ch;
+  1113→                    hash = hash & hash;
+  1114→                }
+  1115→                const maimaiId = 'mm_' + Math.abs(hash).toString(16).padStart(8, '0');
+  1116→
+  1117→                if (seenIds.has(maimaiId)) continue;
+  1118→                seenIds.add(maimaiId);
+  1119→
+  1120→                // Try to extract profile URL
+  1121→                let profileUrl = '';
+  1122→                const links = card.querySelectorAll('a[href]');
+  1123→                for (const link of links) {
+  1124→                    const href = link.getAttribute('href') || '';
+  1125→                    if (href.includes('/profile/detail') || href.includes('/contact/detail/') || href.includes('dstu=') || href.includes('egid=')) {
+  1126→                        profileUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+  1127→                        break;
+  1128→                    }
+  1129→                }
+  1130→
+  1131→                candidates.push({
+  1132→                    name: name,
+  1133→                    title: title || '',
+  1134→                    company: company || '',
+  1135→                    maimai_id: maimaiId,
+  1136→                    profile_url: profileUrl,
+  1137→                    location: '',
+  1138→                });
+  1139→            }
+  1140→
+  1141→            return candidates;
+  1142→        }''')
+  1143→
+  1144→        logger.info(f"Enterprise extraction found {len(candidates_data)} candidates")
+  1145→
+  1146→        for data in candidates_data:
+  1147→            if data.get("name"):
+  1148→                candidates.append(CandidateBasic(
+  1149→                    maimai_id=data.get("maimai_id", ""),
+  1150→                    name=data.get("name", ""),
+  1151→                    title=data.get("title", ""),
+  1152→                    company=data.get("company", ""),
+  1153→                    location=data.get("location", ""),
+  1154→                    profile_url=data.get("profile_url", ""),
+  1155→                ))
+  1156→
+  1157→        # Filter out premium placeholders
+  1158→        candidates = [c for c in candidates if c.name not in PREMIUM_PLACEHOLDER_NAMES]
+  1159→
+  1160→        logger.info(f"Enterprise: extracted {len(candidates)} candidates from page")
+  1161→
+  1162→    except Exception as e:
+  1163→        logger.error(f"Error extracting enterprise results: {e}")
+  1164→
+  1165→    return candidates
+  1166→

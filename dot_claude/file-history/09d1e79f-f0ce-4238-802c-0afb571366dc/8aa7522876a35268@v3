@@ -1,0 +1,53 @@
+"""ContextVars-based progress emission.
+
+Allows any module in the call stack to emit progress events without
+receiving a callback parameter. In CLI mode the context var is None
+and calls are silently ignored. In Web mode, the TaskQueue worker
+sets the callback before running each task.
+"""
+
+import asyncio
+import contextvars
+from typing import Any, Callable, Optional
+
+from loguru import logger
+
+_progress_ctx: contextvars.ContextVar[Optional[Callable]] = contextvars.ContextVar(
+    '_progress_ctx', default=None
+)
+
+
+def set_progress_callback(callback: Optional[Callable]) -> contextvars.Token:
+    """Set the progress callback for the current async context."""
+    return _progress_ctx.set(callback)
+
+
+def reset_progress_callback(token: contextvars.Token) -> None:
+    """Reset the progress callback to its previous value."""
+    _progress_ctx.reset(token)
+
+
+def emit_progress(event: str, **data: Any) -> None:
+    """Emit a progress event if a callback is registered.
+
+    Safe to call from anywhere — does nothing in CLI mode.
+    In Web mode, schedules the async callback as a fire-and-forget task.
+    """
+    cb = _progress_ctx.get()
+    if cb is not None:
+        try:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(cb(event, data))
+            task.add_done_callback(_handle_task_exception)
+        except RuntimeError:
+            pass  # No running event loop
+
+
+def _handle_task_exception(task: asyncio.Task) -> None:
+    """Log exceptions from fire-and-forget progress tasks."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error(f"Error in progress callback: {e}")

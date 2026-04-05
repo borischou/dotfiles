@@ -1,0 +1,85 @@
+# Code Review History
+
+工程审查历史记录，由 code-review-memory skill 自动维护。
+
+---
+
+## Review #1 - 2026-02-13
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/core/browser.py:31-37 | Singleton asyncio.Lock 在多 event loop 下有竞态条件 | 已修复 |
+| 严重 | src/utils/rate_limiter.py:32,59,115,161,179,185,200 | `datetime.utcnow()` 返回 naive datetime，与 DB 的 aware datetime 混用 | 已修复 |
+| 严重 | src/modules/search.py:404-434 | 搜索 URL 参数未经 URL 编码 | 已修复 |
+| 严重 | src/modules/search.py:509-547 | `_save_candidates_to_db` 逐条查询，N+1 问题 | 已修复 |
+| 严重 | scripts/recorder.py:305 | `browser.close` 缺少括号，方法未调用 | 已修复 |
+| 严重 | src/modules/export.py:116-118 | export 中每个候选人单独查消息，N+1 查询 | 已修复 |
+| 严重 | scripts/setup_db.py:33-35 | 原始 SQL 字符串未用 `text()` 包装，SQLAlchemy 2.0 不兼容 | 已修复 |
+| 中等 | src/models/database.py 等多处 | Singleton 全局状态无 reset 机制，测试隔离困难 | 已修复 |
+| 中等 | src/utils/captcha.py:40 | `sys.stdin.readline()` 阻塞 async 事件循环 | 已修复 |
+| 中等 | src/modules/message.py:51-65 | 模板渲染使用简单字符串替换，存在递归替换风险 | 已修复 |
+| 中等 | src/services/pipeline.py:344-411 | batch_pages 分页 start_page 参数未生效（Boss 直聘用无限滚动） | 待处理 |
+| 中等 | src/modules/message.py:267-289 | 非交互模式下失败消息不记录到 DB | 已修复 |
+| 中等 | src/modules/message.py:445-446 | macOS 上 `Control+a` 应为 `Meta+a` | 已修复 |
+| 中等 | src/utils/config.py:15 | 配置路径用相对路径，依赖 CWD | 已修复 |
+| 中等 | src/utils/config.py:40-53 | JSON null 值被 default 覆盖 | 待处理 |
+| 中等 | src/modules/search.py:73-77 | `name+company` MD5 取 12 位，同名碰撞风险 | 已修复 |
+| 中等 | src/services/pipeline.py:310-322 | checkpoint 恢复不验证参数一致性 | 已修复 |
+| 中等 | boss_flow.py:8-11 | async with 块过早关闭，录制回放脚本无法运行 | 已修复 |
+| 中等 | src/models/database.py:12,19 | `declarative_base()` 使用 SA 2.0 废弃 API | 已修复 |
+| 中等 | src/utils/rate_limiter.py:222-233 | 日限额用完时 async_check_rate_limit 可能等待数十天 | 已修复 |
+| 中等 | requirements.txt | pydantic/faker/dotenv 声明但从未使用 | 已修复 |
+| 中等 | src/services/pipeline.py:392-394 | `sent_ids` 记录所有处理过的而非仅成功的 | 已修复 |
+
+### 修复内容
+- **C1 browser.py**: 添加 `threading.Lock` 保护 `__new__`，重建 asyncio.Lock 时检测当前 event loop
+- **C2 rate_limiter.py + checkpoint.py**: 全部 `datetime.utcnow()` 替换为 `datetime.now(timezone.utc)`
+- **C3 search.py**: `_build_search_url` 改用 `urllib.parse.urlencode()` 替代手动拼接
+- **C4 search.py**: `_save_candidates_to_db` 先批量查询已有候选人到 dict，避免 N+1
+- **C5 recorder.py**: `browser.close` → `await browser.close()`
+- **C6 export.py**: 消息查询改为批量 fetch（count + 最新消息）
+- **C7 setup_db.py**: SQL 字符串用 `text()` 包装
+- **M1**: 为 config/db_manager/rate_limiter 添加 `reset_*()` 函数
+- **M2 captcha.py**: `sys.stdin.readline()` 改为 `loop.run_in_executor(None, ...)` 异步读取
+- **M3 message.py**: `render_template` 改用 `re.sub` 单次替换，避免递归
+- **M5 message.py**: 非交互模式失败时也调用 `_save_message_to_db`
+- **M6 message.py**: 根据 `sys.platform` 选择 `Meta+a`（macOS）或 `Control+a`
+- **M7 config.py**: 默认 config_dir 改为基于源文件路径的绝对路径
+- **M9 search.py**: fallback ID 改用 SHA-256 取 20 位，降低碰撞概率
+- **M10 pipeline.py**: checkpoint 恢复时校验 keywords 和 template 是否匹配
+- **M11 boss_flow*.py + recorder.py**: `async with` 改为 `await async_playwright().start()`
+- **M12 database.py**: `from sqlalchemy.ext.declarative import declarative_base` → `from sqlalchemy.orm import declarative_base`
+- **M13 rate_limiter.py**: `async_check_rate_limit` 增加 `max_wait_per_retry=3600` 上限
+- **M14 requirements.txt**: 移除 pydantic/faker/python-dotenv
+- **M15 pipeline.py**: `sent_ids` 去重改用 set 提升效率
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/utils/retry.py | 整个文件删除，`retry_navigation` 从未被调用 | 未调用函数 |
+| src/utils/delays.py:104-107 | `get_retry_delay()` 函数删除 | 未调用函数 |
+| src/services/pipeline.py:477-547 | `generate_pipeline_report()` 函数删除 | 未调用函数 |
+| src/cli/main.py:17-18,23 | 删除未使用的 `Path`, `Tuple`, `Panel` import | 未使用 import |
+| src/modules/search.py:13,14,16,30 | 删除未使用的 `re`, `field`, `quote`, `ExtractionError`, `BrowserError`, `get_config` | 未使用 import |
+| src/modules/message.py:21,29,34,42 | 删除未使用的 `asyncio`, `Table`, `human_click/type/scroll`, `ExtractionError` | 未使用 import |
+| src/modules/profile.py:9,10,16,19 | 删除未使用的 `asyncio`, `List`, `Table`, `get_config` | 未使用 import |
+| src/services/pipeline.py:9,10,21,26 | 删除未使用的 `asyncio`, `datetime`, `Path`, `render_template`, `get_db_manager` | 未使用 import |
+| src/modules/search.py:281 | 删除未使用的 `config = get_config()` | 未使用变量 |
+| src/modules/profile.py:194 | 删除未使用的 `config = get_config()` | 未使用变量 |
+
+### 测试结果
+- 81 个测试全部通过（0.66s）
+- 无回归问题
+
+### 复盘
+- **做得好的**：datetime naive/aware 统一、N+1 查询优化、URL 编码修复 —— 这些都是影响核心功能正确性的关键修复
+- **待改进的**：batch_pages 分页功能实际上因 Boss 直聘的无限滚动机制而无法真正分页，需要重新设计；核心业务模块（search/message/pipeline）缺少单元测试
+- **遗留项**：
+  - M4: batch_pages 分页机制需要重新设计以适配无限滚动
+  - M8: Config.get() 中 JSON null 值处理（极低优先级）
+  - 核心业务模块测试覆盖率低（auth/search/profile/message/pipeline 无测试）
+  - `_error_timestamps` 在 RateLimiter 中永远为空（缺少 `report_error()` 方法）
+  - 多处 `except Exception` 过于宽泛，可考虑细化异常类型
+
+---

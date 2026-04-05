@@ -1,0 +1,72 @@
+     1→     1→"""Lightweight database migration system."""
+     2→     2→
+     3→     3→from typing import Callable, List, Tuple
+     4→     4→
+     5→     5→from sqlalchemy import text, inspect
+     6→     6→from loguru import logger
+     7→     7→
+     8→     8→_migrations: List[Tuple[int, str, Callable]] = []
+     9→     9→
+    10→    10→
+    11→    11→def migration(version: int, description: str):
+    12→    12→    """Decorator to register a migration function."""
+    13→    13→    def decorator(fn: Callable):
+    14→    14→        _migrations.append((version, description, fn))
+    15→    15→        return fn
+    16→    16→    return decorator
+    17→    17→
+    18→    18→
+    19→    19→@migration(1, "Initial schema — create core tables if missing")
+    20→    20→def _m001_initial_schema(conn):
+    21→    21→    """Ensure core tables exist."""
+    22→    22→    pass
+    23→    23→
+    24→    24→
+    25→    25→@migration(2, "Add retry_count column to messages table")
+    26→    26→def _m002_messages_retry_count(conn):
+    27→    27→    inspector = inspect(conn)
+    28→    28→    columns = [c["name"] for c in inspector.get_columns("messages")]
+    29→    29→    if "retry_count" not in columns:
+    30→    30→        conn.execute(text("ALTER TABLE messages ADD COLUMN retry_count INTEGER DEFAULT 0"))
+    31→    31→
+    32→    32→
+    33→    33→def _ensure_version_table(conn) -> None:
+    34→    34→    conn.execute(text("""
+    35→    35→        CREATE TABLE IF NOT EXISTS schema_version (
+    36→    36→            version INTEGER PRIMARY KEY,
+    37→    37→            description TEXT NOT NULL,
+    38→    38→            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    39→    39→        )
+    40→    40→    """))
+    41→    41→    conn.commit()
+    42→    42→
+    43→    43→
+    44→    44→def _current_version(conn) -> int:
+    45→    45→    result = conn.execute(text("SELECT MAX(version) FROM schema_version"))
+    46→    46→    row = result.fetchone()
+    47→    47→    return row[0] or 0 if row else 0
+    48→    48→
+    49→    49→
+    50→    50→def run_migrations(engine) -> None:
+    51→    51→    """Apply all pending migrations."""
+    52→    52→    with engine.connect() as conn:
+    53→    53→        _ensure_version_table(conn)
+    54→    54→        current = _current_version(conn)
+    55→    55→
+    56→    56→        pending = [(v, d, fn) for v, d, fn in _migrations if v > current]
+    57→    57→        if not pending:
+    58→    58→            logger.debug(f"Database schema is up-to-date (version {current})")
+    59→    59→            return
+    60→    60→
+    61→    61→        for version, description, fn in sorted(pending):
+    62→    62→            logger.info(f"Applying migration v{version}: {description}")
+    63→    63→            fn(conn)
+    64→    64→            conn.execute(
+    65→    65→                text("INSERT INTO schema_version (version, description) VALUES (:v, :d)"),
+    66→    66→                {"v": version, "d": description},
+    67→    67→            )
+    68→    68→            conn.commit()
+    69→    69→
+    70→    70→        final = _current_version(conn)
+    71→    71→        logger.info(f"Migrations complete — schema version {final}")
+    72→    72→

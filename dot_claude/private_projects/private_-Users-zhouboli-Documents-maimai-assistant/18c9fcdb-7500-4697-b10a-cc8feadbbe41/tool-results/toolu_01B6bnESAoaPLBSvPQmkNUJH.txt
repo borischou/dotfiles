@@ -1,0 +1,27 @@
+92:async def _navigate_to_chat(
+186:async def extract_contact_quota(page: Page) -> Optional[dict]:
+229:async def fetch_contact_quota(browser: Optional["BrowserManager"] = None) -> Optional[dict]:
+271:async def _handle_quick_contact(page: Page, content: str) -> Optional[bool]:
+448:async def _detect_vip_paywall(page: Page) -> bool:
+490:async def send_message(
+750:async def _send_message_batch_common(
+1018:def _make_search_center_sender(
+1128:def _make_enterprise_sender(
+1175:def _make_talent_bank_sender(
+1263:async def send_message_batch(
+1387:async def interactive_confirm(
+1432:async def edit_message(content: str) -> Optional[str]:
+1455:async def _find_element_by_selectors(page: Page, selectors: List[str], timeout: int = 3000):
+1476:async def _click_chat_button(page: Page, config) -> bool:
+1540:async def _type_message(page: Page, config, content: str) -> bool:
+1593:async def _click_send_button(page: Page, config) -> bool:
+1615:async def _verify_message_sent(page: Page, content: str, timeout: int = 5000) -> bool:
+1743:async def _check_existing_conversation(page: Page, maimai_id: str) -> bool:
+1894:async def _close_enterprise_popup(page: Page) -> None:
+1919:async def send_message_enterprise_inline(
+1994:async def send_message_batch_enterprise(
+2032:async def _find_im_chat_frame(im_page: Page):
+2047:async def _exchange_in_im_tab(
+2149:async def _close_im_tabs(browser: "BrowserManager", search_page: Page) -> None:
+2160:async def send_message_talent_bank_inline(
+2274:async def send_message_batch_talent_bank(

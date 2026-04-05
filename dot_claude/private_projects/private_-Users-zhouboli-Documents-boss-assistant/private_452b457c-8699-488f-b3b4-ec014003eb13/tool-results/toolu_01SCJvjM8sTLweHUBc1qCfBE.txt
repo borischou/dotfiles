@@ -1,0 +1,56 @@
+     1→"""Custom exceptions for Boss Assistant."""
+     2→
+     3→
+     4→class BossAssistantError(Exception):
+     5→    """Base exception for all Boss Assistant errors."""
+     6→    pass
+     7→
+     8→
+     9→class BrowserError(BossAssistantError):
+    10→    """Raised when browser automation fails."""
+    11→    pass
+    12→
+    13→
+    14→class SessionExpiredError(BossAssistantError):
+    15→    """Raised when Boss直聘 session has expired."""
+    16→    pass
+    17→
+    18→
+    19→class RateLimitExceededError(BossAssistantError):
+    20→    """Raised when rate limit is exceeded."""
+    21→
+    22→    def __init__(self, action_type: str, wait_time: int, message: str = None):
+    23→        self.action_type = action_type
+    24→        self.wait_time = wait_time
+    25→        if message is None:
+    26→            message = f"Rate limit exceeded for {action_type}. Wait {wait_time} seconds."
+    27→        super().__init__(message)
+    28→
+    29→
+    30→class SelectorNotFoundError(BossAssistantError):
+    31→    """Raised when page selector is not found."""
+    32→    pass
+    33→
+    34→
+    35→class ExtractionError(BossAssistantError):
+    36→    """Raised when data extraction fails."""
+    37→    pass
+    38→
+    39→
+    40→class ConfigurationError(BossAssistantError):
+    41→    """Raised when configuration is invalid."""
+    42→    pass
+    43→
+    44→
+    45→class ValidationError(BossAssistantError):
+    46→    """Raised when input validation fails."""
+    47→    pass
+    48→
+    49→
+    50→class PermanentFailureError(BossAssistantError):
+    51→    """Raised when a send failure is deterministic and should not be retried.
+    52→
+    53→    Examples: no profile URL, quota exhausted, candidate already messaged.
+    54→    """
+    55→    pass
+    56→

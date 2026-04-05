@@ -1,0 +1,62 @@
+     1→     1→"""Input validation utilities."""
+     2→     2→
+     3→     3→import re
+     4→     4→from typing import Dict, Any
+     5→     5→
+     6→     6→from src.exceptions.errors import ValidationError
+     7→     7→
+     8→     8→
+     9→     9→def validate_boss_id(boss_id: str) -> str:
+    10→    10→    """Validate Boss直聘 candidate ID format.
+    11→    11→
+    12→    12→    Boss直聘 candidate IDs stored as zp_{data-expect-id}.
+    13→    13→
+    14→    14→    Args:
+    15→    15→        boss_id: Boss直聘 candidate ID to validate
+    16→    16→
+    17→    17→    Returns:
+    18→    18→        Validated and cleaned ID
+    19→    19→
+    20→    20→    Raises:
+    21→    21→        ValidationError: If ID format is invalid
+    22→    22→    """
+    23→    23→    if not boss_id:
+    24→    24→        raise ValidationError("Boss ID cannot be empty")
+    25→    25→
+    26→    26→    boss_id = str(boss_id).strip()
+    27→    27→
+    28→    28→    if not re.match(r'^[a-zA-Z0-9_-]+$', boss_id):
+    29→    29→        raise ValidationError(f"Invalid Boss ID format: {boss_id}")
+    30→    30→
+    31→    31→    return boss_id
+    32→    32→
+    33→    33→
+    34→    34→def validate_keywords(keywords: str) -> str:
+    35→    35→    """Validate search keywords."""
+    36→    36→    if not keywords or not keywords.strip():
+    37→    37→        raise ValidationError("Search keywords cannot be empty")
+    38→    38→
+    39→    39→    keywords = keywords.strip()
+    40→    40→
+    41→    41→    if len(keywords) < 2:
+    42→    42→        raise ValidationError("Search keywords must be at least 2 characters")
+    43→    43→
+    44→    44→    if len(keywords) > 200:
+    45→    45→        raise ValidationError("Search keywords cannot exceed 200 characters")
+    46→    46→
+    47→    47→    return keywords
+    48→    48→
+    49→    49→
+    50→    50→def validate_template_variables(template: Dict[str, Any], variables: Dict[str, str]) -> None:
+    51→    51→    """Validate that all required template variables are provided."""
+    52→    52→    required_vars = template.get('variables', [])
+    53→    53→    provided_vars = set(variables.keys())
+    54→    54→    required_set = set(required_vars)
+    55→    55→
+    56→    56→    missing_vars = required_set - provided_vars
+    57→    57→
+    58→    58→    if missing_vars:
+    59→    59→        raise ValidationError(
+    60→    60→            f"Missing required template variables: {', '.join(missing_vars)}"
+    61→    61→        )
+    62→    62→

@@ -1,0 +1,163 @@
+"""Configuration loader and manager."""
+
+import copy
+import json
+from pathlib import Path
+from typing import Any, Dict
+
+from loguru import logger
+
+from src.exceptions.errors import ConfigurationError
+
+_MISSING = object()  # sentinel for missing keys
+
+
+class Config:
+    """Configuration manager for Maimai Assistant."""
+
+    def __init__(self, config_dir: str = None):
+        if config_dir is None:
+            # Resolve relative to project root (3 levels up from this file)
+            config_dir = str(Path(__file__).parent.parent.parent / "config")
+        self.config_dir = Path(config_dir)
+        self._settings: Dict[str, Any] = {}
+        self._selectors: Dict[str, Any] = {}
+        self._message_templates: Dict[str, Any] = {}
+
+        self._load_all()
+
+    def _load_json(self, filename: str) -> Dict[str, Any]:
+        """Load JSON configuration file."""
+        filepath = self.config_dir / filename
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise ConfigurationError(f"Configuration file not found: {filepath}")
+        except json.JSONDecodeError as e:
+            raise ConfigurationError(f"Invalid JSON in {filepath}: {e}")
+
+    def _load_all(self):
+        """Load all configuration files."""
+        logger.info("Loading configuration files...")
+        self._settings = self._load_json("settings.json")
+        self._selectors = self._load_json("selectors.json")
+        self._message_templates = self._load_json("message_templates.json")
+        logger.info("Configuration loaded successfully")
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get setting by dot-notation key (e.g., 'browser.headless').
+
+        Returns the configured value, including explicit ``null`` (None).
+        Only falls back to *default* when the key path does not exist.
+        """
+        keys = key.split('.')
+        value = self._settings
+
+        for k in keys:
+            if isinstance(value, dict):
+                value = value.get(k, _MISSING)
+                if value is _MISSING:
+                    return default
+            else:
+                return default
+
+        return value
+
+    def get_selector(self, selector_path: str) -> str:
+        """Get selector by dot-notation path (e.g., 'search.keyword_input')."""
+        keys = selector_path.split('.')
+        value = self._selectors.get('selectors', {})
+
+        for k in keys:
+            if isinstance(value, dict):
+                value = value.get(k)
+                if value is None:
+                    raise ConfigurationError(f"Selector not found: {selector_path}")
+            else:
+                raise ConfigurationError(f"Invalid selector path: {selector_path}")
+
+        return value
+
+    def get_template(self, template_name: str) -> Dict[str, Any]:
+        """Get message template by name."""
+        template = self._message_templates.get(template_name)
+        if template is None:
+            raise ConfigurationError(f"Message template not found: {template_name}")
+        return template
+
+    def list_templates(self) -> list:
+        """List all available message template names."""
+        return list(self._message_templates.keys())
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Deep merge override into a copy of base. Override wins on conflicts."""
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+def apply_profile(
+    profile_name: str,
+    config: Config = None,
+    project_root: Path = None,
+) -> None:
+    """Override config data paths and optionally merge profile-local settings.
+
+    Args:
+        profile_name: Profile directory name (e.g. 'alice', 'bob')
+        config: Config instance to modify (defaults to global)
+        project_root: Project root for resolving paths (defaults to auto-detect)
+    """
+    if config is None:
+        config = get_config()
+    if project_root is None:
+        project_root = Path(__file__).parent.parent.parent
+
+    profile_dir = project_root / "data" / "profiles" / profile_name
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    # Merge profile-local settings.json if it exists
+    profile_settings_path = profile_dir / "settings.json"
+    if profile_settings_path.exists():
+        try:
+            with open(profile_settings_path, 'r', encoding='utf-8') as f:
+                profile_settings = json.load(f)
+            config._settings = _deep_merge(config._settings, profile_settings)
+        except json.JSONDecodeError as e:
+            raise ConfigurationError(f"Invalid JSON in profile settings: {profile_settings_path}: {e}")
+
+    # Override all data.* paths to point under profile dir
+    rel_profile = f"data/profiles/{profile_name}"
+    data_overrides = {
+        "database_path": f"{rel_profile}/maimai.db",
+        "session_path": f"{rel_profile}/.session/maimai_session.json",
+        "log_dir": f"{rel_profile}/logs",
+        "screenshot_dir": f"{rel_profile}/screenshots",
+        "export_dir": f"{rel_profile}/exports",
+        "checkpoint_dir": f"{rel_profile}/.checkpoints",
+    }
+    if "data" not in config._settings:
+        config._settings["data"] = {}
+    config._settings["data"].update(data_overrides)
+
+    logger.info(f"Profile '{profile_name}' applied — data dir: {profile_dir}")
+
+
+# Global configuration instance
+_config_instance = None
+
+
+def get_config() -> Config:
+    """Get global configuration instance."""
+    global _config_instance
+    if _config_instance is None:
+        _config_instance = Config()
+    return _config_instance
+
+

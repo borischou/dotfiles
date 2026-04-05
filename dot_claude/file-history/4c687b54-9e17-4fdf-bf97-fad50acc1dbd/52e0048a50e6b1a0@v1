@@ -1,0 +1,67 @@
+{
+  "version": "1.1.0",
+  "last_updated": "2026-02-11",
+  "note": "CSS selectors for Boss直聘 pages. Updated from Phase 0 recording. Chat selectors confirmed. Search uses infinite scroll (no pagination buttons). Profile details shown as floating overlay.",
+  "urls": {
+    "search_page": "https://www.zhipin.com/web/chat/search",
+    "job_list": "https://www.zhipin.com/web/chat/job/list",
+    "base": "https://www.zhipin.com"
+  },
+  "selectors": {
+    "navigation": {
+      "search_tab": "text=\"搜索\"",
+      "job_management_tab": "text=\"职位管理\"",
+      "my_chat_tab": "text=\"我的沟通\""
+    },
+    "search": {
+      "search_input": "input[placeholder*='搜索']",
+      "search_button": "button[class*='search']",
+      "candidate_card": "[class*='card-inner']",
+      "candidate_name": "[class*='name']",
+      "candidate_title": "[class*='title']",
+      "candidate_company": "[class*='company']",
+      "candidate_salary": "[class*='salary']",
+      "candidate_experience": "[class*='experience']",
+      "candidate_education": "[class*='education']",
+      "candidate_location": "[class*='area']",
+      "pagination": "infinite_scroll",
+      "chat_card_button": "button:has-text('搜索畅聊卡')",
+      "filter_experience": "[class*='filter-experience']",
+      "filter_education": "[class*='filter-education']",
+      "filter_salary": "[class*='filter-salary']"
+    },
+    "profile": {
+      "name": "[class*='name'], h1",
+      "title": "[class*='title']",
+      "company": "[class*='company']",
+      "location": "[class*='area'], [class*='location']",
+      "salary_expect": "[class*='salary'], [class*='expect']",
+      "work_years": "[class*='work-year'], [class*='experience']",
+      "education_level": "[class*='education'], [class*='degree']",
+      "education_section": "[class*='education-list'], [class*='edu-section']",
+      "education_item": "[class*='education-item'], [class*='edu-item']",
+      "work_experience_section": "[class*='work-list'], [class*='exp-section']",
+      "work_experience_item": "[class*='work-item'], [class*='exp-item']",
+      "skills_section": "[class*='skill-list'], [class*='skill-section']",
+      "skill_tag": "[class*='skill-tag'], [class*='skill-item']"
+    },
+    "message": {
+      "chat_button": "button:has-text('立即沟通'), button:has-text('搜索畅聊卡')",
+      "view_conversation": "text=\"查看对话\"",
+      "message_input": "#boss-chat-global-input",
+      "send_button": "text=\"发送\"",
+      "close_chat": "div.iboss.iboss-close",
+      "close_dialog": "div.boss-popup__close > i.icon-close"
+    },
+    "chat": {
+      "chat_wrap": "div.bosschat-conversation-wrap.chat-wrap",
+      "chat_top_bar": "div.chat-global-top",
+      "dialog_wrap": "div.dialog-wrap.active",
+      "popup_wrapper": "div.boss-popup__wrapper.boss-dialog",
+      "chat_list": "[class*='chat-list']",
+      "chat_item": "[class*='chat-item']",
+      "message_list": "[class*='message-list']",
+      "message_item": "[class*='message-item']"
+    }
+  }
+}

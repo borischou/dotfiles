@@ -1,0 +1,85 @@
+"""FastAPI application factory for Boss Assistant Web service."""
+
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from loguru import logger
+
+from src.web.services.chrome_manager import ChromeProcessManager
+from src.web.task_queue import TaskQueue
+
+WEB_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = WEB_DIR / "templates"
+STATIC_DIR = WEB_DIR / "static"
+
+# Shared instances
+chrome_manager = ChromeProcessManager()
+task_queue = TaskQueue()
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: start/stop Chrome and DB."""
+    logger.info("Starting Boss Assistant Web service...")
+
+    # Initialize database
+    from src.models.database import get_db_manager
+    get_db_manager()
+
+    # Start Chrome and task queue
+    await chrome_manager.start()
+    await task_queue.start()
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down Boss Assistant Web service...")
+    await task_queue.stop()
+    await chrome_manager.stop()
+
+    # Close browser connection
+    from src.core.browser import BrowserManager
+    await BrowserManager.reset_instance()
+
+    logger.info("Shutdown complete")
+
+
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    app = FastAPI(
+        title="Boss Assistant",
+        description="Boss直聘半自动招聘助手",
+        lifespan=lifespan,
+    )
+
+    # Mount static files
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    # Register routes
+    from src.web.routes.dashboard import router as dashboard_router
+    from src.web.routes.auth import router as auth_router
+    from src.web.routes.search import router as search_router
+    from src.web.routes.candidates import router as candidates_router
+    from src.web.routes.messages import router as messages_router
+    from src.web.routes.pipeline import router as pipeline_router
+    from src.web.routes.export import router as export_router
+    from src.web.routes.templates import router as templates_router
+    from src.web.routes.settings import router as settings_router
+    from src.web.routes.status import router as status_router
+
+    app.include_router(dashboard_router)
+    app.include_router(auth_router, prefix="/auth", tags=["auth"])
+    app.include_router(search_router, prefix="/search", tags=["search"])
+    app.include_router(candidates_router, prefix="/candidates", tags=["candidates"])
+    app.include_router(messages_router, prefix="/messages", tags=["messages"])
+    app.include_router(pipeline_router, prefix="/pipeline", tags=["pipeline"])
+    app.include_router(export_router, prefix="/export", tags=["export"])
+    app.include_router(templates_router, prefix="/templates", tags=["templates"])
+    app.include_router(settings_router, prefix="/settings", tags=["settings"])
+    app.include_router(status_router, prefix="/status", tags=["status"])
+
+    return app

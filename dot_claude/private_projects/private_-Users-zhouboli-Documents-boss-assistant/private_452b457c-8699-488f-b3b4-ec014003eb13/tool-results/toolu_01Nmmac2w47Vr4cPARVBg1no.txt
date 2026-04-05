@@ -1,0 +1,86 @@
+     1→"""FastAPI application factory for Boss Assistant Web service."""
+     2→
+     3→from contextlib import asynccontextmanager
+     4→from pathlib import Path
+     5→
+     6→from fastapi import FastAPI, Request
+     7→from fastapi.staticfiles import StaticFiles
+     8→from fastapi.templating import Jinja2Templates
+     9→from loguru import logger
+    10→
+    11→from src.web.services.chrome_manager import ChromeProcessManager
+    12→from src.web.task_queue import TaskQueue
+    13→
+    14→WEB_DIR = Path(__file__).resolve().parent
+    15→TEMPLATES_DIR = WEB_DIR / "templates"
+    16→STATIC_DIR = WEB_DIR / "static"
+    17→
+    18→# Shared instances
+    19→chrome_manager = ChromeProcessManager()
+    20→task_queue = TaskQueue()
+    21→templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    22→
+    23→
+    24→@asynccontextmanager
+    25→async def lifespan(app: FastAPI):
+    26→    """Application lifespan: start/stop Chrome and DB."""
+    27→    logger.info("Starting Boss Assistant Web service...")
+    28→
+    29→    # Initialize database
+    30→    from src.models.database import get_db_manager
+    31→    get_db_manager()
+    32→
+    33→    # Start Chrome and task queue
+    34→    await chrome_manager.start()
+    35→    await task_queue.start()
+    36→
+    37→    yield
+    38→
+    39→    # Shutdown
+    40→    logger.info("Shutting down Boss Assistant Web service...")
+    41→    await task_queue.stop()
+    42→    await chrome_manager.stop()
+    43→
+    44→    # Close browser connection
+    45→    from src.core.browser import BrowserManager
+    46→    await BrowserManager.reset_instance()
+    47→
+    48→    logger.info("Shutdown complete")
+    49→
+    50→
+    51→def create_app() -> FastAPI:
+    52→    """Create and configure the FastAPI application."""
+    53→    app = FastAPI(
+    54→        title="Boss Assistant",
+    55→        description="Boss直聘半自动招聘助手",
+    56→        lifespan=lifespan,
+    57→    )
+    58→
+    59→    # Mount static files
+    60→    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    61→
+    62→    # Register routes
+    63→    from src.web.routes.dashboard import router as dashboard_router
+    64→    from src.web.routes.auth import router as auth_router
+    65→    from src.web.routes.search import router as search_router
+    66→    from src.web.routes.candidates import router as candidates_router
+    67→    from src.web.routes.messages import router as messages_router
+    68→    from src.web.routes.pipeline import router as pipeline_router
+    69→    from src.web.routes.export import router as export_router
+    70→    from src.web.routes.templates import router as templates_router
+    71→    from src.web.routes.settings import router as settings_router
+    72→    from src.web.routes.status import router as status_router
+    73→
+    74→    app.include_router(dashboard_router)
+    75→    app.include_router(auth_router, prefix="/auth", tags=["auth"])
+    76→    app.include_router(search_router, prefix="/search", tags=["search"])
+    77→    app.include_router(candidates_router, prefix="/candidates", tags=["candidates"])
+    78→    app.include_router(messages_router, prefix="/messages", tags=["messages"])
+    79→    app.include_router(pipeline_router, prefix="/pipeline", tags=["pipeline"])
+    80→    app.include_router(export_router, prefix="/export", tags=["export"])
+    81→    app.include_router(templates_router, prefix="/templates", tags=["templates"])
+    82→    app.include_router(settings_router, prefix="/settings", tags=["settings"])
+    83→    app.include_router(status_router, prefix="/status", tags=["status"])
+    84→
+    85→    return app
+    86→

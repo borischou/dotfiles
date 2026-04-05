@@ -1,0 +1,64 @@
+{
+  "browser": {
+    "cdp_endpoint": "http://127.0.0.1:9222",
+    "timeout": 30000
+  },
+  "rate_limits": {
+    "search_per_hour": 15,
+    "search_per_day": 80,
+    "profile_view_per_hour": 20,
+    "profile_view_per_day": 100,
+    "message_per_hour": 20,
+    "message_per_day": 80,
+    "min_interval_seconds": 35
+  },
+  "delays": {
+    "page_load_min": 2,
+    "page_load_max": 5,
+    "action_min": 0.5,
+    "action_max": 2.0,
+    "typing_min": 0.05,
+    "typing_max": 0.15,
+    "scroll_min": 0.5,
+    "scroll_max": 1.5
+  },
+  "data": {
+    "database_path": "data/boss.db",
+    "session_path": "data/.session/boss_session.json",
+    "export_dir": "data/exports",
+    "log_dir": "data/logs",
+    "screenshot_dir": "data/screenshots"
+  },
+  "scoring": {
+    "jd": {
+      "title": "前端工程师",
+      "description": "负责Web前端开发，参与架构设计和性能优化",
+      "required_skills": ["JavaScript", "TypeScript", "React", "Vue"],
+      "preferred_skills": ["Node.js", "Webpack", "性能优化", "微前端", "Flutter", "ReactNative"],
+      "min_experience_years": 3,
+      "preferred_education": "本科"
+    },
+    "weights": {
+      "seniority": 15,
+      "company_tier": 15,
+      "education": 10,
+      "experience": 15,
+      "skill_match": 25,
+      "keyword_relevance": 10,
+      "rd_bonus": 5,
+      "llm_score": 5
+    },
+    "llm": {
+      "enabled": false,
+      "endpoint": "http://127.0.0.1:11434",
+      "model": "qwen2.5:7b",
+      "timeout_seconds": 60
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "rotation": "10 MB",
+    "retention": "30 days",
+    "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+  }
+}

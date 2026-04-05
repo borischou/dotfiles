@@ -1,0 +1,105 @@
+     1→"""Configuration loader and manager."""
+     2→
+     3→import json
+     4→from pathlib import Path
+     5→from typing import Any, Dict
+     6→
+     7→from loguru import logger
+     8→
+     9→from src.exceptions.errors import ConfigurationError
+    10→
+    11→_MISSING = object()  # sentinel for missing keys
+    12→
+    13→
+    14→class Config:
+    15→    """Configuration manager for Maimai Assistant."""
+    16→
+    17→    def __init__(self, config_dir: str = None):
+    18→        if config_dir is None:
+    19→            # Resolve relative to project root (3 levels up from this file)
+    20→            config_dir = str(Path(__file__).parent.parent.parent / "config")
+    21→        self.config_dir = Path(config_dir)
+    22→        self._settings: Dict[str, Any] = {}
+    23→        self._selectors: Dict[str, Any] = {}
+    24→        self._message_templates: Dict[str, Any] = {}
+    25→
+    26→        self._load_all()
+    27→
+    28→    def _load_json(self, filename: str) -> Dict[str, Any]:
+    29→        """Load JSON configuration file."""
+    30→        filepath = self.config_dir / filename
+    31→        try:
+    32→            with open(filepath, 'r', encoding='utf-8') as f:
+    33→                return json.load(f)
+    34→        except FileNotFoundError:
+    35→            raise ConfigurationError(f"Configuration file not found: {filepath}")
+    36→        except json.JSONDecodeError as e:
+    37→            raise ConfigurationError(f"Invalid JSON in {filepath}: {e}")
+    38→
+    39→    def _load_all(self):
+    40→        """Load all configuration files."""
+    41→        logger.info("Loading configuration files...")
+    42→        self._settings = self._load_json("settings.json")
+    43→        self._selectors = self._load_json("selectors.json")
+    44→        self._message_templates = self._load_json("message_templates.json")
+    45→        logger.info("Configuration loaded successfully")
+    46→
+    47→    def get(self, key: str, default: Any = None) -> Any:
+    48→        """Get setting by dot-notation key (e.g., 'browser.headless').
+    49→
+    50→        Returns the configured value, including explicit ``null`` (None).
+    51→        Only falls back to *default* when the key path does not exist.
+    52→        """
+    53→        keys = key.split('.')
+    54→        value = self._settings
+    55→
+    56→        for k in keys:
+    57→            if isinstance(value, dict):
+    58→                value = value.get(k, _MISSING)
+    59→                if value is _MISSING:
+    60→                    return default
+    61→            else:
+    62→                return default
+    63→
+    64→        return value
+    65→
+    66→    def get_selector(self, selector_path: str) -> str:
+    67→        """Get selector by dot-notation path (e.g., 'search.keyword_input')."""
+    68→        keys = selector_path.split('.')
+    69→        value = self._selectors.get('selectors', {})
+    70→
+    71→        for k in keys:
+    72→            if isinstance(value, dict):
+    73→                value = value.get(k)
+    74→                if value is None:
+    75→                    raise ConfigurationError(f"Selector not found: {selector_path}")
+    76→            else:
+    77→                raise ConfigurationError(f"Invalid selector path: {selector_path}")
+    78→
+    79→        return value
+    80→
+    81→    def get_template(self, template_name: str) -> Dict[str, Any]:
+    82→        """Get message template by name."""
+    83→        template = self._message_templates.get(template_name)
+    84→        if template is None:
+    85→            raise ConfigurationError(f"Message template not found: {template_name}")
+    86→        return template
+    87→
+    88→    def list_templates(self) -> list:
+    89→        """List all available message template names."""
+    90→        return list(self._message_templates.keys())
+    91→
+    92→
+    93→# Global configuration instance
+    94→_config_instance = None
+    95→
+    96→
+    97→def get_config() -> Config:
+    98→    """Get global configuration instance."""
+    99→    global _config_instance
+   100→    if _config_instance is None:
+   101→        _config_instance = Config()
+   102→    return _config_instance
+   103→
+   104→
+   105→

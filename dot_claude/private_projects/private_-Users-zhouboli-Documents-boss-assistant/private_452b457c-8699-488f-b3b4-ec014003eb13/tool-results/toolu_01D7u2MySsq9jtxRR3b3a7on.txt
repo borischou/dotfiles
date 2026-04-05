@@ -1,0 +1,85 @@
+     1→{
+     2→  "version": "2.0.0",
+     3→  "last_updated": "2026-03-03",
+     4→  "note": "Verified selectors from live DOM inspection. CRITICAL: search results are inside iframe[name=searchFrame]. Chat input is #boss-chat-editor-input (not #boss-chat-global-input). Resume overlay is wasm-rendered (empty DOM). Search uses '换一换' button, not infinite scroll.",
+     5→  "architecture": {
+     6→    "search_page": "https://www.zhipin.com/web/chat/search",
+     7→    "search_iframe": "iframe[name='searchFrame'] -> /web/frame/search/",
+     8→    "resume_iframe": "/web/frame/c-resume/?source=search (wasm-rendered, DOM empty)",
+     9→    "chat_page": "https://www.zhipin.com/web/chat/index",
+    10→    "candidate_id_source": "a[data-expect] on search cards"
+    11→  },
+    12→  "urls": {
+    13→    "search_page": "https://www.zhipin.com/web/chat/search",
+    14→    "search_iframe": "https://www.zhipin.com/web/frame/search/",
+    15→    "chat_page": "https://www.zhipin.com/web/chat/index",
+    16→    "job_list": "https://www.zhipin.com/web/chat/job/list",
+    17→    "base": "https://www.zhipin.com"
+    18→  },
+    19→  "selectors": {
+    20→    "navigation": {
+    21→      "search_tab": "text=\"搜索\"",
+    22→      "recommend_tab": "text=\"推荐牛人\"",
+    23→      "chat_tab": "text=\"沟通\"",
+    24→      "job_management_tab": "text=\"职位管理\""
+    25→    },
+    26→    "search": {
+    27→      "_context": "All selectors below are INSIDE iframe[name='searchFrame']",
+    28→      "iframe_name": "searchFrame",
+    29→      "search_input": "input.search-input",
+    30→      "card_list": "div.card-list",
+    31→      "candidate_card": "li.geek-info-card",
+    32→      "card_link": "li.geek-info-card > a",
+    33→      "card_link_id_attr": "data-expect",
+    34→      "card_link_job_attr": "data-jid",
+    35→      "candidate_name": "span.name-label",
+    36→      "candidate_labels": "span.card-label",
+    37→      "candidate_active": "span.active-desc-text",
+    38→      "candidate_info_labels": "div.info-labels > span.label-text",
+    39→      "candidate_detail": "div.info-detail",
+    40→      "candidate_expect_city": "ul.expect-exp-box .t-tooltip-slot",
+    41→      "candidate_work_exp": "ul.work-exp-box .t-tooltip-slot",
+    42→      "candidate_edu": "ul.edu-exp-box .t-tooltip-slot",
+    43→      "contact_button": "button.btn-getcontact",
+    44→      "contact_button_chat": "button.btn-getcontact.btn-chat",
+    45→      "refresh_button": "div.change-btn",
+    46→      "filter_area": ".check-params-options-content",
+    47→      "not_interested": "div.suitable-tip"
+    48→    },
+    49→    "profile": {
+    50→      "_context": "Resume overlay is wasm-rendered. Profile data must be extracted from search cards, not from resume DOM.",
+    51→      "dialog": ".dialog-wrap.active",
+    52→      "dialog_resume_class": "dialog-lib-resume",
+    53→      "resume_layout": ".resume-layout-wrap",
+    54→      "resume_center": ".resume-center-side",
+    55→      "resume_detail_wrap": ".resume-detail-wrap",
+    56→      "resume_right": ".resume-right-side",
+    57→      "chat_history": ".chat-history-process",
+    58→      "resume_footer": ".resume-footer-wrap",
+    59→      "position_name": "span.position-name",
+    60→      "close_button": "span.iboss-close",
+    61→      "close_popup": ".boss-popup__close"
+    62→    },
+    63→    "message": {
+    64→      "_context": "Chat page at /web/chat/index. Input is contenteditable div.",
+    65→      "chat_input": "#boss-chat-editor-input",
+    66→      "send_button": "div.submit",
+    67→      "conversation_list": "div.user-list",
+    68→      "conversation_item": "div.geek-item",
+    69→      "conversation_item_id_attr": "data-id",
+    70→      "conversation_box": "div.chat-conversation",
+    71→      "message_list": ".chat-message-list",
+    72→      "message_item": ".message-item",
+    73→      "chat_filter": ".chat-filter-container",
+    74→      "job_select": ".job-select"
+    75→    },
+    76→    "search_contact": {
+    77→      "_context": "Contact button flow from search page",
+    78→      "contact_button_in_card": "button.btn-getcontact",
+    79→      "contact_button_in_dialog": ".resume-footer button.btn-getcontact",
+    80→      "buy_card_dialog": ".buy-search-chat-card",
+    81→      "discount_dialog": ".prop-sale-discounts-dialog-v3"
+    82→    }
+    83→  }
+    84→}
+    85→

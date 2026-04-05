@@ -1,0 +1,128 @@
+"""Diagnose search page DOM to understand current maimai structure."""
+import sys
+import asyncio
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.core.browser import get_browser_manager
+from src.utils.retry import retry_navigation
+
+
+async def main():
+    browser = get_browser_manager()
+    await browser.start()
+    page = browser.page
+
+    keyword = "前端"
+    search_url = f"https://maimai.cn/web/search_center?type=contact&query={keyword}&highlight=true"
+
+    print(f"\n=== Step 1: Navigate to {search_url} ===")
+    await retry_navigation(page, search_url, wait_until='domcontentloaded')
+    await asyncio.sleep(3)
+
+    print(f"\n=== Step 2: Current URL ===")
+    print(page.url)
+
+    print(f"\n=== Step 3: Page title ===")
+    title = await page.title()
+    print(title)
+
+    print(f"\n=== Step 4: Screenshot ===")
+    await page.screenshot(path="data/screenshots/diag_after_nav.png")
+    print("Saved: data/screenshots/diag_after_nav.png")
+
+    print(f"\n=== Step 5: Check for contactcard elements ===")
+    cards = await page.query_selector_all('[id^="contactcard_"]')
+    print(f"contactcard_ elements: {len(cards)}")
+
+    print(f"\n=== Step 6: Check search input value ===")
+    input_val = await page.evaluate('''() => {
+        const inputs = document.querySelectorAll('input[type="text"], input[type="search"], input[placeholder*="搜索"], input[placeholder*="search"]');
+        return Array.from(inputs).map(i => ({
+            placeholder: i.placeholder,
+            value: i.value,
+            className: i.className.substring(0, 80),
+            id: i.id
+        }));
+    }''')
+    for inp in input_val:
+        print(f"  Input: placeholder={inp['placeholder']!r}, value={inp['value']!r}, class={inp['className']!r}")
+
+    print(f"\n=== Step 7: Dump visible text structure (first 3000 chars) ===")
+    body_text = await page.evaluate('''() => {
+        return document.body.innerText.substring(0, 3000);
+    }''')
+    print(body_text)
+
+    print(f"\n=== Step 8: Check all <a> links with href containing contact/profile/u/ ===")
+    links = await page.evaluate('''() => {
+        const anchors = document.querySelectorAll('a[href*="/contact"], a[href*="/u/"], a[href*="profile"], a[href*="egid"]');
+        return Array.from(anchors).slice(0, 10).map(a => ({
+            href: a.href,
+            text: a.innerText.substring(0, 60)
+        }));
+    }''')
+    for l in links:
+        print(f"  Link: text={l['text']!r}, href={l['href']}")
+
+    print(f"\n=== Step 9: Check major DOM containers ===")
+    containers = await page.evaluate('''() => {
+        const selectors = [
+            '[class*="search"]', '[class*="result"]', '[class*="card"]',
+            '[class*="contact"]', '[class*="list"]', '[class*="candidate"]',
+            '[class*="people"]', '[class*="user"]'
+        ];
+        const results = {};
+        for (const sel of selectors) {
+            const els = document.querySelectorAll(sel);
+            if (els.length > 0) {
+                results[sel] = {
+                    count: els.length,
+                    firstClasses: Array.from(els).slice(0, 3).map(e => e.className.substring(0, 80))
+                };
+            }
+        }
+        return results;
+    }''')
+    for sel, info in containers.items():
+        print(f"  {sel}: count={info['count']}, classes={info['firstClasses']}")
+
+    print(f"\n=== Step 10: Try typing keyword into search input ===")
+    search_input = await page.query_selector('input[placeholder*="搜索"]') or await page.query_selector('input[type="search"]') or await page.query_selector('input[type="text"]')
+    if search_input:
+        await search_input.click()
+        await search_input.fill(keyword)
+        await asyncio.sleep(1)
+        await page.keyboard.press('Enter')
+        await asyncio.sleep(3)
+
+        print(f"After typing + Enter:")
+        print(f"  URL: {page.url}")
+        await page.screenshot(path="data/screenshots/diag_after_type.png")
+        print("  Saved: data/screenshots/diag_after_type.png")
+
+        cards2 = await page.query_selector_all('[id^="contactcard_"]')
+        print(f"  contactcard_ elements: {len(cards2)}")
+
+        # Check for "人脉" tab and click it
+        renmai_tab = await page.query_selector('text="人脉"')
+        if renmai_tab:
+            print("  Found '人脉' tab, clicking...")
+            await renmai_tab.click()
+            await asyncio.sleep(3)
+            await page.screenshot(path="data/screenshots/diag_after_renmai.png")
+            print("  Saved: data/screenshots/diag_after_renmai.png")
+            cards3 = await page.query_selector_all('[id^="contactcard_"]')
+            print(f"  contactcard_ elements after 人脉 tab: {len(cards3)}")
+
+        body_text2 = await page.evaluate('() => document.body.innerText.substring(0, 3000)')
+        print(body_text2[:2000])
+    else:
+        print("  No search input found!")
+
+    await browser.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,54 @@
+     1→"""Search module for finding candidates on Maimai.
+     2→
+     3→Handles candidate search with filters, pagination,
+     4→and extraction of basic candidate information.
+     5→"""
+     6→
+     7→from dataclasses import dataclass, asdict
+     8→from typing import List, Optional
+     9→from urllib.parse import urlencode
+    10→
+    11→from patchright.async_api import Page
+    12→from loguru import logger
+    13→from rich.console import Console
+    14→from rich.progress import Progress, SpinnerColumn, TextColumn
+    15→
+    16→from src.core.browser import BrowserManager, get_browser_manager
+    17→from src.core.anti_detection import human_scroll, human_click, human_type
+    18→from src.modules.auth import ensure_logged_in
+    19→from src.utils.config import get_config
+    20→from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+    21→from src.utils.delays import async_random_delay
+    22→from src.utils.retry import retry_navigation
+    23→from src.utils.validators import validate_keywords
+    24→from src.utils.captcha import check_captcha
+    25→from src.models.database import Candidate, SearchHistory, get_db_manager
+    26→from src.exceptions.errors import (
+    27→    SelectorNotFoundError,
+    28→    ExtractionError,
+    29→)
+    30→
+    31→console = Console()
+    32→
+    33→
+    34→# Maimai search URL
+    35→MAIMAI_SEARCH_URL = "https://maimai.cn/web/search_center"
+    36→
+    37→# Names indicating paid/premium-only profiles that should be skipped
+    38→PREMIUM_PLACEHOLDER_NAMES = {"脉脉高价值人脉"}
+    39→
+    40→# Keywords indicating non-R&D roles (to be filtered out)
+    41→NON_RD_KEYWORDS = {
+    42→    "销售", "运营", "产品", "市场", "电子商务", "电商",
+    43→    "商务", "品牌", "公关", "客服", "采购", "招商",
+    44→    "人力", "人事", "HR", "hr", "HRBP", "行政",
+    45→    "财务", "会计", "审计", "法务", "法律", "合规",
+    46→    "内容", "编辑", "翻译", "教育", "培训", "教学",
+    47→    "物流", "供应链", "仓储",
+    48→}
+    49→
+    50→
+
+<system-reminder>
+Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+</system-reminder>

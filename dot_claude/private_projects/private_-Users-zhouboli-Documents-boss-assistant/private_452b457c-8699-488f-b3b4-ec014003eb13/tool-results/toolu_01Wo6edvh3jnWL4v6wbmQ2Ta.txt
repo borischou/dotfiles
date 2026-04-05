@@ -1,0 +1,54 @@
+     1→     1→     1→"""ContextVars-based progress emission.
+     2→     2→     2→
+     3→     3→     3→Allows any module in the call stack to emit progress events without
+     4→     4→     4→receiving a callback parameter. In CLI mode the context var is None
+     5→     5→     5→and calls are silently ignored. In Web mode, the TaskQueue worker
+     6→     6→     6→sets the callback before running each task.
+     7→     7→     7→"""
+     8→     8→     8→
+     9→     9→     9→import asyncio
+    10→    10→    10→import contextvars
+    11→    11→    11→from typing import Any, Callable, Optional
+    12→    12→    12→
+    13→    13→    13→from loguru import logger
+    14→    14→    14→
+    15→    15→    15→_progress_ctx: contextvars.ContextVar[Optional[Callable]] = contextvars.ContextVar(
+    16→    16→    16→    '_progress_ctx', default=None
+    17→    17→    17→)
+    18→    18→    18→
+    19→    19→    19→
+    20→    20→    20→def set_progress_callback(callback: Optional[Callable]) -> contextvars.Token:
+    21→    21→    21→    """Set the progress callback for the current async context."""
+    22→    22→    22→    return _progress_ctx.set(callback)
+    23→    23→    23→
+    24→    24→    24→
+    25→    25→    25→def reset_progress_callback(token: contextvars.Token) -> None:
+    26→    26→    26→    """Reset the progress callback to its previous value."""
+    27→    27→    27→    _progress_ctx.reset(token)
+    28→    28→    28→
+    29→    29→    29→
+    30→    30→    30→def emit_progress(event: str, **data: Any) -> None:
+    31→    31→    31→    """Emit a progress event if a callback is registered.
+    32→    32→    32→
+    33→    33→    33→    Safe to call from anywhere — does nothing in CLI mode.
+    34→    34→    34→    In Web mode, schedules the async callback as a fire-and-forget task.
+    35→    35→    35→    """
+    36→    36→    36→    cb = _progress_ctx.get()
+    37→    37→    37→    if cb is not None:
+    38→    38→    38→        try:
+    39→    39→    39→            loop = asyncio.get_running_loop()
+    40→    40→    40→            task = loop.create_task(cb(event, data))
+    41→    41→    41→            task.add_done_callback(_handle_task_exception)
+    42→    42→    42→        except RuntimeError:
+    43→    43→    43→            pass  # No running event loop
+    44→    44→    44→
+    45→    45→    45→
+    46→    46→    46→def _handle_task_exception(task: asyncio.Task) -> None:
+    47→    47→    47→    """Log exceptions from fire-and-forget progress tasks."""
+    48→    48→    48→    try:
+    49→    49→    49→        task.result()
+    50→    50→    50→    except asyncio.CancelledError:
+    51→    51→    51→        pass
+    52→    52→    52→    except Exception as e:
+    53→    53→    53→        logger.error(f"Error in progress callback: {e}")
+    54→    54→    54→

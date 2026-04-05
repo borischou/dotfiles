@@ -1,0 +1,164 @@
+# Lessons Learned
+
+## 2026-03-03: Talent Bank Pipeline 首次全流程调试
+
+### 背景
+使用甘霖模板通过人才银行模式搜索+打招呼+交换手机微信，4个关键词，最终成功发送29人。
+从0到全流程跑通经历了7个bug修复。
+
+### Bug 列表与根因
+
+| # | 问题 | 根因 | 修复 | 防范规则 |
+|---|------|------|------|----------|
+| 1 | Emunium `click_at()`/`type_at()` 抛 TypeError | CDP 模式下 `page.viewport_size` 为 None，Emunium 内部 `viewport_size["width"]` 报错 | `human_click`/`human_type` 加 try/except TypeError fallback 到原生 click/type | **新模块引入前必须在 CDP 模式下测试** |
+| 2 | 人才银行提取数据错乱（年龄当公司、学历当职位） | 脉脉页面 DOM 结构变化，旧选择器 `talent-card` 等不再匹配 | 重写 `_extract_talent_bank_results()` JS，用 class-based 选择器 | **提取逻辑加 sanity check（名字长度、公司非数字等）** |
+| 3 | 搜完所有关键词再发消息，候选人不在页面上 | 人才银行是 SPA，切关键词后上一批候选人 DOM 消失 | 重构为 per-keyword search+send（搜完一个关键词立即发） | **SPA 场景下搜索和操作必须在同一页面上下文** |
+| 4 | `Config` object has no attribute `data` | 直接访问 `config.data.get()` 而非 `config.get()` | 改为 `config.get("timings.im_tab_open_wait_ms", 3000)` | **Config API 只用 `config.get()` 点分路径** |
+| 5 | 消息带入上一个候选人的名字 | `text='立即沟通'` 选择器匹配页面第一个可见按钮，不是当前候选人的 | 从候选人名字元素向上遍历 DOM 找所属卡片，在卡片内定位按钮 | **页面有多个同名按钮时，必须通过父容器限定作用域** |
+| 6 | textarea 内容被平台预填名字叠加 | 平台"立即沟通"弹窗自动预填候选人名字，Playwright `fill()` 在 React 受控组件上可能合并而非替换 | 用 JS native setter 强制清空再设值；模板去掉 `{name}` 变量 | **React 受控组件用 `HTMLTextAreaElement.prototype.value.set` + dispatchEvent** |
+| 7 | 交换手机/微信不生效 | (a) 按钮文本是"交换手机"非"交换电话" (b) Playwright 复合选择器在 iframe 中静默失败 (c) 交换微信有确认弹窗 `a.confirm` 未点击 | (a) 更新选择器文本 (b) 改用 `frame.evaluate()` JS 直接点击 (c) 加确认弹窗处理 | **iframe 内交互一律用 evaluate() + JS click；新功能上线前在真实页面逐步验证** |
+
+### 关键教训
+
+1. **CDP 模式是特殊环境**: viewport_size=None、Emunium 不可靠、需要 fallback 策略
+2. **iframe 是隔离世界**: Playwright 高级选择器（`:has()`, `:text-is()`）在 iframe 中不可靠，用 `frame.evaluate()` 最稳
+3. **脉脉页面按钮文本不可假设**: "交换电话" vs "交换手机" vs "交换手机号" 三个都试过才对——**必须先诊断再修**
+4. **SPA 页面状态转瞬即逝**: 搜索结果切页后 DOM 消失，搜索和操作不能分离
+5. **React 受控组件陷阱**: `fill()` 和 `type()` 可能不完全覆盖预填内容，native setter 更可靠
+6. **诊断脚本比猜测高效**: 每次都是连上 Chrome 用 evaluate() 直接看 DOM 结构才找到真正原因
+
+### 待优化项
+
+1. **提取数据 sanity check**: `_extract_talent_bank_results()` 应在返回前校验 name 不含数字、company 不是年龄等
+2. **公司过滤应在页面端实现**: 当前是客户端过滤（搜到后筛），大部分候选人被丢弃，浪费搜索配额。应调研页面是否支持公司筛选 UI
+3. **失败记录清理**: 125 条 failed 记录是调试产生的脏数据，应提供清理命令
+4. **人才银行翻页检测**: 当前两次提取相同数据就判断无更多结果（page 2 = page 1 的内容），需更精确的翻页判断
+5. **rate limiter 间隔可优化**: 每次发送后固定等 9-10s（rate limit hit），可调小 settings.json 中的 min_interval
+
+---
+
+## 2026-03-03: Review #8 — 新代码审查补漏
+
+### 背景
+c403333 提交后对 8 个文件 +334/-151 行进行代码审查，发现 11 个问题。
+
+### 新增防范规则
+
+| # | 规则 | 来源 |
+|---|------|------|
+| 1 | **新增 CLI 参数必须同步更新 checkpoint save/restore** | checkpoint 丢失 exchange_phone/wechat/min_years |
+| 2 | **Preview 模式必须传递与 pipeline 相同的筛选参数** | preview 不传 min_years 导致预览与实际不一致 |
+| 3 | **第三方库 fallback 用 Exception 而非具体异常** | Emunium 可能抛 TypeError 以外的异常 |
+| 4 | **URL 匹配用路径前缀（`/im`）而非子串（`im`）** | "im" 匹配 "climb"、"priming" 等误判 |
+| 5 | **JS evaluate_handle 返回值可能是 null handle** | 需额外 try/except 包裹 .evaluate() 调用 |
+
+---
+
+### L001 - 2026-03-05
+
+- **问题**: `apply_profile()` 的 `json.load()` 无异常处理，同文件 `_load_json()` 有完善的 try-except 模式但未参照
+- **根因**: 新增函数时没有检查同文件已有的处理模式，快速实现遗漏防御代码
+- **修复**: 添加 `try-except json.JSONDecodeError` 抛出 `ConfigurationError`，与 `_load_json()` 一致
+- **规则**: **新增代码前先扫描同文件已有的异常处理/错误处理模式，保持一致**。同一文件里同类操作（如 JSON 加载）的防御级别不应有差异
+
+### L002 - 2026-03-05
+
+- **问题**: Review #1 批量修复过函数内 import（re/sys/traceback/datetime），但后续新增的 `_deep_merge`/`apply_profile`/`validate_template_rendering` 又引入同类问题
+- **根因**: 修复历史问题时没有建立机制防止复发，只靠人工记忆
+- **修复**: 移除冗余 import，将 `copy`/`json`/`re` 统一放到文件顶部
+- **规则**: **已修复过的代码风格问题用 lint 规则固化**（如 ruff 的 F811 redefined-while-unused），不依赖人工记忆防止复发
+
+### L003 - 2026-03-05
+
+- **问题**: 搜索阿里系算法工程师，目标 50 人，实际只触达 5 人（人才银行）+ 0 人（搜索中心券用尽）
+- **根因**:
+  1. 人才银行每个关键词只有 1 页有效结果（~20人），阿里系占比极低（1-2人/关键词）
+  2. 搜索中心联系券独立于人才银行沟通券，用尽后触发"极速联系"付费页面无法发送
+  3. 单一关键词"算法"覆盖面不够，需要拆分细分方向
+- **修复**: N/A（平台限制非代码问题）
+- **规则**:
+  - **定向公司搜索（如只要阿里）必须多关键词组合**：算法、算法工程师、机器学习、深度学习、NLP、CV、推荐算法、搜索算法、数据挖掘、风控算法等，单关键词阿里系命中率 < 10%
+  - **人才银行和搜索中心联系券是独立的**：人才银行用沟通券，搜索中心用联系券，一个用尽不影响另一个
+  - **大量触达任务优先用人才银行模式**：沟通券配额通常更充足，且自动交换手机微信
+  - **开始前先确认券余量**：避免跑到一半才发现券用尽浪费时间
+
+### L004 - 2026-03-06
+
+- **问题**: `--max-years 9` 未过滤掉 11年、13年经验的候选人，recruit_manage 年限过滤完全失效
+- **根因**: `search.py:1682` 年限过滤入口条件是 `if min_years:`，只传 `--max-years` 不传 `--min-years` 时整个过滤逻辑被跳过
+- **修复**: 条件改为 `if min_years or max_years:`，`effective_min = min_years or 0` 确保无 min_years 时从最小范围开始选
+- **规则**: **多参数联合控制同一功能时，入口条件必须覆盖所有参数的组合**。`if a:` 里同时处理 a 和 b，当只传 b 时整个逻辑被跳过——应改为 `if a or b:`
+
+---
+
+## 2026-03-10: Chelsea 猎头批量打招呼 Pipeline 调试
+
+### 背景
+使用 chelsea_intro 模板通过 recruit_manage 模式给大厂客户端/后端开发打招呼。
+原计划用 talent_bank 模式，但 UI 变化导致失败，切换到 recruit_manage 后遇到多个弹窗和按钮检测问题。
+
+### Bug 列表与根因
+
+| # | 问题 | 根因 | 修复 | 防范规则 |
+|---|------|------|------|----------|
+| 1 | talent_bank 模式找不到"招人"按钮 | 脉脉 UI 改版，入口按钮变化 | 切换到 recruit_manage 模式 | **定期验证各模式入口可用性；UI 变化时优先切换备用模式而非修复** |
+| 2 | ant-modal 弹窗拦截点击 | 脉脉推"联系券购买"弹窗覆盖在候选人卡片上 | 发送前用 JS 点击 `.ant-modal-wrap .ant-modal-close` 关闭弹窗 | **每次操作前清理可能的遮挡层（modal、overlay、toast）** |
+| 3 | hiddenFullContent 遮罩拦截点击 | 页面有 `[class*="hiddenFullContent"]` 透明遮罩层 | 发送前用 JS `remove()` 移除该元素 | **点击失败时先检查是否有透明遮罩层，用 DevTools Elements 面板排查** |
+| 4 | 已联系候选人重复发送失败 | "发消息"按钮（已联系）vs "立即沟通"按钮（未联系）未区分 | 检测按钮文本，"发消息"时跳过并标记为 skipped | **同一功能不同状态的按钮文本可能不同，必须检测并分别处理** |
+| 5 | 模板包含 `{name}` 导致重复 | 脉脉打招呼自动带候选人名字，模板再加一次造成重复 | 从 chelsea_intro 模板移除 `{name}` 变量 | **平台自动填充的内容不要在模板中重复** |
+| 6 | Frame detached 登录检测失败 | Chrome tab 状态异常，CDP 连接的 page 已 detached | 重启 Chrome 后重试 | **Frame detached 错误无法代码修复，需重启浏览器** |
+| 7 | iOS pipeline 未生成报告 | 后台任务输出截断（100行限制），进程在报告生成前异常退出 | 无代码修复（瞬态问题） | **长时间 pipeline 建议前台运行；运行后检查 reports/ 目录确认报告生成** |
+
+### 代码修改
+
+**`src/modules/message.py` - `_make_recruit_manage_sender()` 内 `_send()` 函数**:
+
+```python
+# 1. 发送前清理弹窗和遮罩
+await page.evaluate("""() => {
+    // 关闭 ant-modal (联系券购买弹窗)
+    const antModalClose = document.querySelector('.ant-modal-wrap .ant-modal-close');
+    if (antModalClose) antModalClose.click();
+    // 移除 hiddenFullContent 遮罩
+    const hiddenOverlay = document.querySelector('[class*="hiddenFullContent"]');
+    if (hiddenOverlay) hiddenOverlay.remove();
+}""")
+
+# 2. 检测按钮状态区分已联系/未联系
+btn_info = await page.evaluate("""(nameEl) => {
+    // ... 遍历父元素找按钮
+    if (text === '立即沟通' || text === '发消息') {
+        return { text: text, found: true };
+    }
+}""", name_el)
+
+if btn_info.get("text") == "发消息":
+    # 已联系，跳过
+    return CandidateSendResult(status="skipped", reason="already contacted")
+```
+
+**`config/message_templates.json`**:
+```json
+"chelsea_intro": {
+    "content": "您好~我是猎头Chelsea...",  // 移除了 {name}
+    "variables": []  // 清空变量列表
+}
+```
+
+### 关键教训
+
+1. **UI 变化是常态**: talent_bank 入口变了就切 recruit_manage，不要死磕修复一个模式
+2. **弹窗/遮罩是点击失败首因**: 脉脉会推各种营销弹窗，操作前必须清理
+3. **按钮文本区分状态**: "立即沟通" vs "发消息" 代表不同状态，不能假设按钮永远可点
+4. **平台自动填充要留意**: 脉脉打招呼自动带名字，模板不要重复
+5. **后台任务有输出限制**: 长时间运行的 pipeline 输出可能被截断，影响问题排查
+
+### 本次运行结果
+
+| 关键词 | 搜索 | 发送 | 跳过 | 失败 | 报告 |
+|-------|------|------|------|------|------|
+| 客户端, 后端 | 35 | 28 | 1 | 6 | ✅ |
+| 前端 | 22 | 1 | 1 | 0 | ✅ (限流20) |
+| iOS | 22 | 20 | 2 | 0 | ❌ (瞬态问题) |
+| Android | 21 | 18 | 3 | 0 | ✅ |
+| **合计** | 100 | 67 | 7 | 6 | - |

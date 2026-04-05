@@ -1,0 +1,257 @@
+"""Rate limiter for preventing account bans."""
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+from typing import Tuple, Optional
+
+from loguru import logger
+from sqlalchemy import func
+
+from src.models.database import ActionLog, get_db_manager, DatabaseManager
+from src.utils.config import get_config, Config
+from src.exceptions.errors import RateLimitExceededError
+
+
+class RateLimiter:
+    """Rate limiter for controlling action frequency.
+
+    Supports adaptive throttling: when captchas or errors are reported,
+    limits are temporarily tightened to reduce detection risk.
+    """
+
+    def __init__(self, config: Optional[Config] = None, db_manager: Optional[DatabaseManager] = None):
+        self.config = config or get_config()
+        self.db_manager = db_manager or get_db_manager()
+
+        self._throttle_factor: float = 1.0
+        self._captcha_timestamps: list = []
+        self._error_timestamps: list = []
+        self._pruned: bool = False
+
+    def report_captcha(self) -> None:
+        now = datetime.now(timezone.utc)
+        self._captcha_timestamps.append(now)
+        cutoff = now - timedelta(minutes=30)
+        self._captcha_timestamps = [t for t in self._captcha_timestamps if t >= cutoff]
+        self._update_throttle_factor()
+
+    def report_error(self) -> None:
+        """Report an error to adaptive throttling (e.g. page load failure, selector not found)."""
+        now = datetime.now(timezone.utc)
+        self._error_timestamps.append(now)
+        cutoff = now - timedelta(minutes=30)
+        self._error_timestamps = [t for t in self._error_timestamps if t >= cutoff]
+        self._update_throttle_factor()
+
+    def _update_throttle_factor(self) -> None:
+        captcha_count = len(self._captcha_timestamps)
+        error_count = len(self._error_timestamps)
+        combined = captcha_count + error_count * 0.5
+
+        if combined >= 3:
+            self._throttle_factor = 0.3
+        elif combined >= 2:
+            self._throttle_factor = 0.5
+        elif combined >= 1:
+            self._throttle_factor = 0.7
+        else:
+            self._throttle_factor = 1.0
+
+        if self._throttle_factor < 1.0:
+            logger.warning(
+                f"Adaptive throttle active: factor={self._throttle_factor:.1f} "
+                f"(captchas={captcha_count}, errors={error_count} in last 30min)"
+            )
+
+    def _refresh_throttle(self) -> None:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        self._captcha_timestamps = [t for t in self._captcha_timestamps if t >= cutoff]
+        self._error_timestamps = [t for t in self._error_timestamps if t >= cutoff]
+        self._update_throttle_factor()
+
+    @property
+    def throttle_factor(self) -> float:
+        return self._throttle_factor
+
+    def _get_limits(self, action_type: str) -> Tuple[int, int, int]:
+        action_map = {
+            'search': ('search_per_hour', 'search_per_day'),
+            'view_profile': ('profile_view_per_hour', 'profile_view_per_day'),
+            'send_message': ('message_per_hour', 'message_per_day'),
+        }
+
+        if action_type not in action_map:
+            raise ValueError(f"Unknown action type: {action_type}")
+
+        hour_key, day_key = action_map[action_type]
+
+        per_hour = self.config.get(f'rate_limits.{hour_key}', 20)
+        per_day = self.config.get(f'rate_limits.{day_key}', 100)
+        min_interval = self.config.get('rate_limits.min_interval_seconds', 35)
+
+        per_hour = max(1, int(per_hour * self._throttle_factor))
+        per_day = max(1, int(per_day * self._throttle_factor))
+        if self._throttle_factor < 1.0:
+            min_interval = int(min_interval / self._throttle_factor)
+
+        return per_hour, per_day, min_interval
+
+    def _count_actions(self, action_type: str, since: datetime) -> int:
+        with self.db_manager.session_scope() as session:
+            count = session.query(func.count(ActionLog.id)).filter(
+                ActionLog.action_type == action_type,
+                ActionLog.timestamp >= since
+            ).scalar()
+            return count or 0
+
+    def _get_last_action_time(self, action_type: Optional[str] = None) -> Optional[datetime]:
+        with self.db_manager.session_scope() as session:
+            query = session.query(func.max(ActionLog.timestamp))
+            if action_type:
+                query = query.filter(ActionLog.action_type == action_type)
+            last_time = query.scalar()
+            return last_time
+
+    def check_rate_limit(self, action_type: str) -> None:
+        if not self._pruned:
+            self.prune_old_entries()
+            self._pruned = True
+
+        self._refresh_throttle()
+        per_hour, per_day, min_interval = self._get_limits(action_type)
+
+        now = datetime.now(timezone.utc)
+        one_hour_ago = now - timedelta(hours=1)
+        one_day_ago = now - timedelta(days=1)
+
+        hourly_count = self._count_actions(action_type, one_hour_ago)
+        if hourly_count >= per_hour:
+            with self.db_manager.session_scope() as session:
+                oldest_in_window = session.query(ActionLog.timestamp).filter(
+                    ActionLog.action_type == action_type,
+                    ActionLog.timestamp >= one_hour_ago
+                ).order_by(ActionLog.timestamp.asc()).first()
+
+                if oldest_in_window:
+                    wait_until = oldest_in_window[0] + timedelta(hours=1)
+                    wait_seconds = max(1, int((wait_until - now).total_seconds()))
+                else:
+                    wait_seconds = 3600
+
+            raise RateLimitExceededError(
+                action_type=action_type,
+                wait_time=wait_seconds,
+                message=f"Hourly rate limit exceeded for {action_type}. "
+                        f"Limit: {per_hour}/hour. Wait {wait_seconds // 60} minutes."
+            )
+
+        daily_count = self._count_actions(action_type, one_day_ago)
+        if daily_count >= per_day:
+            with self.db_manager.session_scope() as session:
+                oldest_in_window = session.query(ActionLog.timestamp).filter(
+                    ActionLog.action_type == action_type,
+                    ActionLog.timestamp >= one_day_ago
+                ).order_by(ActionLog.timestamp.asc()).first()
+
+                if oldest_in_window:
+                    wait_until = oldest_in_window[0] + timedelta(days=1)
+                    wait_seconds = max(1, int((wait_until - now).total_seconds()))
+                else:
+                    wait_seconds = 86400
+
+            raise RateLimitExceededError(
+                action_type=action_type,
+                wait_time=wait_seconds,
+                message=f"Daily rate limit exceeded for {action_type}. "
+                        f"Limit: {per_day}/day. Wait {wait_seconds // 3600} hours."
+            )
+
+        last_action = self._get_last_action_time(action_type=action_type)
+        if last_action:
+            elapsed = (now - last_action).total_seconds()
+            if elapsed < min_interval:
+                wait_seconds = max(1, int(min_interval - elapsed))
+                raise RateLimitExceededError(
+                    action_type=action_type,
+                    wait_time=wait_seconds,
+                    message=f"Minimum interval not met for {action_type}. Wait {wait_seconds} seconds."
+                )
+
+        logger.debug(f"Rate limit check passed for {action_type}")
+
+    def log_action(self, action_type: str, details: Optional[dict] = None) -> None:
+        with self.db_manager.session_scope() as session:
+            action_log = ActionLog(
+                action_type=action_type,
+                timestamp=datetime.now(timezone.utc),
+                details=details or {}
+            )
+            session.add(action_log)
+        logger.debug(f"Logged action: {action_type}")
+
+    def prune_old_entries(self, retention_hours: int = 48) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
+        try:
+            with self.db_manager.session_scope() as session:
+                count = session.query(ActionLog).filter(
+                    ActionLog.timestamp < cutoff
+                ).delete()
+                logger.debug(f"Pruned {count} old ActionLog entries (older than {retention_hours}h)")
+                return count
+        except Exception as e:
+            logger.error(f"Failed to prune ActionLog entries: {e}")
+            return 0
+
+    def get_quota_status(self, action_type: str) -> dict:
+        per_hour, per_day, _ = self._get_limits(action_type)
+
+        now = datetime.now(timezone.utc)
+        one_hour_ago = now - timedelta(hours=1)
+        one_day_ago = now - timedelta(days=1)
+
+        hourly_used = self._count_actions(action_type, one_hour_ago)
+        daily_used = self._count_actions(action_type, one_day_ago)
+
+        return {
+            'action_type': action_type,
+            'hourly': {
+                'used': hourly_used,
+                'limit': per_hour,
+                'remaining': max(0, per_hour - hourly_used)
+            },
+            'daily': {
+                'used': daily_used,
+                'limit': per_day,
+                'remaining': max(0, per_day - daily_used)
+            }
+        }
+
+
+async def async_check_rate_limit(action_type: str, max_retries: int = 60, max_wait_per_retry: int = 3600) -> None:
+    rate_limiter = get_rate_limiter()
+    for attempt in range(max_retries):
+        try:
+            rate_limiter.check_rate_limit(action_type)
+            return
+        except RateLimitExceededError as e:
+            if attempt >= max_retries - 1:
+                raise
+            wait = min(e.wait_time + 1, max_wait_per_retry)
+            logger.info(f"Rate limit hit: {e}. Waiting {wait}s before retrying (attempt {attempt + 1}/{max_retries})...")
+            await asyncio.sleep(wait)
+
+
+_rate_limiter = None
+
+
+def get_rate_limiter() -> RateLimiter:
+    global _rate_limiter
+    if _rate_limiter is None:
+        _rate_limiter = RateLimiter()
+    return _rate_limiter
+
+
+def reset_rate_limiter() -> None:
+    """Reset global rate limiter instance (for testing)."""
+    global _rate_limiter
+    _rate_limiter = None

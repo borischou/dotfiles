@@ -1,0 +1,99 @@
+     1→"""Configuration loader and manager."""
+     2→
+     3→import json
+     4→from pathlib import Path
+     5→from typing import Any, Dict
+     6→
+     7→from loguru import logger
+     8→
+     9→from src.exceptions.errors import ConfigurationError
+    10→
+    11→
+    12→class Config:
+    13→    """Configuration manager for Maimai Assistant."""
+    14→
+    15→    def __init__(self, config_dir: str = None):
+    16→        if config_dir is None:
+    17→            # Resolve relative to project root (3 levels up from this file)
+    18→            config_dir = str(Path(__file__).parent.parent.parent / "config")
+    19→        self.config_dir = Path(config_dir)
+    20→        self._settings: Dict[str, Any] = {}
+    21→        self._selectors: Dict[str, Any] = {}
+    22→        self._message_templates: Dict[str, Any] = {}
+    23→
+    24→        self._load_all()
+    25→
+    26→    def _load_json(self, filename: str) -> Dict[str, Any]:
+    27→        """Load JSON configuration file."""
+    28→        filepath = self.config_dir / filename
+    29→        try:
+    30→            with open(filepath, 'r', encoding='utf-8') as f:
+    31→                return json.load(f)
+    32→        except FileNotFoundError:
+    33→            raise ConfigurationError(f"Configuration file not found: {filepath}")
+    34→        except json.JSONDecodeError as e:
+    35→            raise ConfigurationError(f"Invalid JSON in {filepath}: {e}")
+    36→
+    37→    def _load_all(self):
+    38→        """Load all configuration files."""
+    39→        logger.info("Loading configuration files...")
+    40→        self._settings = self._load_json("settings.json")
+    41→        self._selectors = self._load_json("selectors.json")
+    42→        self._message_templates = self._load_json("message_templates.json")
+    43→        logger.info("Configuration loaded successfully")
+    44→
+    45→    def get(self, key: str, default: Any = None) -> Any:
+    46→        """Get setting by dot-notation key (e.g., 'browser.headless')."""
+    47→        keys = key.split('.')
+    48→        value = self._settings
+    49→
+    50→        for k in keys:
+    51→            if isinstance(value, dict):
+    52→                value = value.get(k)
+    53→                if value is None:
+    54→                    return default
+    55→            else:
+    56→                return default
+    57→
+    58→        return value
+    59→
+    60→    def get_selector(self, selector_path: str) -> str:
+    61→        """Get selector by dot-notation path (e.g., 'search.keyword_input')."""
+    62→        keys = selector_path.split('.')
+    63→        value = self._selectors.get('selectors', {})
+    64→
+    65→        for k in keys:
+    66→            if isinstance(value, dict):
+    67→                value = value.get(k)
+    68→                if value is None:
+    69→                    raise ConfigurationError(f"Selector not found: {selector_path}")
+    70→            else:
+    71→                raise ConfigurationError(f"Invalid selector path: {selector_path}")
+    72→
+    73→        return value
+    74→
+    75→    def get_template(self, template_name: str) -> Dict[str, Any]:
+    76→        """Get message template by name."""
+    77→        template = self._message_templates.get(template_name)
+    78→        if template is None:
+    79→            raise ConfigurationError(f"Message template not found: {template_name}")
+    80→        return template
+    81→
+    82→    def list_templates(self) -> list:
+    83→        """List all available message template names."""
+    84→        return list(self._message_templates.keys())
+    85→
+    86→
+    87→# Global configuration instance
+    88→_config_instance = None
+    89→
+    90→
+    91→def get_config() -> Config:
+    92→    """Get global configuration instance."""
+    93→    global _config_instance
+    94→    if _config_instance is None:
+    95→        _config_instance = Config()
+    96→    return _config_instance
+    97→
+    98→
+    99→

@@ -1,0 +1,81 @@
+{
+  "greeting": {
+    "name": "初次问候",
+    "description": "首次联系候选人的标准问候模板",
+    "content": "您好 {name}，我是{recruiter_name}，{recruiter_company}的猎头顾问。看到您在{company}的{position}经历非常优秀，目前我手上有一个{target_position}的机会，年薪范围{salary_range}，想和您聊聊是否有兴趣了解？",
+    "variables": [
+      "name",
+      "recruiter_name",
+      "recruiter_company",
+      "company",
+      "position",
+      "target_position",
+      "salary_range"
+    ]
+  },
+  "follow_up": {
+    "name": "跟进消息",
+    "description": "向已联系但未回复的候选人发送跟进消息",
+    "content": "{name}您好，上次和您分享的{target_position}职位不知道您考虑得如何？如果您感兴趣，我可以安排时间详细介绍。期待您的回复！",
+    "variables": [
+      "name",
+      "target_position"
+    ]
+  },
+  "job_details": {
+    "name": "职位详情",
+    "description": "详细介绍具体职位信息",
+    "content": "{name}您好，关于{target_position}这个职位，具体情况如下：\n\n公司：{target_company}\n职位：{target_position}\n薪资：{salary_range}\n地点：{location}\n职责：{responsibilities}\n要求：{requirements}\n\n如果您感兴趣，欢迎和我联系详聊！",
+    "variables": [
+      "name",
+      "target_position",
+      "target_company",
+      "salary_range",
+      "location",
+      "responsibilities",
+      "requirements"
+    ]
+  },
+  "referral_request": {
+    "name": "推荐请求",
+    "description": "请求候选人推荐合适的人选",
+    "content": "{name}您好，我是{recruiter_name}。虽然您可能暂时没有换工作的打算，但不知道您身边是否有对{target_position}职位感兴趣的朋友？如果有的话，欢迎推荐给我，我会提供推荐奖励。谢谢！",
+    "variables": [
+      "name",
+      "recruiter_name",
+      "target_position"
+    ]
+  },
+  "thank_you": {
+    "name": "感谢回复",
+    "description": "感谢候选人的回复",
+    "content": "{name}，非常感谢您的回复！我会尽快整理详细的职位信息发给您。如果您有任何问题，随时可以联系我。",
+    "variables": [
+      "name"
+    ]
+  },
+  "chelsea_intro": {
+    "name": "Chelsea简介",
+    "description": "Chelsea猎头初次联系",
+    "content": "您好~我是猎头Chelsea，我这边有一些大厂和初创/头部AI公司的很不错的岗位想推荐给您，方便加个微信嘛",
+    "variables": []
+  },
+  "hello": {
+    "name": "简单问候",
+    "description": "简单的你好消息（极速联系要求10-300字）",
+    "content": "你好，看到您的履历很不错，想和您沟通一下",
+    "variables": []
+  },
+  "jd_live": {
+    "name": "京东直播招聘",
+    "description": "京东直播团队招聘安卓研发",
+    "content": "您好，我这里是京东直播的业务，想聊聊看吗",
+    "variables": []
+  },
+  "ganlin": {
+    "name": "甘霖",
+    "description": "京东零售高阶人才招聘（P9+，汇报CTO-1）",
+    "content": "您好呀~京东在找高阶（P9及以上）优秀人才，汇报给CTO-1，带团队，薪资open可谈，base北京总部（北京最好，上海，深圳等城市也有分公司），也很期待和您行业交流互相认识下，您open聊聊看吗？我可以引荐您和部门负责人认识沟通～可以交换下电话哇！\n京东零售是京东集团的核心业务，晋升空间大，稳定性高。",
+    "variables": []
+  }
+}

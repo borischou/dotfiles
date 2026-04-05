@@ -1,0 +1,8 @@
+src/web/routes/candidates.py:136:        return HTMLResponse(f'<p><mark>抓取失败: {html.escape(str(e))}</mark></p>', status_code=500)
+src/web/routes/messages.py:51:        preview_html = f'<blockquote>{html.escape(content)}</blockquote>'
+src/web/routes/messages.py:57:        return HTMLResponse(f'<p><mark>预览失败: {html.escape(str(e))}</mark></p>')
+src/web/routes/messages.py:110:        return HTMLResponse(f'<p><mark>发送失败: {html.escape(str(e))}</mark></p>', status_code=500)
+src/web/routes/export.py:52:        return HTMLResponse(f'<p><mark>导出失败: {html.escape(str(e))}</mark></p>', status_code=500)
+src/web/routes/pipeline.py:85:        return HTMLResponse(f'<p><mark>{html.escape(msg)}</mark></p>', status_code=400)
+src/web/routes/search.py:56:        return HTMLResponse(f'<p><mark>{html.escape(msg)}</mark></p>', status_code=400)
+src/web/routes/search.py:79:        return HTMLResponse(f'<p><mark>搜索失败: {html.escape(str(e))}</mark></p>', status_code=500)

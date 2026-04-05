@@ -1,0 +1,80 @@
+     1→"""Search routes — search form and execution."""
+     2→
+     3→import html
+     4→
+     5→from fastapi import APIRouter, Request, Form
+     6→from fastapi.responses import HTMLResponse
+     7→from pydantic import ValidationError
+     8→
+     9→from src.web.app import task_queue, templates
+    10→from src.web.schemas import SearchParams
+    11→from src.core.browser import get_browser_manager
+    12→from src.modules.auth import ensure_logged_in
+    13→from src.modules.search import search_candidates
+    14→
+    15→router = APIRouter()
+    16→
+    17→
+    18→@router.get("/", response_class=HTMLResponse)
+    19→async def search_page(request: Request):
+    20→    """Render search form page."""
+    21→    busy = task_queue.is_busy
+    22→    return templates.TemplateResponse("search.html", {
+    23→        "request": request,
+    24→        "pipeline_busy": busy,
+    25→    })
+    26→
+    27→
+    28→@router.post("/", response_class=HTMLResponse)
+    29→async def do_search(
+    30→    request: Request,
+    31→    keywords: str = Form(...),
+    32→    location: str = Form(""),
+    33→    pages: int = Form(1),
+    34→    experience: str = Form(""),
+    35→    education: str = Form(""),
+    36→    salary: str = Form(""),
+    37→):
+    38→    """Execute search and return results as HTML fragment."""
+    39→    if task_queue.is_busy:
+    40→        return HTMLResponse(
+    41→            '<p><mark>Pipeline 运行中，请等待完成后再搜索</mark></p>',
+    42→            status_code=409,
+    43→        )
+    44→
+    45→    try:
+    46→        params = SearchParams(
+    47→            keywords=keywords,
+    48→            location=location,
+    49→            pages=pages,
+    50→            experience=experience,
+    51→            education=education,
+    52→            salary=salary,
+    53→        )
+    54→    except ValidationError as e:
+    55→        msg = e.errors()[0]['msg'] if e.errors() else str(e)
+    56→        return HTMLResponse(f'<p><mark>{html.escape(msg)}</mark></p>', status_code=400)
+    57→
+    58→    try:
+    59→        browser = get_browser_manager()
+    60→        await ensure_logged_in(browser)
+    61→
+    62→        candidates = await search_candidates(
+    63→            keywords=params.keywords,
+    64→            location=params.location,
+    65→            max_pages=params.pages,
+    66→            experience=params.experience,
+    67→            education=params.education,
+    68→            salary=params.salary,
+    69→            browser=browser,
+    70→        )
+    71→
+    72→        return templates.TemplateResponse("partials/search_results.html", {
+    73→            "request": request,
+    74→            "candidates": candidates,
+    75→            "keywords": keywords,
+    76→        })
+    77→
+    78→    except Exception as e:
+    79→        return HTMLResponse(f'<p><mark>搜索失败: {html.escape(str(e))}</mark></p>', status_code=500)
+    80→

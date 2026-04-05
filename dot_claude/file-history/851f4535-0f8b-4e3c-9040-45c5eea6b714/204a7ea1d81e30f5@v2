@@ -1,0 +1,33 @@
+"""Auth status endpoint."""
+
+from fastapi import APIRouter, Depends
+
+from src.core.browser import BrowserManager
+from src.utils.config import get_config
+from src.web.deps import get_browser
+from src.web.schemas import AuthStatusResponse
+
+router = APIRouter()
+
+
+@router.get("/status", response_model=AuthStatusResponse)
+async def auth_status(browser: BrowserManager = Depends(get_browser)):
+    """Check Chrome connection and login status."""
+    config = get_config()
+    cdp = config.get('browser.cdp_endpoint', 'http://localhost:9222')
+
+    connected = browser.is_connected
+    logged_in = False
+
+    if connected and browser.page:
+        try:
+            from src.modules.auth import check_login_status
+            logged_in = await check_login_status(browser.page)
+        except Exception:
+            pass
+
+    return AuthStatusResponse(
+        logged_in=logged_in,
+        browser_connected=connected,
+        cdp_endpoint=cdp,
+    )

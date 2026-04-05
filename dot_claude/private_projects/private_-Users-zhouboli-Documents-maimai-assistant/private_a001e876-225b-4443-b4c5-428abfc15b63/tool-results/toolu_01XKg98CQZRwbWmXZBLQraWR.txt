@@ -1,0 +1,48 @@
+     1→"""Shared captcha detection utility.
+     2→
+     3→Detects captcha elements on page and pauses for manual resolution.
+     4→Used by auth and search modules.
+     5→"""
+     6→
+     7→import sys
+     8→
+     9→from patchright.async_api import Page
+    10→from loguru import logger
+    11→from rich.console import Console
+    12→
+    13→console = Console()
+    14→
+    15→CAPTCHA_SELECTORS = [
+    16→    '[class*="captcha"]',
+    17→    '[class*="verify"]',
+    18→    '[id*="captcha"]',
+    19→    '[class*="slider"]',
+    20→    '[class*="geetest"]',
+    21→    'iframe[src*="captcha"]',
+    22→]
+    23→
+    24→
+    25→async def check_captcha(page: Page, report_to_rate_limiter: bool = False) -> None:
+    26→    """Detect captcha elements on page and pause for manual resolution.
+    27→
+    28→    Args:
+    29→        page: Playwright page instance
+    30→        report_to_rate_limiter: If True, report captcha to adaptive rate limiter
+    31→    """
+    32→    for selector in CAPTCHA_SELECTORS:
+    33→        try:
+    34→            elem = await page.query_selector(selector)
+    35→            if elem and await elem.is_visible():
+    36→                if report_to_rate_limiter:
+    37→                    from src.utils.rate_limiter import get_rate_limiter
+    38→                    rate_limiter = get_rate_limiter()
+    39→                    rate_limiter.report_captcha()
+    40→
+    41→                console.print("[bold red]Captcha detected! Please solve it in the browser window.[/bold red]")
+    42→                console.print("[dim]Press Enter here after solving the captcha...[/dim]")
+    43→                sys.stdin.readline()
+    44→                await page.wait_for_timeout(2000)
+    45→                return
+    46→        except Exception:
+    47→            continue
+    48→

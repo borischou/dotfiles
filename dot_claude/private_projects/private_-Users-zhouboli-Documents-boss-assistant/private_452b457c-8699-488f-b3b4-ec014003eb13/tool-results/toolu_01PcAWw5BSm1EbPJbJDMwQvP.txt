@@ -1,0 +1,218 @@
+     1→"""Chrome process lifecycle manager for Web service.
+     2→
+     3→Manages starting, health-checking, and restarting the Chrome browser
+     4→process with CDP enabled. Used by the Web service lifespan to ensure
+     5→Chrome is always available for browser automation tasks.
+     6→"""
+     7→
+     8→import asyncio
+     9→import shutil
+    10→import signal
+    11→import subprocess
+    12→import sys
+    13→from pathlib import Path
+    14→from typing import Optional
+    15→
+    16→import httpx
+    17→from loguru import logger
+    18→
+    19→from src.utils.config import get_config
+    20→
+    21→
+    22→class ChromeProcessManager:
+    23→    """Manages the Chrome browser process for the Web service.
+    24→
+    25→    - Auto-starts Chrome in headed mode with --remote-debugging-port
+    26→    - Periodically health-checks via CDP HTTP endpoint
+    27→    - Auto-restarts Chrome if it crashes
+    28→    - Gracefully terminates Chrome on shutdown
+    29→    """
+    30→
+    31→    def __init__(self):
+    32→        self._config = get_config()
+    33→        self._process: Optional[subprocess.Popen] = None
+    34→        self._health_task: Optional[asyncio.Task] = None
+    35→        self._running = False
+    36→
+    37→    @property
+    38→    def debug_port(self) -> int:
+    39→        return self._config.get('web.chrome_debug_port', 9222)
+    40→
+    41→    @property
+    42→    def user_data_dir(self) -> str:
+    43→        return self._config.get('web.chrome_user_data_dir', 'data/.chrome-profile')
+    44→
+    45→    @property
+    46→    def cdp_url(self) -> str:
+    47→        return f'http://127.0.0.1:{self.debug_port}'
+    48→
+    49→    @property
+    50→    def is_chrome_running(self) -> bool:
+    51→        return self._process is not None and self._process.poll() is None
+    52→
+    53→    def _find_chrome_binary(self) -> str:
+    54→        """Find Chrome binary on the current platform."""
+    55→        if sys.platform == 'darwin':
+    56→            candidates = [
+    57→                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    58→                '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    59→            ]
+    60→        elif sys.platform == 'win32':
+    61→            candidates = [
+    62→                r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+    63→                r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+    64→            ]
+    65→        else:
+    66→            candidates = [
+    67→                'google-chrome',
+    68→                'google-chrome-stable',
+    69→                'chromium',
+    70→                'chromium-browser',
+    71→            ]
+    72→
+    73→        for candidate in candidates:
+    74→            if Path(candidate).exists() or shutil.which(candidate):
+    75→                return candidate
+    76→
+    77→        raise RuntimeError(
+    78→            'Chrome binary not found. Install Google Chrome or set the path manually.'
+    79→        )
+    80→
+    81→    async def _check_cdp_health(self) -> bool:
+    82→        """Check if Chrome CDP endpoint is responsive."""
+    83→        try:
+    84→            async with httpx.AsyncClient() as client:
+    85→                resp = await client.get(
+    86→                    f'{self.cdp_url}/json/version',
+    87→                    timeout=5.0,
+    88→                )
+    89→                return resp.status_code == 200
+    90→        except Exception:
+    91→            return False
+    92→
+    93→    def _start_chrome_process(self) -> None:
+    94→        """Start Chrome with CDP enabled."""
+    95→        chrome_binary = self._find_chrome_binary()
+    96→        user_data = Path(self.user_data_dir).resolve()
+    97→        user_data.mkdir(parents=True, exist_ok=True)
+    98→
+    99→        args = [
+   100→            chrome_binary,
+   101→            f'--remote-debugging-port={self.debug_port}',
+   102→            f'--user-data-dir={user_data}',
+   103→            '--no-first-run',
+   104→            '--no-default-browser-check',
+   105→            '--disable-background-timer-throttling',
+   106→            '--disable-backgrounding-occluded-windows',
+   107→            '--disable-renderer-backgrounding',
+   108→        ]
+   109→
+   110→        logger.info(f'Starting Chrome: {" ".join(args[:3])}...')
+   111→        self._process = subprocess.Popen(
+   112→            args,
+   113→            stdout=subprocess.DEVNULL,
+   114→            stderr=subprocess.DEVNULL,
+   115→        )
+   116→        logger.info(f'Chrome started with PID {self._process.pid}')
+   117→
+   118→    async def start(self) -> None:
+   119→        """Start Chrome and begin health monitoring.
+   120→
+   121→        If Chrome is already running on the debug port (e.g. user started
+   122→        it manually), we skip launching a new process and just monitor.
+   123→        """
+   124→        self._running = True
+   125→
+   126→        # Check if Chrome is already running on the port
+   127→        if await self._check_cdp_health():
+   128→            logger.info(f'Chrome already running on port {self.debug_port}, skipping launch')
+   129→        elif self._config.get('web.chrome_auto_launch', True):
+   130→            self._start_chrome_process()
+   131→            # Wait for Chrome to be ready
+   132→            for _ in range(30):
+   133→                if await self._check_cdp_health():
+   134→                    logger.info('Chrome CDP endpoint is ready')
+   135→                    break
+   136→                await asyncio.sleep(1)
+   137→            else:
+   138→                logger.error('Chrome failed to start within 30 seconds')
+   139→        else:
+   140→            logger.warning(
+   141→                'Chrome auto-launch disabled and no Chrome detected on '
+   142→                f'port {self.debug_port}'
+   143→            )
+   144→
+   145→        # Start health check loop
+   146→        self._health_task = asyncio.create_task(self._health_loop())
+   147→
+   148→    async def _health_loop(self) -> None:
+   149→        """Periodically check Chrome health and restart if needed."""
+   150→        while self._running:
+   151→            await asyncio.sleep(10)
+   152→            if not self._running:
+   153→                break
+   154→
+   155→            healthy = await self._check_cdp_health()
+   156→            if not healthy:
+   157→                logger.warning('Chrome health check failed')
+   158→                if self._config.get('web.chrome_auto_launch', True):
+   159→                    await self._restart_chrome()
+   160→
+   161→    async def _restart_chrome(self) -> None:
+   162→        """Restart Chrome process and reset BrowserManager connection."""
+   163→        logger.info('Restarting Chrome...')
+   164→
+   165→        # Kill existing process if any
+   166→        self._kill_process()
+   167→
+   168→        await asyncio.sleep(2)
+   169→
+   170→        # Start fresh
+   171→        self._start_chrome_process()
+   172→
+   173→        # Wait for ready
+   174→        for _ in range(30):
+   175→            if await self._check_cdp_health():
+   176→                logger.info('Chrome restarted successfully')
+   177→                break
+   178→            await asyncio.sleep(1)
+   179→        else:
+   180→            logger.error('Chrome restart failed')
+   181→            return
+   182→
+   183→        # Reset BrowserManager singleton so it reconnects
+   184→        from src.core.browser import BrowserManager
+   185→        await BrowserManager.reset_instance()
+   186→
+   187→    def _kill_process(self) -> None:
+   188→        """Terminate the Chrome process."""
+   189→        if self._process is None:
+   190→            return
+   191→
+   192→        try:
+   193→            self._process.send_signal(signal.SIGTERM)
+   194→            try:
+   195→                self._process.wait(timeout=5)
+   196→            except subprocess.TimeoutExpired:
+   197→                self._process.kill()
+   198→                self._process.wait(timeout=5)
+   199→            logger.info('Chrome process terminated')
+   200→        except Exception as e:
+   201→            logger.warning(f'Error terminating Chrome: {e}')
+   202→        finally:
+   203→            self._process = None
+   204→
+   205→    async def stop(self) -> None:
+   206→        """Stop health monitoring and terminate Chrome."""
+   207→        self._running = False
+   208→
+   209→        if self._health_task and not self._health_task.done():
+   210→            self._health_task.cancel()
+   211→            try:
+   212→                await self._health_task
+   213→            except asyncio.CancelledError:
+   214→                pass
+   215→
+   216→        self._kill_process()
+   217→        logger.info('ChromeProcessManager stopped')
+   218→

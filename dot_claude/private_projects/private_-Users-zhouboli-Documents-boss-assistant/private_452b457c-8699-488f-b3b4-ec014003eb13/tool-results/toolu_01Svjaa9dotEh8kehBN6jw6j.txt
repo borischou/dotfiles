@@ -1,0 +1,140 @@
+     1→"""Tests for database models."""
+     2→
+     3→import pytest
+     4→from datetime import datetime, timezone
+     5→from src.models.database import Candidate, Message, SearchHistory, ActionLog, Base
+     6→from sqlalchemy import create_engine
+     7→from sqlalchemy.orm import sessionmaker
+     8→
+     9→
+    10→@pytest.fixture
+    11→def db_session():
+    12→    """Create an in-memory database for testing."""
+    13→    engine = create_engine('sqlite:///:memory:')
+    14→    Base.metadata.create_all(engine)
+    15→    Session = sessionmaker(bind=engine)
+    16→    session = Session()
+    17→    yield session
+    18→    session.close()
+    19→    Base.metadata.drop_all(engine)
+    20→
+    21→
+    22→def test_create_candidate(db_session):
+    23→    """Test creating a candidate record."""
+    24→    candidate = Candidate(
+    25→        boss_id='zp_test123',
+    26→        name='张三',
+    27→        title='高级前端工程师',
+    28→        company='阿里巴巴',
+    29→        location='杭州',
+    30→        salary_expect='30-50K',
+    31→        work_years='5年',
+    32→        education_level='本科',
+    33→    )
+    34→    db_session.add(candidate)
+    35→    db_session.commit()
+    36→
+    37→    result = db_session.query(Candidate).filter_by(boss_id='zp_test123').first()
+    38→    assert result is not None
+    39→    assert result.name == '张三'
+    40→    assert result.salary_expect == '30-50K'
+    41→    assert result.work_years == '5年'
+    42→    assert result.education_level == '本科'
+    43→
+    44→
+    45→def test_candidate_unique_boss_id(db_session):
+    46→    """Test that boss_id must be unique."""
+    47→    c1 = Candidate(boss_id='zp_dup', name='A')
+    48→    c2 = Candidate(boss_id='zp_dup', name='B')
+    49→    db_session.add(c1)
+    50→    db_session.commit()
+    51→
+    52→    db_session.add(c2)
+    53→    with pytest.raises(Exception):
+    54→        db_session.commit()
+    55→    db_session.rollback()
+    56→
+    57→
+    58→def test_candidate_json_fields(db_session):
+    59→    """Test JSON fields for education/work/skills."""
+    60→    candidate = Candidate(
+    61→        boss_id='zp_json_test',
+    62→        name='李四',
+    63→        education=[{'school': '北大', 'degree': '本科'}],
+    64→        work_experience=[{'company': '腾讯', 'title': '工程师'}],
+    65→        skills=['Python', 'Go', 'React'],
+    66→    )
+    67→    db_session.add(candidate)
+    68→    db_session.commit()
+    69→
+    70→    result = db_session.query(Candidate).filter_by(boss_id='zp_json_test').first()
+    71→    assert result.education[0]['school'] == '北大'
+    72→    assert result.work_experience[0]['company'] == '腾讯'
+    73→    assert 'Python' in result.skills
+    74→
+    75→
+    76→def test_create_message(db_session):
+    77→    """Test creating a message record."""
+    78→    # Create candidate first
+    79→    candidate = Candidate(boss_id='zp_msg_test', name='王五')
+    80→    db_session.add(candidate)
+    81→    db_session.commit()
+    82→
+    83→    message = Message(
+    84→        candidate_boss_id='zp_msg_test',
+    85→        template_name='greeting',
+    86→        content='Hello',
+    87→        status='sent',
+    88→        sent_at=datetime.now(timezone.utc),
+    89→    )
+    90→    db_session.add(message)
+    91→    db_session.commit()
+    92→
+    93→    result = db_session.query(Message).filter_by(candidate_boss_id='zp_msg_test').first()
+    94→    assert result is not None
+    95→    assert result.template_name == 'greeting'
+    96→    assert result.status == 'sent'
+    97→
+    98→
+    99→def test_candidate_message_relationship(db_session):
+   100→    """Test relationship between Candidate and Message."""
+   101→    candidate = Candidate(boss_id='zp_rel_test', name='赵六')
+   102→    db_session.add(candidate)
+   103→    db_session.commit()
+   104→
+   105→    msg1 = Message(candidate_boss_id='zp_rel_test', content='Hi', status='sent', template_name='hello')
+   106→    msg2 = Message(candidate_boss_id='zp_rel_test', content='Follow up', status='sent', template_name='follow_up')
+   107→    db_session.add_all([msg1, msg2])
+   108→    db_session.commit()
+   109→
+   110→    result = db_session.query(Candidate).filter_by(boss_id='zp_rel_test').first()
+   111→    assert len(result.messages) == 2
+   112→
+   113→
+   114→def test_search_history(db_session):
+   115→    """Test creating search history records."""
+   116→    history = SearchHistory(
+   117→        criteria={'keywords': '前端', 'location': '北京'},
+   118→        results_count=15,
+   119→    )
+   120→    db_session.add(history)
+   121→    db_session.commit()
+   122→
+   123→    result = db_session.query(SearchHistory).first()
+   124→    assert result.criteria['keywords'] == '前端'
+   125→    assert result.results_count == 15
+   126→
+   127→
+   128→def test_action_log(db_session):
+   129→    """Test creating action log records."""
+   130→    log = ActionLog(
+   131→        action_type='search',
+   132→        details={'keyword': '后端'},
+   133→    )
+   134→    db_session.add(log)
+   135→    db_session.commit()
+   136→
+   137→    result = db_session.query(ActionLog).first()
+   138→    assert result.action_type == 'search'
+   139→    assert result.details['keyword'] == '后端'
+   140→

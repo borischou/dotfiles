@@ -1,0 +1,115 @@
+"""WebSocket progress broadcaster and contextvars-based callback injection.
+
+This module provides two things:
+1. A Broadcaster that manages WebSocket connections and pushes events
+2. A contextvars-based emit_progress() function that existing modules can call
+   without knowing about WebSocket — in CLI mode, the context var is None
+   and calls are silently ignored.
+"""
+
+import asyncio
+import contextvars
+import json
+from typing import Any, Callable, Coroutine, Dict, Optional, Set
+
+from fastapi import WebSocket
+from loguru import logger
+
+
+# Context variable for injecting progress callback into existing modules.
+# In CLI mode this is None; in Web mode it's set before calling pipeline/message.
+_progress_ctx: contextvars.ContextVar[Optional[Callable]] = contextvars.ContextVar(
+    '_progress_ctx', default=None
+)
+
+
+def set_progress_callback(callback: Optional[Callable]) -> contextvars.Token:
+    """Set the progress callback for the current async context."""
+    return _progress_ctx.set(callback)
+
+
+def emit_progress(event: str, **data: Any) -> None:
+    """Emit a progress event if a callback is registered.
+
+    Safe to call from anywhere — does nothing in CLI mode.
+    In web mode, schedules the async callback as a fire-and-forget task.
+    """
+    cb = _progress_ctx.get()
+    if cb is not None:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(cb(event, data))
+        except RuntimeError:
+            pass  # No running event loop (shouldn't happen in web mode)
+
+
+class Broadcaster:
+    """Manages WebSocket connections and broadcasts task events.
+
+    Supports two types of subscriptions:
+    - Task-specific: /ws/task/{task_id} — receives events for one task
+    - Global: /ws/global — receives all task events
+    """
+
+    def __init__(self):
+        # task_id -> set of WebSocket connections
+        self._task_subs: Dict[str, Set[WebSocket]] = {}
+        # Global subscribers
+        self._global_subs: Set[WebSocket] = set()
+
+    async def subscribe_task(self, task_id: str, ws: WebSocket) -> None:
+        """Subscribe a WebSocket to events for a specific task."""
+        if task_id not in self._task_subs:
+            self._task_subs[task_id] = set()
+        self._task_subs[task_id].add(ws)
+
+    async def unsubscribe_task(self, task_id: str, ws: WebSocket) -> None:
+        """Unsubscribe a WebSocket from a task."""
+        if task_id in self._task_subs:
+            self._task_subs[task_id].discard(ws)
+            if not self._task_subs[task_id]:
+                del self._task_subs[task_id]
+
+    async def subscribe_global(self, ws: WebSocket) -> None:
+        self._global_subs.add(ws)
+
+    async def unsubscribe_global(self, ws: WebSocket) -> None:
+        self._global_subs.discard(ws)
+
+    async def broadcast(self, task_id: str, event: str, data: dict) -> None:
+        """Broadcast an event to task subscribers and global subscribers."""
+        message = json.dumps({
+            "task_id": task_id,
+            "event": event,
+            **data,
+        })
+
+        # Send to task-specific subscribers
+        dead: list = []
+        for ws in self._task_subs.get(task_id, set()):
+            try:
+                await ws.send_text(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self._task_subs.get(task_id, set()).discard(ws)
+
+        # Send to global subscribers
+        dead = []
+        for ws in self._global_subs:
+            try:
+                await ws.send_text(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self._global_subs.discard(ws)
+
+    def make_progress_callback(self, task_id: str) -> Callable:
+        """Create a progress callback bound to a specific task_id.
+
+        Returns an async callable suitable for set_progress_callback().
+        """
+        async def callback(event: str, data: dict) -> None:
+            await self.broadcast(task_id, event, data)
+
+        return callback

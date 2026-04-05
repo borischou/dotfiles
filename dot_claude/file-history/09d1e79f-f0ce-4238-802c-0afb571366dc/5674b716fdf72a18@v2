@@ -1,0 +1,93 @@
+"""Pydantic schemas for Web request validation."""
+
+from typing import List, Optional
+
+from pydantic import BaseModel, field_validator
+
+
+class PipelineParams(BaseModel):
+    """Validated pipeline start parameters."""
+    keywords: List[str]
+    template_name: str
+    location: Optional[str] = None
+    pages: int = 3
+    batch_pages: int = 0
+    experience: Optional[str] = None
+    education: Optional[str] = None
+    salary: Optional[str] = None
+    skip_messaged: bool = True
+    dry_run: bool = False
+
+    @field_validator('keywords', mode='before')
+    @classmethod
+    def parse_keywords(cls, v):
+        if isinstance(v, str):
+            return [k.strip() for k in v.split(",") if k.strip()]
+        return v
+
+    @field_validator('keywords')
+    @classmethod
+    def keywords_not_empty(cls, v):
+        if not v:
+            raise ValueError("请输入关键词")
+        return v
+
+    @field_validator('template_name')
+    @classmethod
+    def template_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError("请选择消息模板")
+        return v.strip()
+
+    @field_validator('pages')
+    @classmethod
+    def pages_range(cls, v):
+        return max(1, min(v, 20))
+
+    @field_validator('batch_pages')
+    @classmethod
+    def batch_pages_range(cls, v):
+        return max(0, min(v, 20))
+
+    @field_validator('location', 'experience', 'education', 'salary', mode='before')
+    @classmethod
+    def empty_str_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+
+class SearchParams(BaseModel):
+    """Validated search parameters."""
+    keywords: List[str]
+    location: Optional[str] = None
+    pages: int = 1
+    experience: Optional[str] = None
+    education: Optional[str] = None
+    salary: Optional[str] = None
+
+    @field_validator('keywords', mode='before')
+    @classmethod
+    def parse_keywords(cls, v):
+        if isinstance(v, str):
+            return [k.strip() for k in v.split(",") if k.strip()]
+        return v
+
+    @field_validator('keywords')
+    @classmethod
+    def keywords_not_empty(cls, v):
+        if not v:
+            raise ValueError("请输入搜索关键词")
+        return v
+
+    @field_validator('pages')
+    @classmethod
+    def pages_range(cls, v):
+        return max(1, min(v, 20))
+
+    @field_validator('location', 'experience', 'education', 'salary', mode='before')
+    @classmethod
+    def empty_str_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v

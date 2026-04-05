@@ -1,0 +1,82 @@
+.PHONY: help install test lint format typecheck ci cli db clean
+
+PYTHON := venv/bin/python3
+PIP := venv/bin/pip
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+
+# ── Setup ──────────────────────────────────────────────
+
+install: ## Install dependencies
+	$(PIP) install -r requirements.txt
+	venv/bin/patchright install chrome
+
+db: ## Initialize database
+	$(PYTHON) scripts/setup_db.py
+
+# ── Quality ────────────────────────────────────────────
+
+test: ## Run tests
+	$(PYTHON) -m pytest --tb=short -q
+
+test-v: ## Run tests (verbose)
+	$(PYTHON) -m pytest -v
+
+test-cov: ## Run tests with coverage
+	$(PYTHON) -m pytest --cov=src --cov-report=term-missing
+
+lint: ## Run linter (ruff)
+	venv/bin/ruff check src/ tests/
+
+format: ## Format code (black + ruff fix)
+	venv/bin/black src/ tests/
+	venv/bin/ruff check --fix src/ tests/
+
+typecheck: ## Run type checker (mypy)
+	venv/bin/mypy src/
+
+ci: ## Run full CI pipeline (format check + lint + typecheck + test)
+	venv/bin/black --check src/ tests/
+	venv/bin/ruff check src/ tests/
+	venv/bin/mypy src/
+	$(PYTHON) -m pytest --tb=short -q
+
+# ── Run ────────────────────────────────────────────────
+
+cli: ## Show CLI help
+	$(PYTHON) src/cli/main.py --help
+
+search: ## Quick search (usage: make search K="前端" P=2)
+	$(PYTHON) src/cli/main.py search -k "$(K)" -p $(or $(P),2)
+
+pipeline: ## Run pipeline (usage: make pipeline K="前端" T=greeting P=2)
+	$(PYTHON) src/cli/main.py pipeline -k "$(K)" -t $(or $(T),greeting) -p $(or $(P),2)
+
+# ── Tools ──────────────────────────────────────────────
+
+record: ## Launch browser action recorder
+	$(PYTHON) scripts/recorder.py
+
+backup: ## Backup database
+	$(PYTHON) scripts/backup_data.py
+
+chrome: ## Start Chrome with CDP debug port (default)
+	/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+		--remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile &
+
+chrome-alice: ## Start Chrome for alice profile (port 9222)
+	/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+		--remote-debugging-port=9222 --user-data-dir=/tmp/chrome-profile-alice &
+
+chrome-bob: ## Start Chrome for bob profile (port 9223)
+	/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+		--remote-debugging-port=9223 --user-data-dir=/tmp/chrome-profile-bob &
+
+# ── Clean ──────────────────────────────────────────────
+
+clean: ## Remove cache and build artifacts
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -name "*.pyc" -delete 2>/dev/null || true

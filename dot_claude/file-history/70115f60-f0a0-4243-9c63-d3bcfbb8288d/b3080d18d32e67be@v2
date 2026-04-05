@@ -1,0 +1,76 @@
+.PHONY: help install test lint format typecheck ci dev web cli db clean
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+
+# ── Setup ──────────────────────────────────────────────
+
+install: ## Install dependencies
+	pip3 install -r requirements.txt
+	patchright install chrome
+
+db: ## Initialize database
+	python3 scripts/setup_db.py
+
+# ── Quality ────────────────────────────────────────────
+
+test: ## Run tests
+	python3 -m pytest --tb=short -q
+
+test-v: ## Run tests (verbose)
+	python3 -m pytest -v
+
+test-cov: ## Run tests with coverage
+	python3 -m pytest --cov=src --cov-report=term-missing
+
+lint: ## Run linter (ruff)
+	ruff check src/ tests/
+
+format: ## Format code (black + ruff fix)
+	black src/ tests/
+	ruff check --fix src/ tests/
+
+typecheck: ## Run type checker (mypy)
+	mypy src/
+
+ci: ## Run full CI pip3eline (format check + lint + typecheck + test)
+	black --check src/ tests/
+	ruff check src/ tests/
+	mypy src/
+	python3 -m pytest --tb=short -q
+
+# ── Run ────────────────────────────────────────────────
+
+dev: ## Start web server (dev mode)
+	python3 -m src.web.app --host 0.0.0.0 --port 8000
+
+web: dev ## Alias for dev
+
+cli: ## Show CLI help
+	python3 src/cli/main.py --help
+
+search: ## Quick search (usage: make search K="前端" P=2)
+	python3 src/cli/main.py search -k "$(K)" -p $(or $(P),2)
+
+pip3eline: ## Run pip3eline (usage: make pip3eline K="前端" T=greeting P=2)
+	python3 src/cli/main.py pip3eline -k "$(K)" -t $(or $(T),greeting) -p $(or $(P),2)
+
+# ── Tools ──────────────────────────────────────────────
+
+record: ## Launch browser action recorder
+	python3 scripts/recorder.py
+
+backup: ## Backup database
+	python3 scripts/backup_data.py
+
+chrome: ## Start Chrome with CDP debug port
+	/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+		--remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile &
+
+# ── Clean ──────────────────────────────────────────────
+
+clean: ## Remove cache and build artifacts
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -name "*.pyc" -delete 2>/dev/null || true

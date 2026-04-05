@@ -1,0 +1,70 @@
+     1→     1→"""Auth routes — login status, check, logout."""
+     2→     2→
+     3→     3→from fastapi import APIRouter, Request
+     4→     4→from fastapi.responses import HTMLResponse
+     5→     5→
+     6→     6→from src.core.browser import get_browser_manager
+     7→     7→from src.modules.auth import check_login_status
+     8→     8→
+     9→     9→router = APIRouter()
+    10→    10→
+    11→    11→
+    12→    12→@router.get("/status", response_class=HTMLResponse)
+    13→    13→async def auth_status(request: Request):
+    14→    14→    """Return login status as an HTML fragment (for HTMX)."""
+    15→    15→    try:
+    16→    16→        browser = get_browser_manager()
+    17→    17→        if not browser.is_running:
+    18→    18→            await browser.start()
+    19→    19→        page = browser.page
+    20→    20→        if page:
+    21→    21→            logged_in = await check_login_status(page)
+    22→    22→        else:
+    23→    23→            logged_in = False
+    24→    24→    except Exception:
+    25→    25→        logged_in = False
+    26→    26→
+    27→    27→    if logged_in:
+    28→    28→        return '<p><span class="status-dot online"></span>Boss直聘: 已登录</p>'
+    29→    29→    else:
+    30→    30→        return (
+    31→    31→            '<p><span class="status-dot offline"></span>Boss直聘: 未登录</p>'
+    32→    32→            '<p><small>请在 Chrome 浏览器中手动登录 Boss直聘</small></p>'
+    33→    33→            '<button hx-post="/auth/check" hx-swap="outerHTML">重新检测</button>'
+    34→    34→        )
+    35→    35→
+    36→    36→
+    37→    37→@router.post("/check", response_class=HTMLResponse)
+    38→    38→async def auth_check(request: Request):
+    39→    39→    """Trigger a login status re-check."""
+    40→    40→    try:
+    41→    41→        browser = get_browser_manager()
+    42→    42→        if not browser.is_running:
+    43→    43→            await browser.start()
+    44→    44→        page = browser.page
+    45→    45→        if page:
+    46→    46→            logged_in = await check_login_status(page)
+    47→    47→        else:
+    48→    48→            logged_in = False
+    49→    49→    except Exception:
+    50→    50→        logged_in = False
+    51→    51→
+    52→    52→    if logged_in:
+    53→    53→        return '<p><span class="status-dot online"></span>Boss直聘: 已登录</p>'
+    54→    54→    else:
+    55→    55→        return (
+    56→    56→            '<p><span class="status-dot offline"></span>Boss直聘: 未登录</p>'
+    57→    57→            '<p><small>请在 Chrome 窗口中登录 Boss直聘后重试</small></p>'
+    58→    58→            '<button hx-post="/auth/check" hx-swap="outerHTML">重新检测</button>'
+    59→    59→        )
+    60→    60→
+    61→    61→
+    62→    62→@router.post("/logout")
+    63→    63→async def auth_logout(request: Request):
+    64→    64→    """Clear saved session."""
+    65→    65→    from src.core.session import get_session_manager
+    66→    66→    session_mgr = get_session_manager()
+    67→    67→    if session_mgr.has_saved_session():
+    68→    68→        await session_mgr.clear()
+    69→    69→    return {"status": "ok", "message": "Session cleared"}
+    70→    70→

@@ -1,0 +1,135 @@
+🦞 OpenClaw 2026.2.13 (203b5bd) — I'm not magic—I'm just extremely persistent with retries and coping strategies.
+
+Config warnings:\n- plugins.entries.feishu: plugin feishu: duplicate plugin id detected; later plugin may be overridden (/usr/local/lib/node_modules/openclaw/extensions/feishu/index.ts)
+11:25:01 [plugins] feishu_doc: Registered feishu_doc, feishu_app_scopes
+11:25:01 [plugins] feishu_wiki: Registered feishu_wiki tool
+11:25:01 [plugins] feishu_drive: Registered feishu_drive tool
+11:25:01 [plugins] feishu_bitable: Registered 6 bitable tools
+Config warnings:\n- plugins.entries.feishu: plugin feishu: duplicate plugin id detected; later plugin may be overridden (/usr/local/lib/node_modules/openclaw/extensions/feishu/index.ts)
+│
+Config warnings:\n- plugins.entries.feishu: plugin feishu: duplicate plugin id detected; later plugin may be overridden (/usr/local/lib/node_modules/openclaw/extensions/feishu/index.ts)
+◓  Probing gateway…..Config warnings:\n- plugins.entries.feishu: plugin feishu: duplicate plugin id detected; later plugin may be overridden (/usr/local/lib/node_modules/openclaw/extensions/feishu/index.ts)
+OpenClaw status --all
+
+Overview
+┌─────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Item            │ Value                                                                                                                                                                                     │
+├─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Version         │ 2026.2.13                                                                                                                                                                                 │
+│ OS              │ macos 26.2 (arm64)                                                                                                                                                                        │
+│ Node            │ 24.13.0                                                                                                                                                                                   │
+│ Config          │ ~/.openclaw/openclaw.json                                                                                                                                                                 │
+│ Dashboard       │ http://127.0.0.1:18789/                                                                                                                                                                   │
+│ Tailscale       │ off                                                                                                                                                                                       │
+│ Channel         │ stable (default)                                                                                                                                                                          │
+│ Update          │ pnpm · npm update 2026.2.15                                                                                                                                                               │
+│ Gateway         │ local · ws://127.0.0.1:18789 (local loopback) · reachable 14ms · auth token                                                                                                               │
+│ Security        │ Run: openclaw security audit --deep                                                                                                                                                       │
+│ Gateway self    │ LotharAir.local (172.20.10.10) app unknown macos 26.2                                                                                                                                     │
+│ Gateway service │ LaunchAgent installed · loaded · running (pid 20928)                                                                                                                                      │
+│ Node service    │ LaunchAgent not installed                                                                                                                                                                 │
+│ Agents          │ 1 total · 0 bootstrapping · 1 active · 1 sessions                                                                                                                                         │
+└─────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Channels
+┌──────────┬─────────┬────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Channel  │ Enabled │ State  │ Detail                                                                                                                                                                        │
+├──────────┼─────────┼────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ iMessage │ ON      │ WARN   │ configured · gateway: Channel error: imsg rpc not ready (Error: imsg rpc exited (code 1))                                                                                     │
+│ Feishu   │ ON      │ OK     │ configured                                                                                                                                                                    │
+└──────────┴─────────┴────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+iMessage accounts
+┌──────────┬──────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Account  │ Status   │ Notes                                                                                                                                                                                 │
+├──────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ default  │ OK       │                                                                                                                                                                                       │
+└──────────┴──────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Feishu accounts
+┌──────────┬──────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Account  │ Status   │ Notes                                                                                                                                                                                 │
+├──────────┼──────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ default  │ OK       │                                                                                                                                                                                       │
+└──────────┴──────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Agents
+┌────────────┬───────────┬──────────┬──────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Agent      │ Bootstrap │ Sessions │ Active   │ Store                                                                                                                                                        │
+├────────────┼───────────┼──────────┼──────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ main       │ OK        │        1 │ 7m ago   │ ~/.openclaw/agents/main/sessions/sessions.json                                                                                                               │
+└────────────┴───────────┴──────────┴──────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Diagnosis (read-only)
+
+Gateway connection details:
+  Gateway target: ws://127.0.0.1:18789
+  Source: local loopback
+  Config: /Users/zhouboli/.openclaw/openclaw.json
+  Bind: loopback
+
+✓ Config: /Users/zhouboli/.openclaw/openclaw.json
+✓ Restart sentinel: none
+
+Gateway last log line:
+  2026-02-17T19:25:03.181+08:00 Config warnings:\n- plugins.entries.feishu: plugin feishu: duplicate plugin id detected; later plugin may be overridden (/usr/local/lib/node_modules/openclaw/extensions/feishu/index.ts)
+! Port 18789
+  Port 18789 is already in use.
+  - pid 20928 zhouboli: openclaw-gateway (127.0.0.1:18789)
+  - Gateway already running locally. Stop it (openclaw gateway stop) or use a different port.
+! Tailscale: off · unknown
+  error: Error: spawn tailscale ENOENT
+✓ Skills: 26 eligible · 0 missing · /Users/zhouboli/.openclaw/workspace
+
+Gateway logs (tail, summarized): /Users/zhouboli/.openclaw/logs
+  # stderr: /Users/zhouboli/.openclaw/logs/gateway.err.log
+  2026-02-17T11:22:16.661Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:17.200Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:17.734Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:18.272Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:18.816Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:19.357Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  … 18 lines omitted …
+  2026-02-17T11:22:29.311Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:29.849Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:30.412Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:30.950Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:31.490Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:32.027Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:32.567Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:33.103Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:33.642Z [imessage] imsg rpc: failed to parse permissionDenied(path: "/Users/zhouboli/Library/Messages/chat.db", underlying: authorization denied (code: 23)): Unexpected token 'p', "permission"... is not valid JSON
+  2026-02-17T11:22:33.643Z [imessage] imsg rpc not ready after 30000ms (Error: imsg rpc exited (code 1))
+  2026-02-17T11:22:33.644Z [imessage] [default] channel exited: imsg rpc not ready (Error: imsg rpc exited (code 1))
+  2026-02-17T19:23:03.187+08:00 Config warnings:\n- plugins.entries.feishu: plugin feishu: duplicate plugin id detected; later plugin may be overridden (/usr/local/lib/node_modules/openclaw/extensions/feishu/index.ts)
+  2026-02-17T19:24:03.197+08:00 Config warnings:\n- plugins.entries.feishu: plugin feishu: duplicate plugin id detected; later plugin may be overridden (/usr/local/lib/node_modules/openclaw/extensions/feishu/index.ts)
+  2026-02-17T19:24:12.983+08:00 Config warnings:\n- plugins.entries.feishu: plugin feishu: duplicate plugin id detected; later plugin may be overridden (/usr/local/lib/node_modules/openclaw/extensions/feishu/index.ts)
+  2026-02-17T19:25:03.181+08:00 Config warnings:\n- plugins.entries.feishu: plugin feishu: duplicate plugin id detected; later plugin may be overridden (/usr/local/lib/node_modules/openclaw/extensions/feishu/index.ts)
+  # stdout: /Users/zhouboli/.openclaw/logs/gateway.log
+  2026-02-17T11:13:28.171Z [reload] config change detected; evaluating reload (meta.lastTouchedAt, wizard.lastRunAt)
+  2026-02-17T11:13:28.175Z [reload] config change applied (dynamic reads: meta.lastTouchedAt, wizard.lastRunAt)
+  2026-02-17T11:22:02.770Z [reload] config change detected; evaluating reload (meta.lastTouchedAt, auth.profiles.anthropic:manual)
+  2026-02-17T11:22:02.779Z [gateway] signal SIGUSR1 received
+  2026-02-17T11:22:02.780Z [gateway] received SIGUSR1; restarting
+  2026-02-17T11:22:02.794Z [feishu] feishu[default]: abort signal received, stopping
+  … 18 lines omitted …
+  2026-02-17T11:22:03.425Z [feishu] feishu[default]: starting WebSocket connection...
+  2026-02-17T19:22:03.427+08:00 [info]: [
+    '[ws]',
+    'receive events or callbacks through persistent connection only available in self-build & Feishu app, Configured in:\n' +
+      '        Developer Console(开发者后台) \n' +
+      '          ->\n' +
+      '        Events and Callbacks(事件与回调)\n' +
+      '          -> \n' +
+      '        Mode of event/callback subscription(订阅方式)\n' +
+      '          -> \n' +
+      '        Receive events/callbacks through persistent connection(使用 长连接 接收事件/回调)'
+  ]
+  2026-02-17T11:22:03.429Z [feishu] feishu[default]: WebSocket client started
+  2026-02-17T19:22:03.733+08:00 [info]: [ '[ws]', 'ws client ready' ]
+  2026-02-17T11:22:04.399Z [gateway] update available (latest): v2026.2.15 (current v2026.2.13). Run: openclaw update
+! Channel issues (1)
+  - imessage[default] runtime: Channel error: imsg rpc not ready (Error: imsg rpc exited (code 1))
+
+Pasteable debug report. Auth tokens redacted.
+Troubleshooting: https://docs.openclaw.ai/troubleshooting

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Candidates - Maimai Assistant{% endblock %}
+
+{% block content %}
+<h2>Candidates</h2>
+
+<div class="grid">
+    <input type="search" id="candidate-search" placeholder="Search by name, company, or title..." oninput="debouncedLoad()">
+    <button class="outline" onclick="exportCandidates()">Export Excel</button>
+</div>
+
+<table id="candidates-table">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Name</th>
+            <th>Title</th>
+            <th>Company</th>
+            <th>Location</th>
+            <th>Messages</th>
+            <th>First Seen</th>
+        </tr>
+    </thead>
+    <tbody id="candidates-body">
+        <tr><td colspan="7">Loading...</td></tr>
+    </tbody>
+</table>
+
+<div id="pagination" class="pagination-controls"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+const pageSize = 20;
+
+async function loadCandidates(page = 1) {
+    currentPage = page;
+    const search = document.getElementById('candidate-search').value.trim();
+    const params = new URLSearchParams({page, page_size: pageSize});
+    if (search) params.append('search', search);
+
+    try {
+        const res = await fetch(`/api/candidates?${params}`);
+        const data = await res.json();
+        const tbody = document.getElementById('candidates-body');
+
+        if (!data.items.length) {
+            tbody.innerHTML = '<tr><td colspan="7">No candidates found</td></tr>';
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
+
+        tbody.innerHTML = data.items.map((c, i) => `
+            <tr>
+                <td>${(page - 1) * pageSize + i + 1}</td>
+                <td>${escapeHtml(c.name || '--')}</td>
+                <td>${escapeHtml(c.title || '--')}</td>
+                <td>${escapeHtml(c.company || '--')}</td>
+                <td>${escapeHtml(c.location || '--')}</td>
+                <td>${c.message_count}</td>
+                <td>${c.first_seen ? new Date(c.first_seen).toLocaleDateString() : '--'}</td>
+            </tr>
+        `).join('');
+
+        // Pagination
+        const pag = document.getElementById('pagination');
+        let html = '';
+        if (page > 1) html += `<button class="outline" onclick="loadCandidates(${page-1})">Previous</button> `;
+        html += `<span>Page ${page} / ${data.total_pages} (${data.total} total)</span> `;
+        if (page < data.total_pages) html += `<button class="outline" onclick="loadCandidates(${page+1})">Next</button>`;
+        pag.innerHTML = html;
+    } catch (e) {
+        console.error('Failed to load candidates:', e);
+    }
+}
+
+let debounceTimer;
+function debouncedLoad() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => loadCandidates(1), 300);
+}
+
+async function exportCandidates() {
+    const search = document.getElementById('candidate-search').value.trim();
+    const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({format: 'xlsx', search_keyword: search || null}),
+    });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'candidates.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+loadCandidates();
+</script>
+{% endblock %}

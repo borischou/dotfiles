@@ -1,0 +1,61 @@
+     1→{% extends "base.html" %}
+     2→{% block title %}候选人 — Boss Assistant{% endblock %}
+     3→{% block header %}候选人列表 ({{ total }}){% endblock %}
+     4→
+     5→{% block content %}
+     6→<section>
+     7→    <form method="get" action="/candidates">
+     8→        <div style="display: flex; gap: 1rem; align-items: end;">
+     9→            <label for="q" style="flex: 1;">搜索
+    10→                <input type="text" id="q" name="q" value="{{ q }}" placeholder="姓名、职位、公司">
+    11→            </label>
+    12→            <button type="submit">筛选</button>
+    13→        </div>
+    14→    </form>
+    15→</section>
+    16→
+    17→<section>
+    18→    {% if candidates %}
+    19→    <table>
+    20→        <thead>
+    21→            <tr>
+    22→                <th>姓名</th>
+    23→                <th>职位</th>
+    24→                <th>公司</th>
+    25→                <th>城市</th>
+    26→                <th>经验</th>
+    27→                <th>学历</th>
+    28→                <th>来源</th>
+    29→            </tr>
+    30→        </thead>
+    31→        <tbody>
+    32→            {% for c in candidates %}
+    33→            <tr>
+    34→                <td><a href="/candidates/{{ c.boss_id }}">{{ c.name }}</a></td>
+    35→                <td>{{ (c.title or "")[:30] }}</td>
+    36→                <td>{{ (c.company or "")[:20] }}</td>
+    37→                <td>{{ c.location or "" }}</td>
+    38→                <td>{{ c.work_years or "" }}</td>
+    39→                <td>{{ c.education_level or "" }}</td>
+    40→                <td>{{ (c.source_search or "")[:20] }}</td>
+    41→            </tr>
+    42→            {% endfor %}
+    43→        </tbody>
+    44→    </table>
+    45→
+    46→    <!-- Pagination -->
+    47→    <p>
+    48→        {% if page > 1 %}
+    49→        <a href="/candidates?page={{ page - 1 }}&q={{ q }}">&laquo; 上一页</a>
+    50→        {% endif %}
+    51→        第 {{ page }} / {{ total_pages }} 页
+    52→        {% if page < total_pages %}
+    53→        <a href="/candidates?page={{ page + 1 }}&q={{ q }}">下一页 &raquo;</a>
+    54→        {% endif %}
+    55→    </p>
+    56→    {% else %}
+    57→    <p>暂无候选人数据</p>
+    58→    {% endif %}
+    59→</section>
+    60→{% endblock %}
+    61→

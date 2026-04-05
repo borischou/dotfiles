@@ -1,0 +1,122 @@
+"""Smart filtering utilities for candidates.
+
+自动过滤低质量候选人，提升搜索效率。
+"""
+
+from typing import List
+from loguru import logger
+
+
+def is_recruiter(title: str) -> bool:
+    """
+    判断是否是 HR/猎头.
+
+    Args:
+        title: 职位名称
+
+    Returns:
+        True if is recruiter
+    """
+    if not title:
+        return False
+
+    title_lower = title.lower()
+    hr_keywords = [
+        '招聘', 'hr', 'hrbp', '人力', '猎头', 'recruiter',
+        'headhunter', '人事', 'talent acquisition',
+        'hr manager', 'hr director', '人力资源',
+    ]
+
+    return any(kw in title_lower for kw in hr_keywords)
+
+
+def is_low_quality(candidate: dict) -> bool:
+    """
+    判断是否是低质量候选人.
+
+    过滤条件:
+    1. 没有真实 Maimai ID (hash 生成的 ID)
+    2. 基本信息不完整 (姓名、职位、公司至少缺一项)
+    3. 是 HR/猎头
+
+    Args:
+        candidate: Candidate dict with maimai_id, name, title, company
+
+    Returns:
+        True if is low quality
+    """
+    # Check ID type
+    maimai_id = candidate.get('maimai_id', '')
+    if not maimai_id.startswith('mm_'):
+        logger.debug(f"Filtering {candidate.get('name')}: hash ID (no real maimai_id)")
+        return True
+
+    # Check basic info completeness
+    name = candidate.get('name', '')
+    title = candidate.get('title', '')
+    company = candidate.get('company', '')
+
+    if not name or not title or not company:
+        logger.debug(f"Filtering {candidate.get('name')}: incomplete info")
+        return True
+
+    # Check if recruiter
+    if is_recruiter(title):
+        logger.debug(f"Filtering {name}: recruiter/HR")
+        return True
+
+    return False
+
+
+def filter_candidates(
+    candidates: List[dict],
+    auto_filter: bool = True,
+    include_recruiters: bool = False
+) -> List[dict]:
+    """
+    智能过滤候选人列表.
+
+    Args:
+        candidates: List of candidate dicts
+        auto_filter: Enable auto filtering (default True)
+        include_recruiters: If True, don't filter out recruiters
+
+    Returns:
+        Filtered candidate list
+    """
+    if not auto_filter:
+        return candidates
+
+    filtered = []
+    stats = {
+        'hash_id': 0,
+        'incomplete': 0,
+        'recruiter': 0,
+    }
+
+    for c in candidates:
+        # Check ID
+        if not c.get('maimai_id', '').startswith('mm_'):
+            stats['hash_id'] += 1
+            continue
+
+        # Check completeness
+        if not c.get('name') or not c.get('title') or not c.get('company'):
+            stats['incomplete'] += 1
+            continue
+
+        # Check recruiter
+        if not include_recruiters and is_recruiter(c.get('title', '')):
+            stats['recruiter'] += 1
+            continue
+
+        filtered.append(c)
+
+    if len(filtered) < len(candidates):
+        logger.info(
+            f"Auto-filter: {len(candidates)} → {len(filtered)} candidates "
+            f"(removed: {stats['hash_id']} hash ID, {stats['incomplete']} incomplete, "
+            f"{stats['recruiter']} recruiters)"
+        )
+
+    return filtered

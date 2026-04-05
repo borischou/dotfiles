@@ -1,0 +1,66 @@
+"""Search routes — search form and execution."""
+
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import HTMLResponse
+
+from src.web.app import task_manager, templates
+from src.core.browser import get_browser_manager
+from src.modules.auth import ensure_logged_in
+from src.modules.search import search_candidates
+
+router = APIRouter()
+
+
+@router.get("/", response_class=HTMLResponse)
+async def search_page(request: Request):
+    """Render search form page."""
+    busy = task_manager.is_busy
+    return templates.TemplateResponse("search.html", {
+        "request": request,
+        "pipeline_busy": busy,
+    })
+
+
+@router.post("/", response_class=HTMLResponse)
+async def do_search(
+    request: Request,
+    keywords: str = Form(...),
+    location: str = Form(""),
+    pages: int = Form(1),
+    experience: str = Form(""),
+    education: str = Form(""),
+    salary: str = Form(""),
+):
+    """Execute search and return results as HTML fragment."""
+    if task_manager.is_busy:
+        return HTMLResponse(
+            '<p><mark>Pipeline 运行中，请等待完成后再搜索</mark></p>',
+            status_code=409,
+        )
+
+    keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
+    if not keyword_list:
+        return HTMLResponse('<p><mark>请输入搜索关键词</mark></p>', status_code=400)
+
+    try:
+        browser = get_browser_manager()
+        await ensure_logged_in(browser)
+
+        candidates = await search_candidates(
+            keywords=keyword_list,
+            location=location or None,
+            max_pages=pages,
+            experience=experience or None,
+            education=education or None,
+            salary=salary or None,
+            browser=browser,
+        )
+
+        return templates.TemplateResponse("partials/search_results.html", {
+            "request": request,
+            "candidates": candidates,
+            "keywords": keywords,
+        })
+
+    except Exception as e:
+        return HTMLResponse(f'<p><mark>搜索失败: {e}</mark></p>', status_code=500)

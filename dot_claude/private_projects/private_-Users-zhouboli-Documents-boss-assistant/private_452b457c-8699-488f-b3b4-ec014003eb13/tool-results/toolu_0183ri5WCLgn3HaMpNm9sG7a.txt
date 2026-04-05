@@ -1,0 +1,282 @@
+     1→"""Serial browser task queue with priority support.
+     2→
+     3→All browser operations go through this queue to ensure only one
+     4→browser action runs at a time (Chrome CDP is a serial resource).
+     5→Non-browser operations (DB queries, template listing) bypass the queue.
+     6→"""
+     7→
+     8→import asyncio
+     9→import uuid
+    10→from datetime import datetime, timezone, timedelta
+    11→from enum import IntEnum
+    12→from typing import Any, Awaitable, Callable, Dict, Optional
+    13→
+    14→from loguru import logger
+    15→
+    16→from src.utils.progress import set_progress_callback, reset_progress_callback
+    17→
+    18→
+    19→class TaskPriority(IntEnum):
+    20→    """Task priority levels. Lower value = higher priority."""
+    21→    HIGH = 1      # Status checks, auth
+    22→    NORMAL = 5    # Search, message
+    23→    LOW = 10      # Pipeline (long-running)
+    24→
+    25→
+    26→class TaskStatus:
+    27→    QUEUED = "queued"
+    28→    RUNNING = "running"
+    29→    COMPLETED = "completed"
+    30→    FAILED = "failed"
+    31→    CANCELLED = "cancelled"
+    32→
+    33→
+    34→class BrowserTask:
+    35→    """A task to be executed in the browser queue."""
+    36→
+    37→    def __init__(
+    38→        self,
+    39→        name: str,
+    40→        coroutine_factory: Callable[[], Awaitable[Any]],
+    41→        priority: TaskPriority = TaskPriority.NORMAL,
+    42→        task_id: Optional[str] = None,
+    43→    ):
+    44→        self.task_id = task_id or str(uuid.uuid4())[:8]
+    45→        self.name = name
+    46→        self.coroutine_factory = coroutine_factory
+    47→        self.priority = priority
+    48→        self.status = TaskStatus.QUEUED
+    49→        self.result: Any = None
+    50→        self.error: Optional[str] = None
+    51→        self.created_at = datetime.now(timezone.utc)
+    52→        self.started_at: Optional[datetime] = None
+    53→        self.completed_at: Optional[datetime] = None
+    54→        self._done_event = asyncio.Event()
+    55→        self.cancel_event = asyncio.Event()
+    56→
+    57→    def __lt__(self, other: 'BrowserTask') -> bool:
+    58→        """Compare by (priority, creation time) for PriorityQueue."""
+    59→        if self.priority != other.priority:
+    60→            return self.priority < other.priority
+    61→        return self.created_at < other.created_at
+    62→
+    63→    async def wait(self, timeout: Optional[float] = None) -> None:
+    64→        """Wait for task completion."""
+    65→        if timeout:
+    66→            await asyncio.wait_for(self._done_event.wait(), timeout=timeout)
+    67→        else:
+    68→            await self._done_event.wait()
+    69→
+    70→    def mark_done(self) -> None:
+    71→        self._done_event.set()
+    72→
+    73→    def to_dict(self) -> dict:
+    74→        return {
+    75→            "task_id": self.task_id,
+    76→            "name": self.name,
+    77→            "status": self.status,
+    78→            "priority": self.priority.name,
+    79→            "created_at": self.created_at.isoformat(),
+    80→            "started_at": self.started_at.isoformat() if self.started_at else None,
+    81→            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+    82→            "error": self.error,
+    83→        }
+    84→
+    85→
+    86→class TaskQueue:
+    87→    """Async serial task queue for browser operations.
+    88→
+    89→    Uses asyncio.PriorityQueue so higher-priority tasks run first.
+    90→    A single background worker consumes tasks one at a time.
+    91→    Progress is injected via ContextVar and delivered through per-task
+    92→    asyncio.Queue for SSE streaming.
+    93→    """
+    94→
+    95→    def __init__(self):
+    96→        self._queue: asyncio.PriorityQueue[BrowserTask] = asyncio.PriorityQueue()
+    97→        self._worker_task: Optional[asyncio.Task] = None
+    98→        self._tasks: Dict[str, BrowserTask] = {}
+    99→        self._progress_queues: Dict[str, asyncio.Queue] = {}
+   100→        self._running: bool = False
+   101→        self._current_task: Optional[BrowserTask] = None
+   102→        self._completed_count: int = 0
+   103→
+   104→    async def start(self) -> None:
+   105→        """Start the background worker."""
+   106→        if self._running:
+   107→            return
+   108→        self._running = True
+   109→        self._worker_task = asyncio.create_task(self._worker())
+   110→        logger.info("Task queue worker started")
+   111→
+   112→    async def stop(self) -> None:
+   113→        """Stop the background worker."""
+   114→        self._running = False
+   115→        # Cancel running task
+   116→        if self._current_task and self._current_task.cancel_event:
+   117→            self._current_task.cancel_event.set()
+   118→        if self._worker_task:
+   119→            self._worker_task.cancel()
+   120→            try:
+   121→                await self._worker_task
+   122→            except asyncio.CancelledError:
+   123→                pass
+   124→            finally:
+   125→                self._worker_task = None
+   126→        logger.info("Task queue worker stopped")
+   127→
+   128→    async def submit(self, task: BrowserTask) -> BrowserTask:
+   129→        """Submit a task to the queue."""
+   130→        self._tasks[task.task_id] = task
+   131→        self._progress_queues[task.task_id] = asyncio.Queue()
+   132→        await self._queue.put(task)
+   133→        logger.info(f"Task queued: {task.task_id} ({task.name}) priority={task.priority.name}")
+   134→        return task
+   135→
+   136→    def get_task(self, task_id: str) -> Optional[BrowserTask]:
+   137→        return self._tasks.get(task_id)
+   138→
+   139→    @property
+   140→    def is_busy(self) -> bool:
+   141→        return self._current_task is not None
+   142→
+   143→    @property
+   144→    def current_task(self) -> Optional[BrowserTask]:
+   145→        return self._current_task
+   146→
+   147→    @property
+   148→    def current_task_id(self) -> Optional[str]:
+   149→        return self._current_task.task_id if self._current_task else None
+   150→
+   151→    @property
+   152→    def queue_size(self) -> int:
+   153→        return self._queue.qsize()
+   154→
+   155→    def get_queue_status(self) -> dict:
+   156→        pending = [
+   157→            t.to_dict() for t in self._tasks.values()
+   158→            if t.status == TaskStatus.QUEUED
+   159→        ]
+   160→        return {
+   161→            "queue_size": self._queue.qsize(),
+   162→            "current_task": self._current_task.to_dict() if self._current_task else None,
+   163→            "pending_tasks": pending,
+   164→            "total_tracked": len(self._tasks),
+   165→        }
+   166→
+   167→    async def cancel_task(self, task_id: str) -> bool:
+   168→        """Cancel a specific task (running or queued)."""
+   169→        task = self._tasks.get(task_id)
+   170→        if not task:
+   171→            return False
+   172→        task.cancel_event.set()
+   173→        if task.status == TaskStatus.QUEUED:
+   174→            task.status = TaskStatus.CANCELLED
+   175→            task.completed_at = datetime.now(timezone.utc)
+   176→            task.mark_done()
+   177→        logger.info(f"Cancel requested for task {task_id}")
+   178→        return True
+   179→
+   180→    async def cancel_current(self) -> bool:
+   181→        """Cancel the currently running task."""
+   182→        if not self._current_task:
+   183→            return False
+   184→        return await self.cancel_task(self._current_task.task_id)
+   185→
+   186→    # --- Progress / SSE ---
+   187→
+   188→    def _make_progress_callback(self, task_id: str):
+   189→        """Create a progress callback bound to a task's SSE queue."""
+   190→        async def callback(event: str, data: Dict[str, Any] = None):
+   191→            queue = self._progress_queues.get(task_id)
+   192→            if queue:
+   193→                await queue.put({"event": event, "data": data or {}})
+   194→        return callback
+   195→
+   196→    async def subscribe_progress(self, task_id: str):
+   197→        """Async generator yielding progress events for SSE."""
+   198→        queue = self._progress_queues.get(task_id)
+   199→        if not queue:
+   200→            yield {"event": "error", "data": {"message": "Task not found"}}
+   201→            return
+   202→
+   203→        while True:
+   204→            try:
+   205→                msg = await asyncio.wait_for(queue.get(), timeout=30)
+   206→                yield msg
+   207→                if msg["event"] == "done":
+   208→                    break
+   209→            except asyncio.TimeoutError:
+   210→                yield {"event": "keepalive", "data": {}}
+   211→
+   212→    # --- Worker ---
+   213→
+   214→    async def _worker(self) -> None:
+   215→        """Background worker: dequeue and execute tasks serially."""
+   216→        while self._running:
+   217→            try:
+   218→                task = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+   219→            except asyncio.TimeoutError:
+   220→                continue
+   221→            except asyncio.CancelledError:
+   222→                break
+   223→
+   224→            # Skip cancelled tasks that were cancelled while queued
+   225→            if task.cancel_event.is_set():
+   226→                if task.status != TaskStatus.CANCELLED:
+   227→                    task.status = TaskStatus.CANCELLED
+   228→                    task.completed_at = datetime.now(timezone.utc)
+   229→                    task.mark_done()
+   230→                self._queue.task_done()
+   231→                continue
+   232→
+   233→            self._current_task = task
+   234→            task.status = TaskStatus.RUNNING
+   235→            task.started_at = datetime.now(timezone.utc)
+   236→            logger.info(f"Task running: {task.task_id} ({task.name})")
+   237→
+   238→            token = set_progress_callback(self._make_progress_callback(task.task_id))
+   239→            try:
+   240→                task.result = await task.coroutine_factory()
+   241→                task.status = TaskStatus.COMPLETED
+   242→                logger.info(f"Task completed: {task.task_id}")
+   243→            except asyncio.CancelledError:
+   244→                task.status = TaskStatus.CANCELLED
+   245→                task.error = "cancelled"
+   246→                logger.warning(f"Task cancelled: {task.task_id}")
+   247→            except Exception as e:
+   248→                task.status = TaskStatus.FAILED
+   249→                task.error = str(e)
+   250→                logger.error(f"Task failed: {task.task_id} — {e}")
+   251→            finally:
+   252→                reset_progress_callback(token)
+   253→                task.completed_at = datetime.now(timezone.utc)
+   254→                task.mark_done()
+   255→                # Send single done event with final status for SSE
+   256→                queue = self._progress_queues.get(task.task_id)
+   257→                if queue:
+   258→                    done_data = {"status": task.status}
+   259→                    if task.error:
+   260→                        done_data["message"] = task.error
+   261→                    await queue.put({"event": "done", "data": done_data})
+   262→                self._current_task = None
+   263→                self._queue.task_done()
+   264→
+   265→                self._completed_count += 1
+   266→                if self._completed_count % 10 == 0:
+   267→                    self._cleanup_old_tasks()
+   268→
+   269→    def _cleanup_old_tasks(self, max_age_hours: int = 24) -> int:
+   270→        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+   271→        to_remove = [
+   272→            tid for tid, t in self._tasks.items()
+   273→            if t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+   274→            and t.completed_at and t.completed_at < cutoff
+   275→        ]
+   276→        for tid in to_remove:
+   277→            del self._tasks[tid]
+   278→            self._progress_queues.pop(tid, None)
+   279→        if to_remove:
+   280→            logger.debug(f"Cleaned up {len(to_remove)} old tasks")
+   281→        return len(to_remove)
+   282→

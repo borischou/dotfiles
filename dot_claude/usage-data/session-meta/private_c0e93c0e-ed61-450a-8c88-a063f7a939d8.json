@@ -1,0 +1,45 @@
+{
+  "session_id": "c0e93c0e-ed61-450a-8c88-a063f7a939d8",
+  "project_path": "/Users/zhouboli/Documents/maimai-assistant",
+  "start_time": "2026-03-02T05:02:42.984Z",
+  "duration_minutes": 21,
+  "user_message_count": 2,
+  "assistant_message_count": 23,
+  "tool_counts": {
+    "Read": 5,
+    "Edit": 5,
+    "Glob": 1
+  },
+  "languages": {
+    "Python": 4,
+    "Markdown": 6
+  },
+  "git_commits": 0,
+  "git_pushes": 0,
+  "input_tokens": 68,
+  "output_tokens": 4159,
+  "first_prompt": "Implement the following plan:  # Fix: 搜索结果提取 name/company/title 字段混乱  ## Context  搜索功能已修复（改为交互式搜索 → 人脉 tab），但 `_extract_search_results` 的 JS 提取逻辑将社交标签和活动信息错误地混入了 name/company/title 字段。  **实际卡片文本结构**（T…",
+  "user_interruptions": 0,
+  "user_response_times": [
+    1119.513
+  ],
+  "tool_errors": 1,
+  "tool_error_categories": {
+    "Other": 1
+  },
+  "uses_task_agent": false,
+  "uses_mcp": false,
+  "uses_web_search": false,
+  "uses_web_fetch": false,
+  "lines_added": 60,
+  "lines_removed": 2,
+  "files_modified": 3,
+  "message_hours": [
+    13,
+    13
+  ],
+  "user_message_timestamps": [
+    "2026-03-02T05:02:42.856Z",
+    "2026-03-02T05:22:30.071Z"
+  ]
+}

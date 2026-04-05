@@ -1,0 +1,95 @@
+     1→"""Lightweight database migration system.
+     2→
+     3→Tracks schema versions in a dedicated table and applies incremental
+     4→migrations on startup.  Each migration is a plain function that
+     5→receives a SQLAlchemy connection.
+     6→"""
+     7→
+     8→from typing import Callable, List, Tuple
+     9→
+    10→from sqlalchemy import text, inspect
+    11→from loguru import logger
+    12→
+    13→
+    14→# Migration registry: list of (version, description, migration_fn)
+    15→# Append new migrations at the end; never reorder or remove existing entries.
+    16→_migrations: List[Tuple[int, str, Callable]] = []
+    17→
+    18→
+    19→def migration(version: int, description: str):
+    20→    """Decorator to register a migration function."""
+    21→    def decorator(fn: Callable):
+    22→        _migrations.append((version, description, fn))
+    23→        return fn
+    24→    return decorator
+    25→
+    26→
+    27→# ---------------------------------------------------------------------------
+    28→#  Built-in migrations
+    29→# ---------------------------------------------------------------------------
+    30→
+    31→@migration(1, "Initial schema — create core tables if missing")
+    32→def _m001_initial_schema(conn):
+    33→    """Ensure core tables exist (safe for existing databases)."""
+    34→    # SQLAlchemy create_all is called before migrations, so tables should
+    35→    # already exist.  This migration just marks the baseline version.
+    36→    pass
+    37→
+    38→
+    39→@migration(2, "Add retry_count column to messages table")
+    40→def _m002_messages_retry_count(conn):
+    41→    inspector = inspect(conn)
+    42→    columns = [c["name"] for c in inspector.get_columns("messages")]
+    43→    if "retry_count" not in columns:
+    44→        conn.execute(text("ALTER TABLE messages ADD COLUMN retry_count INTEGER DEFAULT 0"))
+    45→
+    46→
+    47→# ---------------------------------------------------------------------------
+    48→#  Migration runner
+    49→# ---------------------------------------------------------------------------
+    50→
+    51→def _ensure_version_table(conn) -> None:
+    52→    """Create the schema_version table if it doesn't exist."""
+    53→    conn.execute(text("""
+    54→        CREATE TABLE IF NOT EXISTS schema_version (
+    55→            version INTEGER PRIMARY KEY,
+    56→            description TEXT NOT NULL,
+    57→            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    58→        )
+    59→    """))
+    60→    conn.commit()
+    61→
+    62→
+    63→def _current_version(conn) -> int:
+    64→    """Return highest applied migration version, or 0 if none."""
+    65→    result = conn.execute(text("SELECT MAX(version) FROM schema_version"))
+    66→    row = result.fetchone()
+    67→    return row[0] or 0 if row else 0
+    68→
+    69→
+    70→def run_migrations(engine) -> None:
+    71→    """Apply all pending migrations against *engine*.
+    72→
+    73→    Called automatically by DatabaseManager.init_db().
+    74→    """
+    75→    with engine.connect() as conn:
+    76→        _ensure_version_table(conn)
+    77→        current = _current_version(conn)
+    78→
+    79→        pending = [(v, d, fn) for v, d, fn in _migrations if v > current]
+    80→        if not pending:
+    81→            logger.debug(f"Database schema is up-to-date (version {current})")
+    82→            return
+    83→
+    84→        for version, description, fn in sorted(pending):
+    85→            logger.info(f"Applying migration v{version}: {description}")
+    86→            fn(conn)
+    87→            conn.execute(
+    88→                text("INSERT INTO schema_version (version, description) VALUES (:v, :d)"),
+    89→                {"v": version, "d": description},
+    90→            )
+    91→            conn.commit()
+    92→
+    93→        final = _current_version(conn)
+    94→        logger.info(f"Migrations complete — schema version {final}")
+    95→

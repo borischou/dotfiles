@@ -1,0 +1,160 @@
+     1→     1→     1→"""Pipeline checkpoint manager for resume capability."""
+     2→     2→     2→
+     3→     3→     3→import json
+     4→     4→     4→import os
+     5→     5→     5→import tempfile
+     6→     6→     6→from datetime import datetime, timezone
+     7→     7→     7→from pathlib import Path
+     8→     8→     8→from typing import Any, Dict, List, Optional, Set
+     9→     9→     9→
+    10→    10→    10→from loguru import logger
+    11→    11→    11→
+    12→    12→    12→
+    13→    13→    13→CHECKPOINT_DIR = Path("data/.checkpoints")
+    14→    14→    14→
+    15→    15→    15→
+    16→    16→    16→class CheckpointManager:
+    17→    17→    17→    """Manages pipeline checkpoint save/load for resume support."""
+    18→    18→    18→
+    19→    19→    19→    def __init__(self, checkpoint_id: Optional[str] = None):
+    20→    20→    20→        CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    21→    21→    21→
+    22→    22→    22→        if checkpoint_id:
+    23→    23→    23→            self.checkpoint_path = CHECKPOINT_DIR / f"{checkpoint_id}.json"
+    24→    24→    24→        else:
+    25→    25→    25→            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    26→    26→    26→            self.checkpoint_path = CHECKPOINT_DIR / f"pipeline_{ts}.json"
+    27→    27→    27→
+    28→    28→    28→        self._data: Dict[str, Any] = {}
+    29→    29→    29→
+    30→    30→    30→    def save(
+    31→    31→    31→        self,
+    32→    32→    32→        keywords: tuple,
+    33→    33→    33→        template: str,
+    34→    34→    34→        variables: dict,
+    35→    35→    35→        company: tuple,
+    36→    36→    36→        location: Optional[str],
+    37→    37→    37→        max_pages: int,
+    38→    38→    38→        batch_pages: int,
+    39→    39→    39→        skip_messaged: bool,
+    40→    40→    40→        interactive: bool,
+    41→    41→    41→        completed_pages: int,
+    42→    42→    42→        sent_ids: List[str],
+    43→    43→    43→        seen_ids: List[str],
+    44→    44→    44→        total_results: Optional[dict] = None,
+    45→    45→    45→        mode: str = "recommend",
+    46→    46→    46→        dry_run: bool = False,
+    47→    47→    47→    ) -> None:
+    48→    48→    48→        self._data = {
+    49→    49→    49→            "created_at": self._data.get("created_at", datetime.now(timezone.utc).isoformat()),
+    50→    50→    50→            "updated_at": datetime.now(timezone.utc).isoformat(),
+    51→    51→    51→            "params": {
+    52→    52→    52→                "keywords": list(keywords),
+    53→    53→    53→                "template": template,
+    54→    54→    54→                "variables": variables,
+    55→    55→    55→                "company": list(company) if company else [],
+    56→    56→    56→                "location": location,
+    57→    57→    57→                "max_pages": max_pages,
+    58→    58→    58→                "batch_pages": batch_pages,
+    59→    59→    59→                "skip_messaged": skip_messaged,
+    60→    60→    60→                "interactive": interactive,
+    61→    61→    61→                "mode": mode,
+    62→    62→    62→                "dry_run": dry_run,
+    63→    63→    63→            },
+    64→    64→    64→            "progress": {
+    65→    65→    65→                "completed_pages": completed_pages,
+    66→    66→    66→                "sent_ids": sent_ids,
+    67→    67→    67→                "seen_ids": seen_ids,
+    68→    68→    68→                "total_results": total_results or {},
+    69→    69→    69→            },
+    70→    70→    70→        }
+    71→    71→    71→
+    72→    72→    72→        try:
+    73→    73→    73→            tmp_fd, tmp_path = tempfile.mkstemp(
+    74→    74→    74→                dir=self.checkpoint_path.parent, suffix=".tmp"
+    75→    75→    75→            )
+    76→    76→    76→            try:
+    77→    77→    77→                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+    78→    78→    78→                    json.dump(self._data, f, ensure_ascii=False, indent=2)
+    79→    79→    79→                os.replace(tmp_path, self.checkpoint_path)
+    80→    80→    80→            except BaseException:
+    81→    81→    81→                try:
+    82→    82→    82→                    os.unlink(tmp_path)
+    83→    83→    83→                except OSError:
+    84→    84→    84→                    pass
+    85→    85→    85→                raise
+    86→    86→    86→            logger.debug(f"Checkpoint saved: {self.checkpoint_path}")
+    87→    87→    87→        except Exception as e:
+    88→    88→    88→            logger.error(f"Failed to save checkpoint: {e}")
+    89→    89→    89→            raise
+    90→    90→    90→
+    91→    91→    91→    @classmethod
+    92→    92→    92→    def load_latest(cls) -> Optional["CheckpointManager"]:
+    93→    93→    93→        CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    94→    94→    94→        files = sorted(CHECKPOINT_DIR.glob("pipeline_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    95→    95→    95→
+    96→    96→    96→        if not files:
+    97→    97→    97→            return None
+    98→    98→    98→
+    99→    99→    99→        try:
+   100→   100→   100→            mgr = object.__new__(cls)
+   101→   101→   101→            mgr.checkpoint_path = files[0]
+   102→   102→   102→            mgr._data = {}
+   103→   103→   103→            with open(files[0], "r", encoding="utf-8") as f:
+   104→   104→   104→                mgr._data = json.load(f)
+   105→   105→   105→            logger.info(f"Loaded checkpoint: {files[0]}")
+   106→   106→   106→            return mgr
+   107→   107→   107→        except Exception as e:
+   108→   108→   108→            logger.error(f"Failed to load checkpoint: {e}")
+   109→   109→   109→            return None
+   110→   110→   110→
+   111→   111→   111→    @property
+   112→   112→   112→    def params(self) -> Dict[str, Any]:
+   113→   113→   113→        return self._data.get("params", {})
+   114→   114→   114→
+   115→   115→   115→    @property
+   116→   116→   116→    def progress(self) -> Dict[str, Any]:
+   117→   117→   117→        return self._data.get("progress", {})
+   118→   118→   118→
+   119→   119→   119→    @property
+   120→   120→   120→    def completed_pages(self) -> int:
+   121→   121→   121→        return self.progress.get("completed_pages", 0)
+   122→   122→   122→
+   123→   123→   123→    @property
+   124→   124→   124→    def sent_ids(self) -> List[str]:
+   125→   125→   125→        return list(self.progress.get("sent_ids", []))
+   126→   126→   126→
+   127→   127→   127→    @property
+   128→   128→   128→    def seen_ids(self) -> Set[str]:
+   129→   129→   129→        return set(self.progress.get("seen_ids", []))
+   130→   130→   130→
+   131→   131→   131→    @property
+   132→   132→   132→    def total_results(self) -> Dict[str, int]:
+   133→   133→   133→        return self.progress.get("total_results", {})
+   134→   134→   134→
+   135→   135→   135→    @property
+   136→   136→   136→    def summary(self) -> str:
+   137→   137→   137→        p = self.params
+   138→   138→   138→        pr = self.progress
+   139→   139→   139→        created = self._data.get("created_at", "unknown")
+   140→   140→   140→        updated = self._data.get("updated_at", "unknown")
+   141→   141→   141→        mode = p.get("mode", "recommend")
+   142→   142→   142→        return (
+   143→   143→   143→            f"Keywords: {p.get('keywords', [])}\n"
+   144→   144→   144→            f"Template: {p.get('template', '')}\n"
+   145→   145→   145→            f"Mode: {mode}\n"
+   146→   146→   146→            f"Pages completed: {pr.get('completed_pages', 0)} / {p.get('max_pages', '?')}\n"
+   147→   147→   147→            f"Candidates seen: {len(pr.get('seen_ids', []))}\n"
+   148→   148→   148→            f"Messages sent: {len(pr.get('sent_ids', []))}\n"
+   149→   149→   149→            f"Created: {created}\n"
+   150→   150→   150→            f"Last updated: {updated}"
+   151→   151→   151→        )
+   152→   152→   152→
+   153→   153→   153→    def delete(self) -> None:
+   154→   154→   154→        try:
+   155→   155→   155→            if self.checkpoint_path.exists():
+   156→   156→   156→                self.checkpoint_path.unlink()
+   157→   157→   157→                logger.debug(f"Checkpoint deleted: {self.checkpoint_path}")
+   158→   158→   158→        except Exception as e:
+   159→   159→   159→            logger.error(f"Failed to delete checkpoint: {e}")
+   160→   160→   160→

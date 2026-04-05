@@ -1,0 +1,4 @@
+#!/bin/bash
+cd /Users/zhouboli/Documents/video-enhance
+/Library/Developer/CommandLineTools/usr/bin/python3 underwater_enhance.py image sample.jpg -o out_optimized.jpg --compare
+echo "处理完成，查看 out_optimized.jpg 和 out_optimized_compare.jpg"

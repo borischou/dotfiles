@@ -1,0 +1,193 @@
+     1→"""Database models and setup using SQLAlchemy."""
+     2→
+     3→from contextlib import contextmanager
+     4→from datetime import datetime, timezone
+     5→from pathlib import Path
+     6→from typing import Optional
+     7→
+     8→from sqlalchemy import (
+     9→    Column, Integer, String, Text, DateTime, JSON,
+    10→    ForeignKey, create_engine, Index, CheckConstraint, event
+    11→)
+    12→from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+    13→from sqlalchemy.pool import QueuePool, StaticPool
+    14→from loguru import logger
+    15→
+    16→from src.utils.config import get_config
+    17→
+    18→Base = declarative_base()
+    19→
+    20→
+    21→def _utcnow():
+    22→    """Return timezone-aware UTC now (replaces deprecated datetime.utcnow)."""
+    23→    return datetime.now(timezone.utc)
+    24→
+    25→
+    26→class Candidate(Base):
+    27→    """Candidate model - stores candidate profile information."""
+    28→
+    29→    __tablename__ = 'candidates'
+    30→
+    31→    id = Column(Integer, primary_key=True, autoincrement=True)
+    32→    maimai_id = Column(String(50), unique=True, nullable=False, index=True)
+    33→    name = Column(String(100))
+    34→    title = Column(String(200))
+    35→    company = Column(String(200))
+    36→    location = Column(String(100))
+    37→    profile_url = Column(Text)
+    38→
+    39→    # JSON fields for structured data
+    40→    basic_info = Column(JSON)
+    41→    education = Column(JSON)
+    42→    work_experience = Column(JSON)
+    43→    skills = Column(JSON)
+    44→
+    45→    # Metadata
+    46→    first_seen = Column(DateTime, default=_utcnow)
+    47→    last_updated = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    48→    source_search = Column(Text)  # Search keywords that found this candidate
+    49→
+    50→    # Relationships
+    51→    messages = relationship("Message", back_populates="candidate")
+    52→
+    53→    def __repr__(self):
+    54→        return f"<Candidate(maimai_id='{self.maimai_id}', name='{self.name}', company='{self.company}')>"
+    55→
+    56→
+    57→class Message(Base):
+    58→    """Message model - stores sent messages to candidates."""
+    59→
+    60→    __tablename__ = 'messages'
+    61→
+    62→    id = Column(Integer, primary_key=True, autoincrement=True)
+    63→    candidate_maimai_id = Column(String(50), ForeignKey('candidates.maimai_id'), index=True)
+    64→    template_name = Column(String(100))
+    65→    content = Column(Text, nullable=False)
+    66→    status = Column(String(20), CheckConstraint("status IN ('sent', 'failed', 'cancelled')"))
+    67→    sent_at = Column(DateTime)
+    68→    created_at = Column(DateTime, default=_utcnow)
+    69→
+    70→    # Relationships
+    71→    candidate = relationship("Candidate", back_populates="messages")
+    72→
+    73→    def __repr__(self):
+    74→        return f"<Message(id={self.id}, candidate_id='{self.candidate_maimai_id}', status='{self.status}')>"
+    75→
+    76→
+    77→class SearchHistory(Base):
+    78→    """Search history model - tracks all searches performed."""
+    79→
+    80→    __tablename__ = 'search_history'
+    81→
+    82→    id = Column(Integer, primary_key=True, autoincrement=True)
+    83→    criteria = Column(JSON)  # Search parameters as JSON
+    84→    results_count = Column(Integer, default=0)
+    85→    executed_at = Column(DateTime, default=_utcnow, index=True)
+    86→
+    87→    def __repr__(self):
+    88→        return f"<SearchHistory(id={self.id}, results={self.results_count}, date='{self.executed_at}')>"
+    89→
+    90→
+    91→class ActionLog(Base):
+    92→    """Action log model - tracks all actions for rate limiting."""
+    93→
+    94→    __tablename__ = 'action_logs'
+    95→
+    96→    id = Column(Integer, primary_key=True, autoincrement=True)
+    97→    action_type = Column(String(50), nullable=False)  # 'search', 'view_profile', 'send_message'
+    98→    timestamp = Column(DateTime, default=_utcnow, nullable=False)
+    99→    details = Column(JSON)  # Additional action details
+   100→
+   101→    # Composite index for efficient rate limiting queries
+   102→    __table_args__ = (
+   103→        Index('idx_action_logs_type_time', 'action_type', 'timestamp'),
+   104→    )
+   105→
+   106→    def __repr__(self):
+   107→        return f"<ActionLog(id={self.id}, type='{self.action_type}', time='{self.timestamp}')>"
+   108→
+   109→
+   110→def _set_wal_mode(dbapi_conn, connection_record):
+   111→    """Enable WAL mode on every new SQLite connection.
+   112→
+   113→    WAL mode allows concurrent readers with a single writer,
+   114→    suitable for 2-5 concurrent web users.
+   115→    """
+   116→    cursor = dbapi_conn.cursor()
+   117→    cursor.execute("PRAGMA journal_mode=WAL")
+   118→    cursor.close()
+   119→
+   120→
+   121→class DatabaseManager:
+   122→    """Database manager for initialization and session management."""
+   123→
+   124→    def __init__(self, db_path: Optional[str] = None):
+   125→        """Initialize database manager."""
+   126→        if db_path is None:
+   127→            config = get_config()
+   128→            db_path = config.get('data.database_path', 'data/maimai.db')
+   129→
+   130→        # Ensure data directory exists
+   131→        db_file = Path(db_path)
+   132→        db_file.parent.mkdir(parents=True, exist_ok=True)
+   133→
+   134→        # Use QueuePool with WAL mode for concurrent read support (web service).
+   135→        # check_same_thread=False is still needed for SQLite in multi-threaded context.
+   136→        self.db_path = db_path
+   137→        self.engine = create_engine(
+   138→            f'sqlite:///{db_path}',
+   139→            echo=False,
+   140→            poolclass=QueuePool,
+   141→            pool_size=5,
+   142→            max_overflow=10,
+   143→            connect_args={"check_same_thread": False},
+   144→        )
+   145→
+   146→        # Enable WAL mode on every connection
+   147→        event.listen(self.engine, "connect", _set_wal_mode)
+   148→
+   149→        self.Session = sessionmaker(bind=self.engine)
+   150→
+   151→        # Auto-create tables and run migrations
+   152→        self.init_db()
+   153→
+   154→        logger.info(f"Database initialized at: {db_path}")
+   155→
+   156→    def init_db(self):
+   157→        """Create all tables and run pending migrations."""
+   158→        Base.metadata.create_all(self.engine)
+   159→        logger.info("Database tables created successfully")
+   160→
+   161→        from src.models.migrations import run_migrations
+   162→        run_migrations(self.engine)
+   163→
+   164→    @contextmanager
+   165→    def session_scope(self):
+   166→        """Provide a transactional scope with auto commit/rollback/close."""
+   167→        session = self.Session()
+   168→        try:
+   169→            yield session
+   170→            session.commit()
+   171→        except Exception:
+   172→            session.rollback()
+   173→            raise
+   174→        finally:
+   175→            session.close()
+   176→
+   177→    def drop_all(self):
+   178→        """Drop all tables (use with caution!)."""
+   179→        Base.metadata.drop_all(self.engine)
+   180→        logger.warning("All database tables dropped")
+   181→
+   182→
+   183→# Global database manager instance
+   184→_db_manager = None
+   185→
+   186→
+   187→def get_db_manager() -> DatabaseManager:
+   188→    """Get global database manager instance."""
+   189→    global _db_manager
+   190→    if _db_manager is None:
+   191→        _db_manager = DatabaseManager()
+   192→    return _db_manager
+   193→

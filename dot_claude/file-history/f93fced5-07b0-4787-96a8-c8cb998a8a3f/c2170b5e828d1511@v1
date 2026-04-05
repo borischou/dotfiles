@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Maimai Assistant{% endblock %}
+
+{% block content %}
+<h2>Dashboard</h2>
+
+<div class="grid">
+    <article>
+        <header>Connection Status</header>
+        <p>Browser: <strong id="browser-status">--</strong></p>
+        <p>Login: <strong id="login-status">--</strong></p>
+        <p>CDP: <code id="cdp-endpoint">--</code></p>
+        <footer>
+            <button class="outline" onclick="checkStatus()">Refresh</button>
+        </footer>
+    </article>
+
+    <article>
+        <header>Task Queue</header>
+        <p>Queue size: <strong id="queue-size">0</strong></p>
+        <p>Current task: <strong id="current-task">None</strong></p>
+        <footer>
+            <a href="/search" role="button" class="outline">New Search</a>
+            <a href="/pipeline" role="button">New Pipeline</a>
+        </footer>
+    </article>
+</div>
+
+<h3>Recent Tasks</h3>
+<table id="recent-tasks">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Created</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr><td colspan="4">Loading...</td></tr>
+    </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function checkStatus() {
+    try {
+        const [authRes, statusRes, tasksRes] = await Promise.all([
+            fetch('/api/auth/status'),
+            fetch('/api/status'),
+            fetch('/api/tasks?limit=10'),
+        ]);
+        const auth = await authRes.json();
+        const status = await statusRes.json();
+        const tasks = await tasksRes.json();
+
+        document.getElementById('browser-status').textContent = auth.browser_connected ? 'Connected' : 'Disconnected';
+        document.getElementById('browser-status').style.color = auth.browser_connected ? 'var(--pico-color-green-500)' : 'var(--pico-color-red-500)';
+        document.getElementById('login-status').textContent = auth.logged_in ? 'Logged in' : 'Not logged in';
+        document.getElementById('login-status').style.color = auth.logged_in ? 'var(--pico-color-green-500)' : 'var(--pico-color-red-500)';
+        document.getElementById('cdp-endpoint').textContent = auth.cdp_endpoint;
+
+        document.getElementById('queue-size').textContent = status.queue.queue_size;
+        document.getElementById('current-task').textContent = status.queue.current_task ? status.queue.current_task.name : 'None';
+
+        // Update connection badge
+        const badge = document.getElementById('connection-badge');
+        if (auth.browser_connected && auth.logged_in) {
+            badge.textContent = 'Online';
+            badge.dataset.status = 'ok';
+        } else if (auth.browser_connected) {
+            badge.textContent = 'Not Logged In';
+            badge.dataset.status = 'warn';
+        } else {
+            badge.textContent = 'Offline';
+            badge.dataset.status = 'error';
+        }
+
+        // Recent tasks
+        const tbody = document.querySelector('#recent-tasks tbody');
+        if (tasks.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4">No tasks yet</td></tr>';
+        } else {
+            tbody.innerHTML = tasks.map(t => `
+                <tr>
+                    <td><code>${t.task_id}</code></td>
+                    <td>${t.name}</td>
+                    <td><span class="badge" data-status="${t.status}">${t.status}</span></td>
+                    <td>${new Date(t.created_at).toLocaleString()}</td>
+                </tr>
+            `).join('');
+        }
+    } catch (e) {
+        console.error('Status check failed:', e);
+    }
+}
+
+checkStatus();
+setInterval(checkStatus, 10000);
+</script>
+{% endblock %}

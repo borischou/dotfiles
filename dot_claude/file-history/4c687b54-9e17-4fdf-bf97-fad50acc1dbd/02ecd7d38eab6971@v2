@@ -1,0 +1,536 @@
+"""Candidate search module for Boss直聘.
+
+Handles searching for candidates on Boss直聘's talent search pages.
+Search page: /web/chat/search — candidates are inside iframe[name='searchFrame'].
+
+CRITICAL ARCHITECTURE NOTE:
+The search results live inside an iframe (searchFrame), NOT the main page DOM.
+All evaluate() calls must target the iframe frame, not page directly.
+Search uses "换一换" button to refresh results, not infinite scroll.
+Candidate IDs come from data-expect attribute on card links.
+"""
+
+import hashlib
+from dataclasses import dataclass, field
+from typing import List, Optional, Set
+
+from patchright.async_api import Page, Frame
+from loguru import logger
+from rich.console import Console
+from rich.table import Table
+
+from src.core.browser import BrowserManager, get_browser_manager
+from src.utils.delays import async_random_delay
+from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+from src.utils.captcha import check_captcha
+from src.utils.retry import retry_navigation
+from src.models.database import Candidate, SearchHistory, get_db_manager
+console = Console()
+
+
+@dataclass
+class CandidateBasic:
+    """Basic candidate info extracted from search results."""
+    boss_id: str
+    name: str
+    title: str
+    company: str
+    location: Optional[str] = None
+    salary_expect: Optional[str] = None
+    work_years: Optional[str] = None
+    education_level: Optional[str] = None
+    profile_url: Optional[str] = None
+    active_status: Optional[str] = None
+    school: Optional[str] = None
+    major: Optional[str] = None
+    job_status: Optional[str] = None
+    self_desc: Optional[str] = None
+    _score: int = field(default=0, init=False, repr=False)
+
+    def __hash__(self):
+        return hash(self.boss_id)
+
+    def __eq__(self, other):
+        if isinstance(other, CandidateBasic):
+            return self.boss_id == other.boss_id
+        return False
+
+
+# Non-R&D roles to filter out
+NON_RD_KEYWORDS = {
+    "销售", "产品经理", "市场", "运营", "行政", "人事", "财务",
+    "法务", "采购", "客服", "前台", "助理", "秘书",
+}
+
+
+def _is_non_rd_role(title: str) -> bool:
+    """Check if title indicates a non-R&D role."""
+    if not title:
+        return False
+    for keyword in NON_RD_KEYWORDS:
+        if keyword in title:
+            return True
+    return False
+
+
+def _generate_boss_id(name: str, company: str) -> str:
+    """Generate a fallback Boss ID from name + company hash."""
+    raw = f"{name}_{company}"
+    h = hashlib.sha256(raw.encode()).hexdigest()[:20]
+    return f"zp_{h}"
+
+
+async def _get_search_frame(page: Page) -> Optional[Frame]:
+    """Get the searchFrame iframe from the main page.
+
+    Boss直聘 search page loads candidates inside iframe[name='searchFrame'].
+    Returns the Frame object for executing JS inside the iframe.
+    """
+    frame = page.frame(name='searchFrame')
+    if frame:
+        return frame
+
+    # Fallback: find by URL pattern
+    for f in page.frames:
+        if 'frame/search' in (f.url or ''):
+            return f
+
+    return None
+
+
+# JavaScript extraction for candidates inside searchFrame iframe.
+# Targets: div.card-list > li.geek-info-card > a[data-expect]
+EXTRACT_CANDIDATES_JS = """
+() => {
+    const candidates = [];
+    const cards = document.querySelectorAll('.card-list .geek-info-card');
+
+    for (const card of cards) {
+        try {
+            const link = card.querySelector('a');
+            if (!link) continue;
+
+            // Candidate ID from data-expect attribute
+            const expectId = link.dataset.expect || '';
+            if (!expectId) continue;
+
+            const bossId = 'zp_' + expectId;
+
+            // Name (anonymized, e.g. "卿**")
+            const nameEl = card.querySelector('.name-label');
+            const name = nameEl ? nameEl.innerText.trim() : '';
+            if (!name) continue;
+
+            // Labels (e.g. "热搜")
+            const labelEls = card.querySelectorAll('.card-label');
+            const labels = Array.from(labelEls).map(el => el.innerText.trim()).filter(Boolean);
+
+            // Active status (e.g. "3日内活跃")
+            const activeEl = card.querySelector('.active-desc-text');
+            const activeStatus = activeEl ? activeEl.innerText.trim() : '';
+
+            // Info labels: age, work years, education, job status, salary
+            const infoLabels = card.querySelectorAll('.info-labels > .label-text');
+            const infoTexts = Array.from(infoLabels).map(el => el.innerText.trim());
+
+            let age = '', workYears = '', education = '', jobStatus = '', salary = '';
+            for (const text of infoTexts) {
+                if (text.includes('岁')) age = text;
+                else if (text.includes('年') && !text.includes('岁')) workYears = text;
+                else if (['博士', '硕士', '本科', '大专', '中专', '高中'].some(d => text.includes(d))) education = text;
+                else if (text.includes('在职') || text.includes('离职') || text.includes('求职')) jobStatus = text;
+                else if (text.includes('K') || text.includes('k') || text.includes('薪')) salary = text;
+            }
+
+            // Self description / detail
+            const detailEl = card.querySelector('.info-detail');
+            const selfDesc = detailEl ? detailEl.innerText.trim() : '';
+
+            // Expect city
+            const expectCityEls = card.querySelectorAll('.expect-exp-box .t-tooltip-slot');
+            const expectCity = Array.from(expectCityEls).map(el => el.innerText.trim()).filter(Boolean).join(' ');
+
+            // Work experience (company + title)
+            const workExpEls = card.querySelectorAll('.work-exp-box .t-tooltip-slot');
+            const workExpTexts = Array.from(workExpEls).map(el => el.innerText.trim()).filter(Boolean);
+            const company = workExpTexts[0] || '';
+            const title = workExpTexts[1] || '';
+
+            // Education (school + major)
+            const eduExpEls = card.querySelectorAll('.edu-exp-box .t-tooltip-slot');
+            const eduTexts = Array.from(eduExpEls).map(el => el.innerText.trim()).filter(Boolean);
+            const school = eduTexts[0] || '';
+            const major = eduTexts[1] || '';
+
+            // Contact button status
+            const contactBtn = card.querySelector('.btn-getcontact');
+            const contactText = contactBtn ? contactBtn.innerText.trim() : '';
+
+            // Elite/hot candidate flag
+            const isElite = link.dataset.elitegeek === '1';
+
+            candidates.push({
+                boss_id: bossId,
+                name: name,
+                title: title,
+                company: company,
+                location: expectCity,
+                salary_expect: salary,
+                work_years: workYears,
+                education_level: education,
+                active_status: activeStatus,
+                school: school,
+                major: major,
+                job_status: jobStatus,
+                self_desc: selfDesc,
+                age: age,
+                labels: labels,
+                is_elite: isElite,
+                contact_text: contactText,
+                profile_url: ''
+            });
+        } catch (e) {
+            console.error('Error extracting candidate:', e);
+        }
+    }
+
+    return candidates;
+}
+"""
+
+
+async def search_candidates(
+    keywords: List[str],
+    location: Optional[str] = None,
+    max_pages: int = 1,
+    experience: Optional[str] = None,
+    education: Optional[str] = None,
+    salary: Optional[str] = None,
+    browser: Optional[BrowserManager] = None,
+    start_page: int = 1,
+) -> List[CandidateBasic]:
+    """
+    Search for candidates on Boss直聘.
+
+    Navigates to search page, types keyword in iframe search input,
+    extracts candidates from card list, and optionally refreshes
+    via "换一换" button for more results.
+
+    Args:
+        keywords: List of search keywords
+        location: Location filter (e.g., "北京")
+        max_pages: Number of "换一换" refresh rounds per keyword
+        experience: Experience filter
+        education: Education filter
+        salary: Salary filter
+        browser: Browser manager instance
+        start_page: Starting refresh round (for resume)
+
+    Returns:
+        List of CandidateBasic instances
+    """
+    if browser is None:
+        browser = get_browser_manager()
+
+    page = browser.page
+    if not page:
+        page = await browser.start()
+
+    rate_limiter = get_rate_limiter()
+    db_manager = get_db_manager()
+
+    all_candidates: List[CandidateBasic] = []
+    seen_ids: Set[str] = set()
+    seen_dedup_keys: Set[str] = set()
+
+    for keyword in keywords:
+        console.print(f"\n[cyan]Searching for: {keyword}[/cyan]")
+
+        # Rate limit check
+        await async_check_rate_limit('search')
+
+        try:
+            # Navigate to search page (main page, iframe will load)
+            search_url = "https://www.zhipin.com/web/chat/search"
+            await retry_navigation(page, search_url, wait_until='domcontentloaded')
+            await async_random_delay('page_load')
+
+            # Check for captcha on main page
+            await check_captcha(page, report_to_rate_limiter=True)
+
+            # Get the search iframe
+            search_frame = await _get_search_frame(page)
+            if not search_frame:
+                logger.error("Could not find searchFrame iframe")
+                console.print("[red]Search iframe not found. Page structure may have changed.[/red]")
+                continue
+
+            # Wait for search input to be ready inside iframe
+            try:
+                await search_frame.wait_for_selector('input.search-input', timeout=10000)
+            except Exception:
+                logger.error("Search input not found in iframe")
+                continue
+
+            # Type keyword in search input
+            search_input = await search_frame.query_selector('input.search-input')
+            if search_input:
+                await search_input.click()
+                await page.wait_for_timeout(300)
+                # Clear and type
+                import sys
+                select_all_key = "Meta+a" if sys.platform == "darwin" else "Control+a"
+                await page.keyboard.press(select_all_key)
+                await search_input.fill(keyword)
+                await page.keyboard.press('Enter')
+                await async_random_delay('page_load')
+            else:
+                logger.error("Search input element not found")
+                continue
+
+            # Wait for card list to appear
+            try:
+                await search_frame.wait_for_selector('.card-list .geek-info-card', timeout=15000)
+            except Exception:
+                logger.warning(f"No candidate cards loaded for '{keyword}'")
+                continue
+
+            # Check for quota exhaustion
+            if await _check_quota_exhausted(search_frame):
+                console.print("[red]Daily contact quota exhausted. Stopping search.[/red]")
+                break
+
+            # Extract candidates from current results + refresh rounds
+            total_rounds = start_page + max_pages - 1
+            for refresh_round in range(start_page, total_rounds + 1):
+                if refresh_round > start_page:
+                    console.print(f"  [dim]Refresh round {refresh_round}/{total_rounds} (换一换)...[/dim]")
+                    await _refresh_search_results(search_frame)
+                    await async_random_delay('page_load')
+
+                # Extract candidates from current card list
+                raw_candidates = await search_frame.evaluate(EXTRACT_CANDIDATES_JS)
+
+                if not raw_candidates:
+                    logger.warning(f"No candidates found in round {refresh_round} for '{keyword}'")
+                    continue
+
+                # Process results
+                round_count = 0
+                for raw in raw_candidates:
+                    name = raw.get('name', '').strip()
+                    title = raw.get('title', '').strip()
+                    company = raw.get('company', '').strip()
+
+                    if not name:
+                        continue
+
+                    # Filter non-R&D roles
+                    if _is_non_rd_role(title):
+                        continue
+
+                    # Use boss_id from data-expect
+                    boss_id = raw.get('boss_id', '')
+                    if not boss_id:
+                        boss_id = _generate_boss_id(name, company)
+
+                    # Deduplicate
+                    if boss_id in seen_ids:
+                        continue
+
+                    dedup_key = f"{name}_{company}"
+                    if dedup_key in seen_dedup_keys:
+                        continue
+
+                    seen_ids.add(boss_id)
+                    seen_dedup_keys.add(dedup_key)
+
+                    candidate = CandidateBasic(
+                        boss_id=boss_id,
+                        name=name,
+                        title=title,
+                        company=company,
+                        location=raw.get('location', ''),
+                        salary_expect=raw.get('salary_expect', ''),
+                        work_years=raw.get('work_years', ''),
+                        education_level=raw.get('education_level', ''),
+                        profile_url=raw.get('profile_url', ''),
+                        active_status=raw.get('active_status', ''),
+                        school=raw.get('school', ''),
+                        major=raw.get('major', ''),
+                        job_status=raw.get('job_status', ''),
+                        self_desc=raw.get('self_desc', ''),
+                    )
+
+                    all_candidates.append(candidate)
+                    round_count += 1
+
+                console.print(f"  [green]Round {refresh_round}: {round_count} new candidates[/green]")
+
+            # Log action
+            rate_limiter.log_action('search', {
+                'keyword': keyword,
+                'refresh_rounds': max_pages,
+                'results': len([c for c in all_candidates]),
+            })
+
+            # Save search history
+            keyword_count = len([c for c in all_candidates if c.boss_id in seen_ids])
+            with db_manager.session_scope() as session:
+                history = SearchHistory(
+                    criteria={
+                        'keywords': keyword,
+                        'location': location,
+                        'refresh_rounds': max_pages,
+                        'experience': experience,
+                        'education': education,
+                        'salary': salary,
+                    },
+                    results_count=keyword_count,
+                )
+                session.add(history)
+
+        except Exception as e:
+            logger.error(f"Error searching for '{keyword}': {e}")
+            console.print(f"  [red]Error: {e}[/red]")
+            rate_limiter.report_error()
+
+    console.print(f"\n[green]Total unique candidates: {len(all_candidates)}[/green]")
+
+    # Save candidates to database
+    _save_candidates_to_db(all_candidates, keywords, db_manager)
+
+    # Display results summary
+    _display_results(all_candidates, keywords)
+
+    return all_candidates
+
+
+async def _refresh_search_results(frame: Frame) -> None:
+    """Click "换一换" button in the search iframe to load new candidates.
+
+    Boss直聘 search does NOT use infinite scroll. Instead it shows ~30 cards
+    and provides a "换一换" button to refresh the list with new candidates.
+    """
+    try:
+        refresh_btn = await frame.query_selector('.change-btn')
+        if refresh_btn and await refresh_btn.is_visible():
+            await refresh_btn.click()
+            # Wait for new cards to load
+            await frame.wait_for_timeout(2000)
+            return
+    except Exception as e:
+        logger.warning(f"Could not click refresh button: {e}")
+
+    # Fallback: scroll the iframe body to trigger any lazy loading
+    await frame.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    await frame.wait_for_timeout(1500)
+
+
+async def _check_quota_exhausted(frame: Frame) -> bool:
+    """Check if Boss直聘 shows a quota exhaustion indicator."""
+    try:
+        result = await frame.evaluate("""
+            () => {
+                const bodyText = document.body ? document.body.innerText : '';
+                const quotaIndicators = [
+                    '今日沟通次数已用完',
+                    '沟通次数已达上限',
+                    '今日联系人数已满',
+                    '升级会员',
+                    '开通会员享更多沟通'
+                ];
+                for (const indicator of quotaIndicators) {
+                    if (bodyText.includes(indicator)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        """)
+        return result
+    except Exception:
+        return False
+
+
+def _save_candidates_to_db(
+    candidates: List[CandidateBasic],
+    keywords: List[str],
+    db_manager,
+) -> None:
+    """Save or update candidates in the database."""
+    source = ', '.join(keywords)
+
+    with db_manager.session_scope() as session:
+        # Batch-fetch existing candidates to avoid N+1 queries
+        boss_ids = [c.boss_id for c in candidates]
+        existing_map = {}
+        for i in range(0, len(boss_ids), 500):
+            chunk = boss_ids[i:i + 500]
+            rows = session.query(Candidate).filter(
+                Candidate.boss_id.in_(chunk)
+            ).all()
+            for row in rows:
+                existing_map[row.boss_id] = row
+
+        for c in candidates:
+            existing = existing_map.get(c.boss_id)
+            if existing:
+                existing.name = c.name or existing.name
+                existing.title = c.title or existing.title
+                existing.company = c.company or existing.company
+                existing.location = c.location or existing.location
+                existing.salary_expect = c.salary_expect or existing.salary_expect
+                existing.work_years = c.work_years or existing.work_years
+                existing.education_level = c.education_level or existing.education_level
+                existing.profile_url = c.profile_url or existing.profile_url
+                if source and source not in (existing.source_search or ''):
+                    existing.source_search = f"{existing.source_search or ''}, {source}".strip(', ')
+            else:
+                new_candidate = Candidate(
+                    boss_id=c.boss_id,
+                    name=c.name,
+                    title=c.title,
+                    company=c.company,
+                    location=c.location,
+                    salary_expect=c.salary_expect,
+                    work_years=c.work_years,
+                    education_level=c.education_level,
+                    profile_url=c.profile_url,
+                    source_search=source,
+                )
+                session.add(new_candidate)
+
+
+def _display_results(candidates: List[CandidateBasic], keywords: List[str]) -> None:
+    """Display search results in a Rich table."""
+    if not candidates:
+        console.print("[yellow]No candidates found.[/yellow]")
+        return
+
+    table = Table(title=f"Search Results ({len(candidates)} candidates)")
+    table.add_column("Boss ID", style="dim", max_width=20)
+    table.add_column("Name", style="bold")
+    table.add_column("Title")
+    table.add_column("Company")
+    table.add_column("Education")
+    table.add_column("Salary")
+    table.add_column("Experience")
+    table.add_column("Active", style="green")
+
+    for c in candidates[:50]:
+        table.add_row(
+            c.boss_id[:20],
+            c.name,
+            c.title[:30] if c.title else "",
+            c.company[:20] if c.company else "",
+            c.education_level or "",
+            c.salary_expect or "",
+            c.work_years or "",
+            c.active_status or "",
+        )
+
+    console.print(table)
+
+    if len(candidates) > 50:
+        console.print(f"[dim]...and {len(candidates) - 50} more candidates[/dim]")

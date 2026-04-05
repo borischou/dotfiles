@@ -1,0 +1,137 @@
+     1→"""Candidates routes — list, detail, profile extraction."""
+     2→
+     3→import html
+     4→
+     5→from fastapi import APIRouter, Request, Query
+     6→from fastapi.responses import HTMLResponse
+     7→
+     8→from src.web.app import task_queue, templates
+     9→from src.models.database import Candidate, Message, get_db_manager
+    10→
+    11→router = APIRouter()
+    12→
+    13→
+    14→@router.get("/", response_class=HTMLResponse)
+    15→async def candidates_list(
+    16→    request: Request,
+    17→    page: int = Query(1, ge=1),
+    18→    q: str = Query("", description="Search filter"),
+    19→):
+    20→    """List candidates from database with pagination."""
+    21→    db = get_db_manager()
+    22→    per_page = 50
+    23→
+    24→    with db.session_scope() as session:
+    25→        query = session.query(Candidate).order_by(Candidate.last_updated.desc())
+    26→
+    27→        if q:
+    28→            like = f"%{q}%"
+    29→            query = query.filter(
+    30→                Candidate.name.ilike(like)
+    31→                | Candidate.title.ilike(like)
+    32→                | Candidate.company.ilike(like)
+    33→            )
+    34→
+    35→        total = query.count()
+    36→        candidates = query.offset((page - 1) * per_page).limit(per_page).all()
+    37→
+    38→        # Detach from session for template use
+    39→        result = []
+    40→        for c in candidates:
+    41→            result.append({
+    42→                "boss_id": c.boss_id,
+    43→                "name": c.name,
+    44→                "title": c.title,
+    45→                "company": c.company,
+    46→                "location": c.location,
+    47→                "salary_expect": c.salary_expect,
+    48→                "work_years": c.work_years,
+    49→                "education_level": c.education_level,
+    50→                "source_search": c.source_search,
+    51→            })
+    52→
+    53→    total_pages = max(1, (total + per_page - 1) // per_page)
+    54→
+    55→    return templates.TemplateResponse("candidates.html", {
+    56→        "request": request,
+    57→        "candidates": result,
+    58→        "page": page,
+    59→        "total_pages": total_pages,
+    60→        "total": total,
+    61→        "q": q,
+    62→    })
+    63→
+    64→
+    65→@router.get("/{boss_id}", response_class=HTMLResponse)
+    66→async def candidate_detail(request: Request, boss_id: str):
+    67→    """Show candidate detail page."""
+    68→    db = get_db_manager()
+    69→
+    70→    with db.session_scope() as session:
+    71→        candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+    72→        if not candidate:
+    73→            return HTMLResponse("<p>候选人未找到</p>", status_code=404)
+    74→
+    75→        messages = session.query(Message).filter_by(
+    76→            candidate_boss_id=boss_id
+    77→        ).order_by(Message.created_at.desc()).all()
+    78→
+    79→        c = {
+    80→            "boss_id": candidate.boss_id,
+    81→            "name": candidate.name,
+    82→            "title": candidate.title,
+    83→            "company": candidate.company,
+    84→            "location": candidate.location,
+    85→            "salary_expect": candidate.salary_expect,
+    86→            "work_years": candidate.work_years,
+    87→            "education_level": candidate.education_level,
+    88→            "profile_url": candidate.profile_url,
+    89→            "skills": candidate.skills or [],
+    90→            "education": candidate.education or [],
+    91→            "work_experience": candidate.work_experience or [],
+    92→            "basic_info": candidate.basic_info or {},
+    93→            "source_search": candidate.source_search,
+    94→        }
+    95→
+    96→        msgs = []
+    97→        for m in messages:
+    98→            msgs.append({
+    99→                "template_name": m.template_name,
+   100→                "content": m.content,
+   101→                "status": m.status,
+   102→                "sent_at": m.sent_at,
+   103→                "created_at": m.created_at,
+   104→            })
+   105→
+   106→    return templates.TemplateResponse("candidate_detail.html", {
+   107→        "request": request,
+   108→        "candidate": c,
+   109→        "messages": msgs,
+   110→        "pipeline_busy": task_queue.is_busy,
+   111→    })
+   112→
+   113→
+   114→@router.post("/{boss_id}/extract", response_class=HTMLResponse)
+   115→async def extract_profile(request: Request, boss_id: str):
+   116→    """Extract profile from Boss直聘 for a candidate."""
+   117→    if task_queue.is_busy:
+   118→        return HTMLResponse(
+   119→            '<p><mark>Pipeline 运行中，无法抓取 profile</mark></p>',
+   120→            status_code=409,
+   121→        )
+   122→
+   123→    try:
+   124→        from src.core.browser import get_browser_manager
+   125→        from src.modules.auth import ensure_logged_in
+   126→        from src.modules.profile import extract_profile as do_extract
+   127→
+   128→        browser = get_browser_manager()
+   129→        await ensure_logged_in(browser)
+   130→        await do_extract(boss_id=boss_id, browser=browser)
+   131→
+   132→        return HTMLResponse(
+   133→            '<p>Profile 抓取成功！<a href="" onclick="location.reload()">刷新页面</a></p>'
+   134→        )
+   135→    except Exception as e:
+   136→        return HTMLResponse(f'<p><mark>抓取失败: {html.escape(str(e))}</mark></p>', status_code=500)
+   137→

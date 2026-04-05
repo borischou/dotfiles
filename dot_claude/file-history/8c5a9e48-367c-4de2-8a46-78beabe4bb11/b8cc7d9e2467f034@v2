@@ -1,0 +1,88 @@
+# Boss Assistant - Claude Code Guidance
+
+## Project Overview
+Boss直聘半自动招聘助手 - Semi-automated recruitment assistant for Boss直聘 (zhipin.com).
+Recruiter-side (Boss端) tool for searching candidates, extracting profiles, and sending templated messages.
+
+## Tech Stack
+- Python 3.10+
+- Browser automation: Patchright (Playwright fork) + Chrome CDP
+- Anti-detection: Emunium (human-like interactions)
+- CLI: Click + Rich
+- Web: FastAPI + Jinja2 + HTMX + Simple.css
+- Real-time: SSE (Server-Sent Events) via sse-starlette
+- Database: SQLAlchemy + SQLite (NullPool for concurrent access)
+- Rate limiting: Database-backed with adaptive throttling
+
+## Project Structure
+- `src/cli/main.py` - Click CLI with 10 commands (boss login/search/profile/message/pipeline/export/templates/status/logout)
+- `src/web/app.py` - FastAPI app factory + lifespan (Chrome auto-start, DB init)
+- `src/web/routes/` - Web routes: dashboard, auth, search, candidates, messages, pipeline, export, templates, settings, status
+- `src/web/templates/` - Jinja2 templates (base layout + page templates + HTMX partials)
+- `src/web/static/` - CSS (style.css) + JS (app.js)
+- `src/web/services/chrome_manager.py` - Chrome process lifecycle (auto-start, health check, restart)
+- `src/web/services/task_manager.py` - Background pipeline task management with SSE progress
+- `src/core/` - Browser manager (CDP singleton), session encryption, anti-detection
+- `src/modules/` - Feature modules: auth, search, profile, message, export
+- `src/services/pipeline.py` - Search → score → message orchestration (with progress_callback for Web SSE)
+- `src/models/database.py` - SQLAlchemy ORM (Candidate, Message, SearchHistory, ActionLog, PipelineRun)
+- `src/utils/` - Config, rate limiter, delays, retry, validators, captcha, checkpoint, scoring, logger
+- `src/exceptions/errors.py` - Custom exception hierarchy
+- `config/` - settings.json, selectors.json, message_templates.json
+- `tests/` - Pytest unit tests
+- `run_web.py` - Web service entry point
+
+## Key Patterns
+- Singleton pattern for BrowserManager, Config, RateLimiter, SessionManager
+- **Search results are inside `iframe[name='searchFrame']`** — must use `page.frame(name='searchFrame')` for extraction
+- **Recommend results are inside `iframe[name='recommendFrame']`** — must use `page.frame(name='recommendFrame')` for extraction
+- Resume overlay is wasm-rendered — DOM inside `.resume-detail-wrap` is empty, profile data comes from search cards
+- Chat input is `#boss-chat-editor-input` (contenteditable div), send button is `div.submit`
+- Search uses "换一换" button to refresh candidates (~30 per batch), NOT infinite scroll
+- Recommend page uses `button.btn.btn-greet` for greet, candidate IDs from `data-geek` attribute on `.card-inner`
+- Log-normal delays with fatigue/distraction simulation
+- Database-backed rate limiting with adaptive throttling on captcha detection
+- Checkpoint-based pipeline resume
+- Candidate IDs: Search uses `zp_{data-expect}` (from `<a data-expect="...">`), Recommend uses `data-geek`/`data-geekid` on `.card-inner`
+
+## Running
+
+### Web Service (recommended)
+```bash
+# Start web service (auto-launches Chrome)
+python run_web.py
+
+# Or with custom host/port
+python run_web.py --host 127.0.0.1 --port 8080
+
+# Access: http://localhost:8080
+```
+
+### CLI (still supported)
+```bash
+# Start Chrome with CDP manually
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+
+# Run commands
+python -m src.cli.main login
+python -m src.cli.main search -k "前端工程师" -p 2
+python -m src.cli.main pipeline -k "前端" -t greeting --dry-run
+```
+
+## Testing
+```bash
+pytest tests/ -v
+```
+
+## Important Notes
+- Web mode: Chrome auto-launched in headed mode with `--user-data-dir` for session persistence
+- CLI mode: user manages Chrome lifecycle and logs in manually
+- Pipeline runs exclusively lock the browser — other operations (search, message) disabled during pipeline
+- Boss直聘 has stricter anti-crawling than Maimai - use conservative rate limits
+- Candidate IDs: Search uses `data-expect` (stored as `zp_{id}`), Recommend uses `data-geek`/`data-geekid`
+- Search page: `/web/chat/search` (iframe at `/web/frame/search/`), Chat page: `/web/chat/index`
+- Recommend page: `/web/chat/recommend` (iframe at `/web/frame/recommend/`)
+- Selectors in config/selectors.json verified from live DOM (2026-03-04)
+
+## Skills
+- `review`（全局 skill）：带记忆的代码审查。当用户要求分析工程缺陷、代码审查、优化空间时，使用 `/review` 触发。审查历史记录保存在 `.claude/review-history.md`

@@ -1,0 +1,621 @@
+# Code Review History
+
+工程审查历史记录，由 code-review-memory skill 自动维护。
+
+---
+
+## Review #1 - 2026-02-13
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/modules/message.py:226-244 | `_handle_quick_contact` 对同一 page 并发 7 个 `wait_for_selector`，Playwright 不支持并发操作 | 已修复 |
+| 严重 | src/modules/message.py:226-244 | `asyncio.create_task` ���建的任务取消后未 await，可能产生泄漏警告 | 已修复 |
+| 严重 | src/utils/captcha.py:43 | `sys.stdin.readline()` 阻塞事件循环，可能导致 CDP 连接超时 | 已修复 |
+| 中等 | src/modules/search.py:680-715 | `_save_candidates_to_db` N+1 查询，每候选人 2 次 SELECT | 已修复 |
+| 中等 | src/modules/message.py:612-628 | `send_message_batch` 跳过已发消息检查逐条开 DB session | 已修复 |
+| 中等 | src/modules/export.py:129-131 | `_get_candidates_data` 导出时每候选人单独查消息记录 | 已修复 |
+| 中等 | 多文件 | `datetime.utcnow()`（naive）与 `_utcnow()`（aware）混用 | 已修复 |
+| 中等 | src/modules/selector_discovery.py:286 | `apply_discovered_selectors` 验证失败仍返回 True | 已修复 |
+| 中等 | src/modules/message.py↔selector_discovery.py | 循环依赖（延迟 import 绕过，运行时正常） | 待处理 |
+| 中等 | src/modules/message.py:552+1479 | `send_message_batch` 和 enterprise 版约 100 行重复逻辑 | 待处理 |
+| 中等 | src/utils/rate_limiter.py:226 | `min_interval` 全局冷却而非按操作类型 | 已修复 |
+| 中等 | src/utils/validators.py:9-32 | `validate_maimai_id` 调用方未捕获返回值 | 已修复 |
+| 中等 | src/utils/config.py:15 | config_dir 使用相对路径 | 已修复 |
+| 轻微 | src/modules/profile.py:450 | `import re` 在函数内部 | 已修复 |
+| 轻微 | src/modules/message.py:1445,271 | `import sys`、`import traceback` 在函数内部 | 已修复 |
+| 轻微 | src/utils/delays.py:86 | `import datetime` 在函数内部 | 已修复 |
+| 轻微 | src/utils/checkpoint.py:17 | 硬编码路径 `data/.checkpoints` | 已修复 |
+| 轻微 | src/services/pipeline.py:233 | 硬编码路径 `data/reports` | 已修复 |
+| 轻微 | src/models/database.py:12 | `declarative_base()` 使用已弃用的 `sqlalchemy.ext.declarative` | 已修复 |
+| 轻微 | src/modules/search.py:551 | `profile_links = []` 冗余初始化 | 已修复 |
+
+### 修复内容
+- **并发改顺序**: `_handle_quick_contact` 的提交按钮探测从 `asyncio.create_task` 并发改为 `for` 循环顺序探测，每个 selector 1.5s 超时
+- **异步 stdin**: captcha.py 的 `sys.stdin.readline()` 改为 `await loop.run_in_executor(None, sys.stdin.readline)`
+- **N+1 查询优化**: search/message/export 三处改为 `IN (...)` 批量预取后内存查找
+- **datetime 统一**: rate_limiter.py、message.py、checkpoint.py 全部统一为 `datetime.now(timezone.utc)`
+- **返回值修复**: selector_discovery 验证失败现在正确返回 False
+- **validator 返回值**: message.py 和 profile.py 的 `validate_maimai_id` 调用方现在捕获清理后的值
+- **per-type 冷却**: rate_limiter 的 min_interval 检查改为按 action_type 查最后操作时间
+- **config 绝对路径**: Config 类默认从 `__file__` 向上推导项目根目录下的 config/
+- **imports 提升**: re/sys/traceback/datetime 从函数内部移到模块顶层
+- **路径可配置**: checkpoint_dir 和 report_dir 改为从 settings.json 读取
+- **deprecation 修复**: `declarative_base` 改用 `sqlalchemy.orm.declarative_base`
+- **测试修复**: test_validators.py 移除对已删除函数的测试，新增 template_variables 测试
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/modules/message.py:38 | 移除 `MAIMAI_PROFILE_URL` 常量（profile.py 有同名在用） | 未使用常量 |
+| src/utils/rate_limiter.py:35 | 移除 `_error_timestamps` 及相关代码（从未被填充） | 死代码管道 |
+| src/modules/message.py:437 | 空 except 块添加 `logger.debug` 避免隐藏 "等待回应" 检测失败 | 空异常处理 |
+| tests/test_validators.py | 移除引用已删除函数的测试（validate_page_number/validate_url/sanitize_text） | 过时测试 |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复前 1 error（test_validators 导入已删除函数），修复后全部通过
+
+### 复盘
+- **做得好的**: N+1 查询的批量优化模式可复用；datetime 统一有效避免了 naive/aware 混用陷阱
+- **待改进的**: `send_message_batch` 和 `send_message_batch_enterprise` 仍有约 100 行重复代码，应提取为带回调的通用批量编排函数；循环依赖（message↔selector_discovery）虽可运行但架构上需解耦
+- **遗留项**: 批量发送重复代码未重构（涉及面广，需独立 PR）；循环依赖未解耦（deferred import 当前可工作，重构优先级低）
+
+---
+
+## Review #2 - 2026-02-14
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/core/browser.py:31,75-83 | `asyncio.Lock` 绑定创建时的事件循环，多次 `asyncio.run()` 会 RuntimeError | 已修复 |
+| 严重 | src/modules/search.py:727-728 | `_save_candidates_to_db` 吞掉全部异常，DB 故障时静默丢数据 | 已修复 |
+| 严重 | src/modules/search.py:666-668 | `_extract_search_results` 外层 try-except 吞错误，提取失败返回空列表无告警 | 已修复 |
+| 中等 | src/utils/rate_limiter.py:310-332 | `async_check_rate_limit` 无总体超时，daily limit 触发后可挂起数小时 | 已修复 |
+| 中等 | src/utils/config.py:50-54 | `Config.get()` 把 JSON `null` 等同于"不存在"，无法显式禁用配置项 | 已修复 |
+| 中等 | src/modules/auth.py:109 | `check_login_status` 硬编码 `wait_for_timeout(3000)`，每次命令多等 3 秒 | 已修复 |
+| 中等 | src/modules/message.py:1362-1366 | `_log_message` 审计日志失败不中断，sent 状态丢失可导致重复发送 | 已修复 |
+| 中等 | src/modules/export.py:223-226 | `_create_dataframe` datetime 为 None 时 strftime 产生 "NaT" 文本 | 已修复 |
+| 中等 | tests/conftest.py:49-55 | fixture `start_date`/`end_date` 与 dataclass `start_year`/`end_year` 不一致 | 已修复 |
+| 轻微 | src/utils/captcha.py:48-49 | `except Exception: continue` 过于宽泛，隐藏 CDP 连接断开等底层问题 | 已修复 |
+| 轻微 | src/utils/scoring.py:171 | `c._score = s` 给 dataclass 添加未声明的私有属性 | 已修复 |
+| 中等 | src/modules/message.py↔selector_discovery.py | 循环依赖（延迟 import 绕过，运行时正常） | 待处理 |
+| 中等 | src/modules/message.py:540+1473 | `send_message_batch` 和 enterprise 版约 100 行重复逻辑 | 待处理 |
+
+### 修复内容
+- **Lock 跨循环修复**: `BrowserManager._ensure_lock()` 增加事件循环追踪，循环切换时自动重建 Lock
+- **异常传播**: `_save_candidates_to_db` 异常不再被吞掉而是 re-raise，调用方用 try-except 捕获并显示用户可见的警告
+- **提取失败告警**: `_extract_search_results` 异常仍返回空列表但增加 `console.print` 让用户感知
+- **总体超时**: `async_check_rate_limit` 新增 `max_total_wait=1800`（30 分钟），超时后直接抛异常而非无限等待
+- **Config sentinel**: `Config.get()` 使用 `_MISSING` 哨兵区分"键不存在"与"键为 null"
+- **登录检查优化**: `check_login_status` 用 `wait_for_url` 监测 login 重定向替代盲等 3 秒
+- **审计日志**: `_log_message` 对 `sent` 状态的审计失败 re-raise，防止静默丢失导致重复发送
+- **NaT 修复**: export datetime 格式化后用 `.fillna('')` 替换 NaT 为空字符串
+- **fixture 对齐**: conftest.py education/work_experience 字段名改为与 dataclass 一致（start_year/end_year/title）
+- **captcha 日志**: 非超时异常增加 `logger.debug` 输出，不再完全静默
+- **score 属性声明**: `CandidateBasic` 新增 `score: Optional[int] = None` 字段，`scoring.py` 和 `pipeline.py` 统一使用声明的字段
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| tests/conftest.py:10 | 移除未使用的 `DatabaseManager` import | 未使用 import |
+| 多文件 | 7 处空 `except: pass` 块补充注释说明为何可忽略异常 | 空异常处理 |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复前后均全部通过，无回归
+
+### 复盘
+- **做得好的**: sentinel 模式解决 Config.get 的 None 歧义简洁有效；Lock 跨循环检测是 asyncio 单例的通用最佳实践；`_log_message` 对 sent 状态 re-raise 兼顾了容错与数据完整性
+- **待改进的**: 测试覆盖率仍然很低（仅 config 和 validators），scoring/delays/rate_limiter/checkpoint 等纯逻辑模块应优先补充单元测试；内联 JS（~380 行）应考虑抽取为独立 .js 文件便于维护和语法检查
+- **遗留项**: 批量发送重复代码未重构（Review #1 遗留）；循环依赖未解耦（Review #1 遗留）；测试覆盖率低（新增遗留）；内联 JS 未抽取（新增遗留）
+
+---
+
+## Review #3 - 2026-02-28
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/web/routers/pipeline.py:75-86 | 确认事件跨事件循环风险 + confirmation_data 空指针 | 已修复 |
+| 严重 | src/web/routers/pipeline.py:151 | confirmation_event 未初始化检查 | 已修复 |
+| 严重 | src/web/routers/{search,message,pipeline}.py | contextvars.Token 泄漏（reset 未用） | 已修复 |
+| 严重 | src/web/task_queue.py:202 | 不必要的 `__import__('datetime')` | 已修复 |
+| 严重 | src/web/progress.py:41 | create_task 未 await，可能泄漏 | 已修复 |
+| 中等 | src/web/task_queue.py:110 | 后台任务未妥善关闭 | 已修复 |
+| 中等 | src/web/routers/pipeline.py:68-110 | 确认流程竞态条件（无 lock 保护） | 已修复 |
+| 中等 | src/web/schemas.py | PipelineConfirmRequest 缺少输入验证 | 已修复 |
+| 中等 | src/utils/rate_limiter.py:238 | action_type 返回误导（'any' 应为实际类型） | 已修复 |
+| 中等 | src/web/task_queue.py:143-154 | 任务字典内存泄漏（完成任务不清理） | 已修复 |
+| 轻微 | src/web/deps.py:28,33 | 使用 assert 做运行时检查（生产环境可能失效） | 已修复 |
+| 轻微 | src/services/pipeline.py:多处 | 内联导入影响可读性（8 处） | 已修复 |
+| 轻微 | scripts/setup_db.py:33-36 | 使用 raw SQL 查询表名 | 已修复 |
+| 轻微 | src/modules/message.py:1807 | enterprise inline 发送失败缺少详细日志 | 已修复 |
+| 中等 | src/modules/message.py:675-950 vs 1621-1820 | 批量发送重复代码 ~100 行 | 待处理 |
+| 中等 | src/modules/message.py↔selector_discovery.py | 循环依赖（延迟 import） | 待处理 |
+
+### 修复内容
+- **确认事件防护三层**：pipeline.py 添加 Event 存在性检查、data None 检查、confirm 端点初始化检查
+- **contextvars 正确重置**：progress.py 新增 `reset_progress_callback(token)`，三个路由 finally 块改用 reset 而非覆盖 None
+- **create_task 异常处理**：progress.py 添加 `_handle_task_exception` done_callback，防止"Task exception was never retrieved"警告
+- **导入优化**：task_queue.py 直接导入 timedelta 替代 `__import__`；pipeline.py 移除 8 处内联导入移到顶部
+- **竞态条件修复**：BrowserTask 添加 `_confirmation_lock`，confirm_pipeline 用 async with 保护 data 设置
+- **输入验证**：PipelineConfirmRequest 添加 min_length=1/max_length=1000 + field_validator 验证非空和长度
+- **内存泄漏防御**：task_queue._worker 每 10 个任务自动 cleanup_old_tasks(24h)
+- **后台任务清理**：stop() 方法 finally 块置空 _worker_task 避免悬挂引用
+- **错误信息准确性**：rate_limiter 最小间隔检查返回实际 action_type 替代 'any'
+- **运行时检查规范**：deps.py 用 RuntimeError 替代 assert（生产环境安全）
+- **数据库查询规范**：setup_db.py 用 `sqlalchemy.inspect()` 替代 raw SQL
+- **日志完善**：message.py enterprise inline 失败增加 logger.warning 详细信息
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/web/routers/search.py:5 | 移除 `get_browser` 未使用导入 | 未使用 import |
+| src/web/routers/status.py:5 | 移除 `get_browser` 未使用导入 | 未使用 import |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复前后均全部通过，无回归
+
+### 复盘
+- **做得好的**: contextvars.Token reset 方案正确处理嵌套上下文；确认流程三层防护（Event 检查 + data 检查 + Lock）有效防止竞态和空指针；create_task 的 add_done_callback 优雅处理 fire-and-forget 异常；内联导入批量移除使 pipeline.py 结构清晰；输入验证防止空列表和超长 ID 攻击；内存泄漏自动清理（每 10 个任务）平衡性能和内存
+- **待改进的**: Web 层零测试覆盖（routers/task_queue/progress 需补充集成测试）；emit_progress 无送达保证（长期应考虑 ACK 或缓冲）；queue.current_task 竞态虽风险低但未根治（需改为任务内自引用）
+- **遗留项**: 批量发送重复代码（Review #1, #2, #3 遗留，需独立 PR 重构）；循环依赖（Review #1, #2, #3 遗留，deferred import 当前可工作）；测试覆盖率低（Review #2, #3 遗留，Web 层需集成测试）；内联 JS 未抽取（Review #2, #3 遗留，优先级低）；emit_progress 可靠性（本次新增，需架构改进）；queue.current_task 竞态（本次新增，需任务自引用机制）
+
+---
+
+## Review #4 - 2026-03-01
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/static/js/pipeline.js:114 | Pipeline 模式 API 请求缺少 `location` 字段，地点过滤在 Pipeline 模式下失效 | 已修复 |
+| 中等 | src/static/js/pipeline.js:322 | `result.error` 未转义直接放入 innerHTML（XSS 风险） | 已修复 |
+| 中等 | src/templates/index.html:180 | 模板名和描述未转义放入 select innerHTML（XSS 风险） | 已修复 |
+| 中等 | src/templates/index.html:200 | 模板变量名未转义放入 label/placeholder（XSS 风险） | 已修复 |
+| 中等 | src/templates/index.html:176 | 模板加载未检查 res.ok，API 错误时静默失败 | 已修复 |
+| 中等 | src/templates/data.html:82 | Candidates 加载未检查 res.ok | 已修复 |
+| 轻微 | src/templates/index.html:51 vs 61 | 隐藏方式不一致（CSS .hidden vs HTML hidden 混用） | 已修复 |
+
+### 修复内容
+- **location 字段补全**: pipeline.js pipeline 模式的 fetch body 添加 `location` 参数，与 search 模式一致
+- **XSS 防护**: result.error 用 `escapeHtml()` 转义；模板 select 改用 `createElement/textContent`；变量名用 `escapeHtml()` 转义
+- **res.ok 检查**: 模板加载和候选人加载均增加 `if (!res.ok) throw` 检查
+- **隐藏方式统一**: messaging-options 从 CSS `.hidden` 类改为 HTML `hidden` 属性，删除多余 CSS 规则
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/web/app.py:8 | 移除 `import sys`（全文无引用） | 未使用 import |
+| src/static/js/app.js:36-39 | 移除 `formatDate()` 函数（全项目零引用） | 未调用函数 |
+| src/static/css/style.css | 移除 `#messaging-options.hidden` 规则（改用 hidden 属性后不再需要） | 废弃 CSS |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复前后均全部通过，无回归
+
+### 复盘
+- **做得好的**: 5 页→2 页的 UI 精简整体干净，模板删除无残留引用；pipeline.js 抽离解决了 Review #2 遗留的"内联 JS 未抽取"问题；auth.py 自动连接 CDP 改善了新用户体验
+- **待改进的**: location 字段遗漏说明双路 API（search/pipeline）的参数一致性容易被忽略，应考虑统一表单序列化函数；innerHTML XSS 问题在多处出现，前端应建立统一的 DOM 操作规范（优先 createElement + textContent）
+- **遗留项**: 批量发送重复代码（Review #1-3 遗留）；循环依赖（Review #1-3 遗留）；测试覆盖率低（Review #2-3 遗留）；emit_progress 可靠性（Review #3 遗留）；queue.current_task 竞态（Review #3 遗留）
+
+---
+
+## Review #5 - 2026-03-02
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/web/routers/message.py:83-84 | `/api/message/batch` N+1 查询：for 循环逐个查 Candidate | 已修复 |
+| 中等 | src/static/js/pipeline.js:229 | `showConfirmation()` 中 `maimai_id` 未转义写入 checkbox value 属性（XSS） | 已修复 |
+| 中等 | src/web/routers/auth.py:26,35-36 | 两处 `except Exception: pass` 完全吞掉错误，调试困难 | 已修复 |
+| 中等 | src/web/progress.py:106,116 | `broadcast()` 迭代可变 set，并发 subscribe/unsubscribe 期间 await 让出控制权可导致 RuntimeError | 已修复 |
+| 中等 | src/web/task_queue.py:204-205 | `len(self._tasks) % 10` 清理不可靠，并发提交可跳过触发点 | 已修复 |
+| 轻微 | src/web/schemas.py:93 | `MessageBatchRequest.maimai_ids` 缺少验证（对比 `PipelineConfirmRequest` 有 min/max/validator） | 已修复 |
+| 轻微 | src/static/js/pipeline.js:298 + src/templates/data.html:124 | 两处 export fetch 未检查 `res.ok`，API 错误时静默失败 | 已修复 |
+| 轻微 | src/modules/search.py:166（未提交变更） | `wait_for_function` 用裸 `except Exception` 吞掉非超时异常 | 已修复 |
+
+### 修复内容
+- **N+1→批量查询**: message.py router 的 for 循环改为 `Candidate.maimai_id.in_(req.maimai_ids)` 单次批量查询 + 内存 dict 查找
+- **XSS 防护**: pipeline.js `showConfirmation()` 的 checkbox value 属性添加 `escapeHtml()` 转义
+- **异常日志**: auth.py 两处 bare except 改为 `except Exception as e` + `logger.debug()` 输出具体错误
+- **broadcast 并发安全**: progress.py `broadcast()` 迭代前 snapshot（`list(set)`），防止 await 期间 set 被修改
+- **清理可靠性**: task_queue.py 用 `_completed_count` 计数器替代 `len(self._tasks) % 10`，确保每 10 次完成必触发清理
+- **输入验证补全**: `MessageBatchRequest.maimai_ids` 添加 `min_length=1, max_length=1000` 和 `field_validator`，与 `PipelineConfirmRequest` 对齐
+- **export 错误处理**: pipeline.js 和 data.html 的 export fetch 增加 `res.ok` 检查和 try-catch 提示
+- **异常分类**: search.py `wait_for_function` 改为分别捕获 `TimeoutError`（debug 级别）和其他异常（warning 级别）
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/cli/main.py:509-566 | 移除被第二个 `status()` 函数（581 行）完全覆盖的第一个 `status()` 函数定义 | 重复函数定义 |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复和清理后均全部通过，无回归
+
+### 复盘
+- **做得好的**: N+1 查询模式在 Review #1 批量修复后，新增的 message batch endpoint 再次引入同样问题——说明新代码需要参照已有模式（candidates.py 的 `IN (...)` 模式是标准）；broadcast snapshot 模式简洁有效地解决了 asyncio 协程让出控制权期间的集合变更风险；`_completed_count` 计数器比 `len(dict) % N` 更可靠
+- **待改进的**: 前端 XSS 防护仍需系统化——`escapeHtml()` 在模板字符串中容易遗漏（本次 `maimai_id` 在 attribute 中），建议建立 lint 规则检测模板字符串中未转义的变量；`MessageBatchRequest` 缺少验证说明新增 schema 时没有参照已有的安全基线（`PipelineConfirmRequest`），应在文档或注释中标注 schema 安全规范
+- **遗留项**: 批量发送重复代码（Review #1-4 遗留）；循环依赖（Review #1-4 遗留）；测试覆盖率低（Review #2-4 遗留）；emit_progress 可靠性（Review #3-4 遗留）；queue.current_task 竞态（Review #3-4 遗留）
+
+---
+
+## Fix #1 - 2026-03-02（搜索结果提取字段混乱）
+
+### 背景
+搜索功能改为交互式搜索 → 人脉 tab 后，`_extract_search_results` 的 JS 提取逻辑将社交标签和活动信息错误混入 name/company/title 字段。
+
+**实际卡片 text nodes**：`"郭大明(猎头勿扰)" → "4天前活跃" → "字节跳动前端leader" → "同行，26个共同好友" → "+ 好友"`
+**期望**：name="郭大明", company="字节跳动", title="前端leader"
+**实际**：name="字节跳动前端leader", company="同行，26个共同好友"
+
+### 根因（3 个 bug）
+| 严重程度 | 位置 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/modules/search.py:372 | name 正则不允许括号，"郭大明(猎头勿扰)" 无法匹配为姓名 → 后续公司职位文本被错选为 name | 已修复 |
+| 严重 | src/modules/search.py:358-362 | `isSkippable()` 未过滤社交标签（"同行，26个共同好友"），被当作 company/title | 已修复 |
+| 轻微 | src/modules/search.py:373 | 匹配姓名后未去除括号注释（"(猎头勿扰)"），name 包含非姓名内容 | 已修复 |
+
+### 修复内容
+- **name 正则扩展**（line 374）：`/^[\u4e00-\u9fa5a-zA-Z·\s()（）]+$/` 允许中英文括号
+- **括号注释去除**（line 375）：`part.replace(/[（(][^)）]*[）)]/g, '').trim()` 只保留纯姓名
+- **社交标签过滤**（line 363）：`isSkippable()` 新增 `/同行|前同事|校友|共同好友/` 检测
+
+### 复盘
+- **根因分析**: 三个 bug 形成级联——name 正则不匹配 → 真实姓名被跳过 → 公司职位文本被选为 name → 社交标签被选为 company
+- **经验**: 脉脉页面结构变化频繁，提取逻辑应以"排除法"为主（先过滤已知非目标文本），而非仅依赖"匹配法"（只匹配预期格式）。`isSkippable()` 的关键词列表需随页面更新维护
+- **改进方向**: 可考虑增加提取结果的 sanity check（如 name 不应超过 10 字、company 不应包含"共同好友"等关键词），在提取层之后加一层校验
+
+---
+
+## Review #6 - 2026-03-02
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 中等 | src/modules/search.py:182 | 未提交变更: scroll-wait 的 `except Exception` 太宽泛，非超时异常（如 CDP 断连）被静默吞掉 | 已修复 |
+| 中等 | src/modules/search.py:149 | 未提交变更: `input[type="text"]` fallback 选择器太宽泛，可能匹配页面上非搜索输入框 | 已修复 |
+| 中等 | src/static/js/pipeline.js:62,116 | search 和 pipeline 两个 fetch 调用未检查 `res.ok`，API 4xx/5xx 时连接 `/ws/task/undefined` | 已修复 |
+| 轻微 | src/web/routers/ws.py:46,70 | WebSocket keepalive 发送失败的 `except Exception: break` 无日志输出 | 已修复 |
+| 轻微 | scripts/diagnose_*.py (3 files) | 调试脚本未清理，不应提交到仓库 | 已修复 |
+
+### 修复内容
+- **异常分类**: search.py scroll-wait 改为分别捕获 `TimeoutError`（debug 级别）和其他异常（warning 级别），与同文件 line 194-197 的写法一致
+- **选择器收紧**: `input[type="text"]` 改为 `.search-input input, .header input[type="text"]`，限定搜索区域避免误匹配
+- **res.ok 检查**: pipeline.js 的 search 和 pipeline 两个 fetch 调用增加 `if (!res.ok) throw new Error(...)`，API 错误时正确进入 catch 处理
+- **WebSocket 日志**: ws.py 两处 keepalive bare except 改为 `except Exception as e` + `logger.debug()` 输出错误信息
+- **gitignore**: `scripts/diagnose_*.py` 加入 .gitignore，防止调试脚本误提交
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/utils/filters.py:33-68 | 移除 `is_low_quality()` 函数（全项目零调用，逻辑已内联到 `filter_candidates()`） | 未调用函数 |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复和清理后均全部通过，无回归
+
+### 复盘
+- **做得好的**: 本次 agent 报告 7 个问题中 4 个经手动验证为误报（PriorityQueue 创建位置、flush 事务边界、已修复的 XSS、已知遗留问题变体），验证环节有效避免了无效修改；`res.ok` 检查的遗漏模式再次出现（Review #4、#5 修过其他 fetch 调用），说明前端 fetch 的安全基线需要系统化
+- **待改进的**: ~~前端所有 fetch 调用应统一封装为 `safeFetch()` 函数~~ ✅ 已实施；search.py 的交互式搜索依赖 `asyncio.sleep` 固定延迟而非等待 DOM 变化，网络慢时可能不够稳定
+- **遗留项**: 批量发送重复代码（Review #1-5 遗留）；循环依赖（Review #1-5 遗留）；测试覆盖率低（Review #2-5 遗留）；emit_progress 可靠性（Review #3-5 遗留）；queue.current_task 竞态（Review #3-5 遗留）
+
+### 追加修复：safeFetch 统一封装
+- **背景**: `res.ok` 遗漏在 Review #4、#5、#6 连续三次被发现，逐个修补治标不治本
+- **方案**: 在 `app.js` 新增 `safeFetch(url, options)` 封装，内置 `res.ok` 检查 + FastAPI 错误信息提取
+- **改动范围**: 11 个 fetch 调用点（app.js:1, pipeline.js:4, data.html:3, index.html:3）全部替换为 `safeFetch`，移除各处手写的 `res.ok` 检查
+- **效果**: 新增 fetch 调用只需用 `safeFetch` 即可自动获得错误处理，从机制上消除遗漏
+
+---
+
+## Review #7 - 2026-03-03
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/modules/message.py:1957,1969 | exchange 按钮选择器硬编码，未使用 config/selectors.json 定义的 `im_exchange_phone`/`im_exchange_wechat` | 已修复 |
+| 中等 | src/modules/search.py:1219 | `keep_tab_open` 参数声明但未使用 — talent_bank 在当前 tab 导航，不像 enterprise 开新 tab | 已修复 |
+| 中等 | src/modules/search.py:234,1334 | `c.company.lower()` 缺防御，company 为空/None 时崩溃 | 已修复 |
+| 中等 | src/web/schemas.py:122-123 | `exchange_phone`/`exchange_wechat` 对任何 mode 都接受，应校验仅 talent_bank 有效 | 已修复 |
+| 中等 | config/selectors.json:15-18 | `im_tool_normal`/`im_tool_disable` 定义但代码未使用 | 已修复 |
+| 轻微 | src/modules/message.py:2059 | IM tab 打开等 2000ms 硬编码魔数 | 已修复 |
+| 轻微 | src/modules/message.py:769,1758,2163 | 所有候选人已发过时提示信息不够清晰 | 已修复 |
+
+### 修复内容
+- **exchange 选择器**: `_exchange_in_im_tab()` 改用 `config.get_selector("talent_bank.im_exchange_phone/wechat")`，消除硬编码
+- **移除 keep_tab_open**: 从 `search_candidates_talent_bank()` 和 `search_all_keywords_talent_bank()` 移除该参数，同步更新 3 处调用方（pipeline.py ×2, web/routers/pipeline.py ×1）
+- **company 防御**: 两处 `c.company.lower()` 加 `c.company and` 前置检查
+- **schema 校验**: `PipelineRequest` 新增 `model_validator` 校验 exchange 字段仅在 talent_bank mode 下有效
+- **清理无用选择器**: 移除 `im_tool_normal`/`im_tool_disable` 配置项
+- **IM tab 超时**: 2000ms 硬编码改为从 `config.data.timings.im_tab_open_wait_ms` 读取（默认 3000ms）
+- **空候选人提示**: 三个 batch 函数的空列表提示改为区分"全部已发"和"真空列表"两种情况
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/modules/search.py:1209-1210 | 移除 `TALENT_BANK_URL` 和 `TALENT_BANK_SEARCH_URL` 常量（定义但全项目零引用） | 未用常量 |
+| config/selectors.json:14 | 移除 `im_chat_iframe` 选择器（`_find_im_chat_frame()` 用 URL 匹配代替） | 未用配置 |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复和清理后均全部通过，无回归
+
+### 复盘
+- **做得好的**: 本次审查聚焦新集成的 talent_bank 代码，发现 exchange 选择器硬编码是最有价值的修复 — 不使用 config 意味着选择器变化时需要改代码而非改配置；`keep_tab_open` 参数的移除消除了 API 误导性（talent_bank 不开新 tab）
+- **待改进的**: talent_bank 与 enterprise 的 `_extract_*_results()` JS 提取逻辑高度重复（~150 行），三个 batch send 函数也大量重复（~100 行），每新增一个搜索模式就多一份 copy，需要提取通用函数
+- **遗留项**: 批量发送重复代码（Review #1-7 遗留，三份 copy 后更严重）；循环依赖 message↔selector_discovery（Review #1-6 遗留）；测试覆盖率低（Review #2-6 遗留）；emit_progress 可靠性（Review #3-6 遗留）；queue.current_task 竞态（Review #3-6 遗留）
+
+---
+
+## Review #8 - 2026-03-03
+
+### 背景
+审查 c403333 提交（talent bank pipeline 7 bug 修复），涉及 8 个文件 +334/-151 行改动。
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | pipeline.py:903-918 + cli/main.py:328-348 | checkpoint 不保存/恢复 `exchange_phone`、`exchange_wechat`、`min_years`，resume 后参数丢失 | 已修复 |
+| 严重 | cli/main.py:387 | Preview 模式 talent_bank 搜索未传 `min_years`，预览与实际不一致 | 已修复 |
+| 严重 | anti_detection.py:77-83,105-113 | Emunium fallback 只捕获 TypeError，其他异常导致崩溃；type fallback 多余 click() | 已修复 |
+| 中等 | message.py:1943-1944 | IM tab URL 匹配太宽泛（"im" 匹配 "climb" 等） | 已修复 |
+| 中等 | message.py:2089-2090 | 异常处理注释写 "using default greeting" 但实际不发送 | 已修复 |
+| 中等 | message.py:2328 | evaluate_handle 返回 JS null 时 .evaluate() 可能失败 | 已修复 |
+| 中等 | search.py:1303-1314 | year_options dict 创建后立即被 if/elif 覆盖（死代码） | 已修复 |
+| 中等 | message.py:1937 | 文档注释写 "交换电话" 但按钮文本是 "交换手机" | 已修复 |
+| 轻微 | message.py:2125-2126 | 关闭弹窗 except 无日志 | 已修复 |
+| 轻微 | search.py:1516 | Hash ID 中 name 缺少 `|| ''` null 保护 | 已修复 |
+| 中等 | pipeline.py:207,613 | min_years 只在第一个关键词设置 UI 过滤，后续关键词跳过 | 待处理 |
+
+### 修复内容
+- **checkpoint 完整性**: `_save_checkpoint()` 新增 `exchange_phone`/`exchange_wechat`/`min_years` 参数，4 处调用点全部更新；cli/main.py resume 块恢复这 3 个参数
+- **preview 参数传递**: talent_bank 预览搜索传入 `min_years=min_years`
+- **Emunium fallback 扩大**: TypeError → Exception，覆盖 CDP 模式下所有潜在异常；去除 type fallback 中多余的 `element.click()`
+- **IM tab URL 收紧**: `"im"` → `"/im"`，`"chat"` → `"/chat"` + `"uh_chat"`，防止误匹配
+- **注释修正**: "using default greeting" → "platform default greeting will be used"；"交换电话" → "交换手机"
+- **evaluate_handle 防御**: 增加 handle 有效性检查和 try-except 包裹
+- **年限筛选简化**: 移除无用的 `year_options` dict，增加 `else: "1-3年"` 兜底
+- **hash ID 防御**: talent bank `name +` → `(name || '') +` 与其他两处一致
+- **日志补全**: 关闭弹窗 `except: pass` → `except as e: logger.debug()`
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| search.py:1303-1304 | 移除 `year_options = {5: "5-10年", 10: "10年以上"}` 和 `year_options.get()` 调用 | 创建即覆盖 |
+| anti_detection.py:111 | 移除 type fallback 中多余的 `await element.click()` | 冗余调用 |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复和清理后均全部通过，无回归
+
+### 复盘
+- **做得好的**: 本次审查精确聚焦 c403333 新代码，发现 checkpoint 参数丢失是最有价值的修复——resume pipeline 是真实使用场景，丢失 exchange 和 min_years 参数会导致行为不一致；Emunium fallback 扩大为 Exception 避免了 CDP 模式下的脆弱性
+- **待改进的**: `min_years` 只在第一个关键词设置 UI 过滤（`idx == 0`）是有意设计（注释 "Set filter once"），但需验证人才银行切关键词后 UI 筛选状态是否保持——如果不保持则后续关键词无过滤；evaluate_handle 的 null 问题说明 Playwright JSHandle 与 JS null 的交互需要更系统的理解
+- **遗留项**: 批量发送重复代码（Review #1-8 遗留）；循环依赖 message↔selector_discovery（Review #1-7 遗留）；测试覆盖率低（Review #2-7 遗留）；emit_progress 可靠性（Review #3-7 遗留）；queue.current_task 竞态（Review #3-7 遗留）；min_years 跨关键词过滤行为待验证（本次新增）
+
+---
+
+## Review #9 - 2026-03-03
+
+### 背景
+审查 77d1752 提交（批量发送函数重构：三合一），涉及 message.py、pipeline.py、web/routers/pipeline.py 的大规模重构。同时全面扫描项目其他文件。
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/utils/checkpoint.py:43 | `CheckpointManager.save()` 缺少 `exchange_phone`/`exchange_wechat`/`min_years` 参数，但 `pipeline.py:_save_checkpoint()` 传入这三个 kwargs → 运行时 TypeError（Review #8 修 `_save_checkpoint` 时漏改 `save()`） | 已修复 |
+| 轻微 | src/modules/message.py | 重构后配额耗尽/频率限制 abort 时不再显示剩余候选人数量（旧代码有 `remaining = total - idx - 1` 提示） | 已修复 |
+
+### 排除的误报（6项）
+| 来源 | 报告内容 | 排除原因 |
+|------|---------|---------|
+| Agent 1 | progress.advance 在 abort 时未调用 | 非回归——旧代码 break 前也不 advance |
+| Agent 1 | quota_exhausted 统计归类错误 | 归入 failed 是正确行为，与旧代码一致 |
+| Agent 1 | Path A 缺 rate_limiter.log_action | `send_message()` 内部已调用 |
+| Agent 2 | queue.current_task 竞态 | 已知遗留项 (#5)，非本次引入 |
+| Agent 2 | exchange 参数缺校验 | schemas.py:125-129 已有 model_validator |
+| Agent 2 | checkpoint 不存 exchange 参数 | 与 Agent 严重 issue 重复（已确认修复） |
+
+### 修复内容
+- **checkpoint.save() 补参数**: 添加 `exchange_phone: bool = False`、`exchange_wechat: bool = False`、`min_years: Optional[int] = None` 三个参数，同步写入 `params` dict。修复 Review #8 中 `_save_checkpoint()` 新增参数后遗漏的下游接口适配
+- **abort 提示恢复**: `_send_message_batch_common()` 的 `abort_batch` break 前新增 `console.print(f"跳过剩余 {remaining} 位候选人")`，恢复旧代码用户体验
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/web/schemas.py:3 | 移除 `from datetime import datetime`（全文零引用） | 未使用 import |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复和清理后均全部通过，无回归
+
+### 复盘
+- **做得好的**: 批量发送三合一重构（~760行→~330行，-57%）成功消除了 Review #1-8 反复标记的最大遗留项；重构后公共 API 签名完全不变，所有调用者零改动；agent 扫描 + 人工验证的双层审查有效过滤了 6/8 的误报
+- **待改进的**: Review #8 修 `_save_checkpoint()` 时只改了调用方 wrapper 但没检查被调用方 `CheckpointManager.save()` 的签名——跨文件参数传递链需要从调用方一路追到底层实现；重构引入的 `CandidateSendResult.abort_batch` 路径需要保持旧代码的用户体验（如剩余数量提示）
+- **遗留项**: 循环依赖 message↔selector_discovery（Review #1-8 遗留）；测试覆盖率低（Review #2-8 遗留）；emit_progress 可靠性（Review #3-8 遗留）；queue.current_task 竞态（Review #3-8 遗留）；min_years 跨关键词过滤行为待验证（Review #8 遗留）；~~批量发送重复代码~~（✅ Review #9 已完成重构）
+
+---
+
+## Review #10 - 2026-03-04
+
+### 背景
+移除 Web 层（src/web/, src/templates/, src/static/），项目从 CLI+Web 双入口简化为 CLI-only。涉及删除整个 Web 目录、清理 emit_progress 引用、移除 Web 依赖、更新文档。
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 中等 | src/models/database.py:110-129 | `WebTask` 模型已无调用方，Web 层删除后成为死代码 | 已修复 |
+| 轻微 | README.md:98-124,330-332 | Web 服务说明、项目结构中 web/templates/static 目录残留 | 已修复 |
+
+### 排除的误报（2项）
+| 来源 | 报告内容 | 排除原因 |
+|------|---------|---------|
+| Agent | settings.json 缺少 checkpoint_dir/report_dir 键 | `config.get()` 有 fallback 默认值，Review #2 已修复 sentinel 模式 |
+| Agent | asyncio.get_running_loop() 无错误处理 | CLI 模式下 `asyncio.run()` 始终创建事件循环，非新问题 |
+
+### 修复内容
+- **WebTask 模型移除**: 从 database.py 删除 `WebTask` 类定义（20 行），migrations.py 保留 web_tasks 表 migration 以兼容已有数据库
+- **README.md 清理**: 移除 Web 服务使用说明（方式一整块）、项目结构中 web/templates/static 目录、v0.4.0 Web UI 描述、v0.2.1 Web 稳定性描述
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/models/database.py:110-129 | 移除 `WebTask` 模型类（Web 层删除后无调用方） | 孤立模型 |
+| src/services/pipeline.py:33 | 移除 `from src.web.progress import emit_progress` 及 8 处调用 | Web 残留 import |
+| src/modules/message.py:42 | 移除 `from src.web.progress import emit_progress` 及 `emit_web_progress` 字段和 1 处调用 | Web 残留 import |
+| README.md | 移除 Web 服务说明、项目结构中 web 相关目录 | 过时文档 |
+| CLAUDE.md | 移除 Web API 文档、Web 启动说明、Web 相关约束 | 过时文档 |
+| Makefile | 移除 `dev`/`web` targets | 过时构建目标 |
+| requirements.txt | 移除 fastapi/uvicorn/python-multipart/jinja2 | 未使用依赖 |
+
+### 测试结果
+- 13 passed in 0.03s（test_config: 7, test_validators: 6）
+- 修复和清理后均全部通过，无回归
+- `ruff check src/` 无新增错误（18 个 pre-existing）
+- `grep src.web src/` 零残留引用
+
+### 复盘
+- **做得好的**: Web 代码良好的模块隔离使移除非常干净——唯一的反向依赖是 `emit_progress`（CLI 模式下 no-op），移除零影响；migration 保留策略正确（删除 migration 会破坏已有 DB 的升级路径）
+- **待改进的**: WebTask 模型在删除 Web 目录时应同步清理，说明大规模删除操作需要一个"影响清单"检查——不仅检查 import，还要检查 ORM 模型、DB migration、文档等间接关联
+- **遗留项（3 项）**: 循环依赖 message↔selector_discovery；测试覆盖率低（13 个测试）；min_years 跨关键词过滤待验证
+- **本次消除的遗留项**: emit_progress 可靠性（随 Web 层删除）、queue.current_task 竞态（随 Web 层删除）、批量发送重复代码（Review #9 已重构）
+
+---
+
+## Review #11 - 2026-03-04
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/utils/captcha.py:43 | `CaptchaBlockedError` 未导入，触发时 NameError 崩溃 | 已修复 |
+| 严重 | src/cli/main.py:655 | `distinct(column).count()` 对 SQLite 无效，"已沟通"计数虚高 | 已修复 |
+| 严重 | src/services/pipeline.py:929 | 裸 `results[key]` 访问，异常路径可能 KeyError | 已修复 |
+| 中等 | src/modules/message.py:976-981 | `quota_exhausted` 混入 `failed` 计数，配额耗尽在报告中不可见 | 已修复 |
+| 中等 | src/modules/message.py:1830-1835 | `_check_existing_conversation` 异常时默认 True，候选人被跳过（保守策略合理，已改善日志） | 已修复 |
+| 中等 | src/modules/message.py:1684-1700 | `_verify_message_sent` 策略2 检查所有空 input，搜索框等导致误报"发送成功" | 已修复 |
+| 中等 | src/services/pipeline.py:439 + checkpoint.py:23 | `Path("data")` 相对路径依赖 CWD，从非项目根启动时文件写入错误位置 | 已修复 |
+| 中等 | src/services/pipeline.py:1007 | `min_years: int = None` 类型标注错误 | 已修复 |
+| 轻微 | src/modules/search.py:43-65 | `NON_RD_KEYWORDS` 大小写匹配不一致（HRBP 无小写对应） | 已修复 |
+| 轻微 | src/modules/message.py:251 | `asyncio.sleep(2)` 硬编码，其他延迟都走配置化路径 | 已修复 |
+| 轻微 | src/models/migrations.py:47-67 | `web_tasks` 表残留，添加 migration v4 清理 | 已修复 |
+
+### 修复内容
+- **CaptchaBlockedError import**: captcha.py 顶部添加 `from src.exceptions.errors import CaptchaBlockedError`
+- **distinct 查询修正**: `session.query(Message.candidate_maimai_id).filter_by(status='sent').distinct().count()` 正确去重
+- **results 安全访问**: `results[key]` → `results.get(key, 0)` 与 talent_bank 分支一致
+- **quota_exhausted 独立计数**: results dict 新增 `quota_exhausted` 键，不再混入 failed
+- **conversation check 日志**: 保持保守策略（return True），改善日志描述为"skipping to avoid potential duplicate"
+- **verify 误报修复**: 策略2 的 input 检查限定在 chat/im/message/editor 容器内，排除搜索框等控件
+- **相对路径修复**: pipeline.py `data_dir` 和 checkpoint.py `_get_checkpoint_dir` 均改用 `Path(__file__)` 推导绝对路径
+- **类型标注**: `int = None` → `Optional[int] = None`
+- **大小写统一**: `_is_non_rd_title` 改为 `title.lower()` + `kw.lower()` 比较，移除冗余 `"hr"`
+- **hardcoded sleep**: `asyncio.sleep(2)` → `async_random_delay("page_load")` 走配置路径
+- **migration v4**: 添加 `_m004_drop_web_tasks` 清理 web 层遗留表
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/modules/message.py:40 | 移除 `LoginRequiredError` import（文件内零引用） | 未使用 import |
+| src/models/database.py:13 | 移除 `StaticPool` import（仅用 QueuePool） | 未使用 import |
+| src/models/database.py:177-180 | 移除 `drop_all()` 方法（生产代码零调用） | 未调用方法 |
+| src/core/session.py:105-193 | 移除 `has_saved_session()` + `get_session_info()`（全项目零调用） | 未调用方法 |
+| src/core/browser.py:66-68 | 移除 `is_connected` property（Web 层残留 shim） | Web 残留 |
+| src/cli/main.py:591,594 | `browser.is_connected` → `browser.is_running` | 同步更新 |
+| src/modules/message.py:1906,1916 | 空 `except: pass` → `except as e: logger.debug()` | 空异常处理 |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复和清理后均全部通过，无回归
+
+### 复盘
+- **做得好的**: BUG-01（CaptchaBlockedError 未导入）是典型的"运行时才爆"问题——代码路径不常触发所以一直未被发现，但一旦验证码出现就必崩。这类问题靠测试覆盖或 import 静态检查可预防；BUG-02（distinct 误用）提醒 SQLAlchemy API 在 SQLite 和 PostgreSQL 上语义不同，需要注意 ORM 的 DB-specific 行为差异
+- **待改进的**: BUG-06 的 `_verify_message_sent` 策略2 虽然缩小了检查范围，但仍依赖 CSS 类名猜测聊天容器，脆弱——长期应该只在已知的聊天输入元素上验证清空状态；相对路径问题（BUG-07）在 config.py 已经正确处理但 pipeline/checkpoint 未效仿，说明项目缺少统一的"项目根路径"工具函数
+- **遗留项（2 项）**: 循环依赖 message↔selector_discovery（Review #1-10 遗留）；测试覆盖率低（Review #2-10 遗留，仅 13 个测试）
+- **本次消除的遗留项**: min_years 跨关键词过滤已确认为设计缺陷（BUG-08，仅首关键词生效）——当前保持现状但已记录，未来多关键词场景需每次设置过滤器
+
+---
+
+## Review #12 - 2026-03-05
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/utils/config.py:129-130 | `apply_profile()` 中 `json.load()` 无异常处理，格式错误的 profile settings.json 导致程序崩溃 | 已修复 |
+| 中等 | src/utils/config.py:128 | `apply_profile()` 冗余 `import json`（文件顶部已 import） | 已修复 |
+| 中等 | src/utils/config.py:95 | `_deep_merge()` 函数内 `import copy`，应在文件顶部 | 已修复 |
+| 中等 | src/utils/validators.py:99 | `validate_template_rendering()` 函数内 `import re`（文件顶部已 import） | 已修复 |
+| 中等 | pyproject.toml:10,51 + README.md:56 | Python 版本要求写 `^3.10`，但实际运行环境是 3.9.6 | 已修复 |
+| 轻微 | src/cli/main.py:39 | `--profile` 名称无合法性验证，可传入路径遍历字符 `../` | 已修复 |
+
+### 修复内容
+- **apply_profile 异常处理**: `json.load()` 包裹 try-except，格式错误时抛出 `ConfigurationError` 而非裸异常
+- **冗余 import 清理**: config.py 移除 `apply_profile` 内的 `import json`（顶部已有）和 `_deep_merge` 内的 `import copy`（移到顶部）；validators.py 移除 `validate_template_rendering` 内的 `import re`（顶部已有）
+- **Python 版本统一**: pyproject.toml `python = "^3.9"`、mypy `python_version = "3.9"`、README `3.9 或更高版本`，与实际运行环境一致
+- **profile 名称验证**: 新增 `_validate_profile_name()` 函数，限制只允许字母数字、连字符、下划线，防止路径遍历
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/cli/main.py:18 | 移除顶层 `get_rate_limiter` import（609 行有局部 import，顶层多余） | 未使用 import |
+| src/modules/auth.py:18 | 移除 `SessionExpiredError` import（仅出现在 docstring，未实际使用） | 未使用 import |
+
+### 测试结果
+- 18 passed in 0.04s（test_config: 12, test_validators: 6）
+- ruff F401 检查通过（0 errors）
+- 修复前后均全部通过，无回归
+
+### 复盘
+- **做得好的**: multi-profile 代码的 `apply_profile()` 异常处理遗漏是典型的"快速实现忘了防御"问题——同文件的 `_load_json()` 已有完善的异常处理模式，新代码应参照已有模式；profile 名称验证防止了潜在的路径遍历安全隐患
+- **待改进的**: 函数内 `import` 问题在 Review #1 中已批量修复过（re/sys/traceback/datetime），但新增代码（`_deep_merge`/`apply_profile`）又引入了同类问题——说明 ruff F811（redefined-while-unused）或自定义 lint 规则可以从机制上预防
+- **遗留项（2 项）**: 循环依赖 message↔selector_discovery（Review #1-11 遗留）；测试覆盖率低（Review #2-11 遗留，18 个测试）
+
+---
+
+## Review #13 - 2026-03-10
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 中等 | src/modules/message.py:497 | `DiscoveredSelectors` 类型提示缺少 TYPE_CHECKING 导入，ruff F821 报错 | 已修复 |
+| 轻微 | src/cli/main.py:485 | f-string 无占位符 `f"消息预览"` | 已修复 |
+| 轻微 | src/modules/message.py:533 | `except Exception as e` 中 `e` 未使用 | 已修复 |
+| 轻微 | src/modules/message.py:1073 | f-string 无占位符 | 已修复 |
+| 轻微 | src/modules/search.py:613 | 模糊变量名 `l`（列表推导式中） | 已修复 |
+| 轻微 | src/modules/selector_discovery.py:122 | f-string 无占位符 | 已修复 |
+| 轻微 | src/services/pipeline.py:1103 | f-string 无占位符 | 已修复 |
+
+### 排除的误报（7项）
+| 来源 | 报告内容 | 排除原因 |
+|------|---------|---------|
+| Agent | CLI 函数内 import（17 处） | 有意设计：CLI 按需加载避免启动时加载重模块 |
+| Agent | Lock 跨事件循环风险 | 已有 `_lock_loop` 检测机制，循环变化时重建 Lock |
+| Agent | SQL 注入风险 | SQLAlchemy 参数化查询，无注入风险 |
+| Agent | distinct().count() SQLite 不兼容 | 验证通过：生成 `SELECT count(*) FROM (SELECT DISTINCT ...)` |
+| Agent | Pipeline send_batch 未捕获异常 | 边缘场景，当前行为可接受 |
+| Agent | close_current_tab 资源泄漏 | 异常后移除引用是正确行为 |
+| Agent | rate_limiter 竞态条件 | SQLite WAL + 应用级检查足够 |
+
+### 修复内容
+- **TYPE_CHECKING 导入**: message.py 添加 `from typing import TYPE_CHECKING` 和条件导入 `DiscoveredSelectors`，修复 ruff F821
+- **f-string 清理**: 5 处无占位符的 f-string 改为普通字符串
+- **变量命名**: search.py 列表推导式中 `l` 改为 `line`
+- **未使用变量**: message.py 第 533 行 `except Exception as e` 改为 `except Exception`
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| 无 | 本次扫描未发现死代码 | - |
+
+### 测试结果
+- 18 passed in 0.05s（test_config: 12, test_validators: 6）
+- ruff check: 4 errors（均为 E402 预期的 sys.path 后导入）
+- 修复后无回归
+
+### 复盘
+- **做得好的**: 本次审查重点验证了 agent 报告的问题，有效过滤了 7/14 的误报。CLI 函数内 import 是常见的按需加载模式，不应视为问题；SQLAlchemy 的 distinct().count() 经实际验证生成正确的子查询 SQL
+- **待改进的**: `DiscoveredSelectors` 的类型提示问题说明跨文件类型引用需要 TYPE_CHECKING 块，否则 ruff 会报 F821；f-string 无占位符问题可以用 ruff F541 自动修复 (`--fix`)
+- **遗留项（2 项）**: 循环依赖 message↔selector_discovery（Review #1-12 遗留，TYPE_CHECKING 导入已部分缓解但运行时仍用 deferred import）；测试覆盖率低（Review #2-12 遗留，仅 18 个测试）
+
+---

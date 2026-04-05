@@ -1,0 +1,314 @@
+"""Export module for exporting candidate data.
+
+Supports Excel (.xlsx) and CSV formats with optional
+message history inclusion.
+"""
+
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, Literal, List, Dict, Any
+
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+from loguru import logger
+from rich.console import Console
+
+from src.utils.config import get_config
+from src.models.database import Candidate, Message, get_db_manager
+
+console = Console()
+
+
+def export_candidates(
+    format: Literal["excel", "xlsx", "csv"] = "excel",
+    output_path: Optional[str] = None,
+    include_messages: bool = True
+) -> str:
+    """
+    Export candidate data to Excel or CSV.
+
+    Args:
+        format: Export format ('excel', 'xlsx', or 'csv')
+        output_path: Output file path (auto-generated if None)
+        include_messages: Include message history
+
+    Returns:
+        Path to exported file
+    """
+    config = get_config()
+    db_manager = get_db_manager()
+
+    # Normalize format
+    if format == "xlsx":
+        format = "excel"
+
+    # Generate output path if not provided
+    if output_path is None:
+        export_dir = Path(config.get('data.export_dir', 'data/exports'))
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        extension = 'xlsx' if format == 'excel' else 'csv'
+        output_path = str(export_dir / f"candidates_{timestamp}.{extension}")
+
+    # Ensure parent directory exists
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # Get data from database
+    candidates_data = _get_candidates_data(db_manager, include_messages)
+
+    if not candidates_data:
+        console.print("[yellow]No candidates to export[/yellow]")
+        return ""
+
+    # Create DataFrame
+    df = _create_dataframe(candidates_data)
+
+    # Export based on format
+    if format == "excel":
+        _export_to_excel(df, output_path)
+    else:
+        _export_to_csv(df, output_path)
+
+    console.print(f"[green]Exported {len(candidates_data)} candidates to: {output_path}[/green]")
+    return output_path
+
+
+def _get_candidates_data(db_manager, include_messages: bool) -> List[Dict[str, Any]]:
+    """
+    Get candidate data from database.
+
+    Args:
+        db_manager: Database manager instance
+        include_messages: Whether to include message history
+
+    Returns:
+        List of candidate dictionaries
+    """
+    with db_manager.session_scope() as session:
+        candidates = session.query(Candidate).all()
+
+        # Batch pre-fetch all messages grouped by candidate to avoid N+1 queries
+        messages_by_candidate = {}
+        if include_messages and candidates:
+            all_maimai_ids = [c.maimai_id for c in candidates]
+            all_messages = session.query(Message).filter(
+                Message.candidate_maimai_id.in_(all_maimai_ids)
+            ).order_by(Message.created_at.desc()).all()
+
+            for msg in all_messages:
+                messages_by_candidate.setdefault(msg.candidate_maimai_id, []).append(msg)
+
+        data = []
+        for candidate in candidates:
+            record = {
+                'maimai_id': candidate.maimai_id,
+                'name': candidate.name,
+                'title': candidate.title,
+                'company': candidate.company,
+                'location': candidate.location,
+                'profile_url': candidate.profile_url,
+                'first_seen': candidate.first_seen,
+                'last_updated': candidate.last_updated,
+                'source_search': candidate.source_search,
+            }
+
+            # Flatten education
+            education = candidate.education or []
+            if education:
+                latest_edu = education[0]
+                record['latest_education'] = _format_education(latest_edu)
+            else:
+                record['latest_education'] = ''
+
+            # Flatten work experience
+            work_exp = candidate.work_experience or []
+            if work_exp:
+                latest_work = work_exp[0]
+                record['latest_experience'] = _format_work_experience(latest_work)
+            else:
+                record['latest_experience'] = ''
+
+            # Format skills
+            skills = candidate.skills or []
+            record['skills'] = ', '.join(skills) if skills else ''
+
+            # Get message info from pre-fetched data
+            if include_messages:
+                messages = messages_by_candidate.get(candidate.maimai_id, [])
+                record['message_count'] = len(messages)
+
+                if messages:
+                    latest_msg = messages[0]
+                    record['last_message_status'] = latest_msg.status
+                    record['last_message_date'] = latest_msg.sent_at or latest_msg.created_at
+                    record['last_message_template'] = latest_msg.template_name
+                else:
+                    record['last_message_status'] = ''
+                    record['last_message_date'] = None
+                    record['last_message_template'] = ''
+
+            data.append(record)
+
+        return data
+
+
+def _format_education(edu: Dict) -> str:
+    """Format education entry as string."""
+    parts = []
+    if edu.get('school'):
+        parts.append(edu['school'])
+    if edu.get('degree'):
+        parts.append(edu['degree'])
+    if edu.get('major'):
+        parts.append(edu['major'])
+    return ' - '.join(parts) if parts else ''
+
+
+def _format_work_experience(work: Dict) -> str:
+    """Format work experience entry as string."""
+    parts = []
+    if work.get('title'):
+        parts.append(work['title'])
+    if work.get('company'):
+        parts.append(f"@ {work['company']}")
+    return ' '.join(parts) if parts else ''
+
+
+def _create_dataframe(data: List[Dict[str, Any]]) -> pd.DataFrame:
+    """
+    Create pandas DataFrame from candidate data.
+
+    Args:
+        data: List of candidate dictionaries
+
+    Returns:
+        pandas DataFrame
+    """
+    # Define column order
+    columns = [
+        'maimai_id',
+        'name',
+        'title',
+        'company',
+        'location',
+        'latest_education',
+        'latest_experience',
+        'skills',
+        'profile_url',
+        'source_search',
+        'first_seen',
+        'last_updated',
+    ]
+
+    # Add message columns if present
+    if data and 'message_count' in data[0]:
+        columns.extend([
+            'message_count',
+            'last_message_status',
+            'last_message_date',
+            'last_message_template',
+        ])
+
+    # Create DataFrame
+    df = pd.DataFrame(data)
+
+    # Reorder columns (only include existing columns)
+    existing_columns = [c for c in columns if c in df.columns]
+    df = df[existing_columns]
+
+    # Format datetime columns
+    datetime_columns = ['first_seen', 'last_updated', 'last_message_date']
+    for col in datetime_columns:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col]).dt.strftime('%Y-%m-%d %H:%M')
+
+    return df
+
+
+def _export_to_excel(df: pd.DataFrame, output_path: str) -> None:
+    """
+    Export DataFrame to Excel with formatting.
+
+    Args:
+        df: pandas DataFrame
+        output_path: Output file path
+    """
+    # Create workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Candidates"
+
+    # Define styles
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
+    # Write data
+    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+        for c_idx, value in enumerate(row, 1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+            cell.border = border
+
+            if r_idx == 1:
+                # Header row
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+            else:
+                # Data rows
+                cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+    # Set column widths
+    column_widths = {
+        'A': 15,  # maimai_id
+        'B': 12,  # name
+        'C': 25,  # title
+        'D': 20,  # company
+        'E': 12,  # location
+        'F': 30,  # latest_education
+        'G': 30,  # latest_experience
+        'H': 40,  # skills
+        'I': 40,  # profile_url
+        'J': 20,  # source_search
+        'K': 18,  # first_seen
+        'L': 18,  # last_updated
+        'M': 12,  # message_count
+        'N': 15,  # last_message_status
+        'O': 18,  # last_message_date
+        'P': 15,  # last_message_template
+    }
+
+    for col, width in column_widths.items():
+        ws.column_dimensions[col].width = width
+
+    # Freeze first row
+    ws.freeze_panes = 'A2'
+
+    # Add auto-filter
+    ws.auto_filter.ref = ws.dimensions
+
+    # Save workbook
+    wb.save(output_path)
+    logger.info(f"Excel file saved to: {output_path}")
+
+
+def _export_to_csv(df: pd.DataFrame, output_path: str) -> None:
+    """
+    Export DataFrame to CSV.
+
+    Args:
+        df: pandas DataFrame
+        output_path: Output file path
+    """
+    df.to_csv(output_path, index=False, encoding='utf-8-sig')
+    logger.info(f"CSV file saved to: {output_path}")

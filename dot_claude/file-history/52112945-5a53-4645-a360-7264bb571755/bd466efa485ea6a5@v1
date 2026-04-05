@@ -1,0 +1,153 @@
+"""Pipeline endpoint — search + message orchestration with confirmation flow."""
+
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from src.web.deps import get_queue, get_broadcaster
+from src.web.schemas import PipelineRequest, PipelineConfirmRequest, TaskResponse
+from src.web.task_queue import BrowserTask, TaskPriority, TaskStatus, TaskQueue
+from src.web.progress import Broadcaster, set_progress_callback, emit_progress
+
+router = APIRouter()
+
+
+@router.post("/pipeline", response_model=TaskResponse)
+async def run_pipeline(
+    req: PipelineRequest,
+    queue: TaskQueue = Depends(get_queue),
+    broadcaster: Broadcaster = Depends(get_broadcaster),
+):
+    """Submit a pipeline task (search + optional message sending).
+
+    If auto_send=False (default), the task will pause after search and emit
+    an 'awaiting_confirmation' event via WebSocket. Use POST /api/pipeline/{task_id}/confirm
+    to resume with selected candidates.
+    """
+
+    async def _run():
+        from src.core.browser import get_browser_manager
+        from src.modules.auth import ensure_logged_in
+        from src.services.pipeline import (
+            search_all_keywords, search_all_keywords_enterprise,
+            send_batch, send_batch_enterprise,
+            SearchMode, _candidates_to_dicts,
+        )
+
+        browser = get_browser_manager()
+        await browser.start()
+        await ensure_logged_in(browser)
+
+        mode = SearchMode(req.mode)
+
+        # --- Search phase ---
+        if mode == SearchMode.ENTERPRISE:
+            all_candidates, seen_ids = await search_all_keywords_enterprise(
+                browser, tuple(req.keywords), tuple(req.company), req.pages,
+                keep_last_tab_open=not req.dry_run,
+            )
+        else:
+            all_candidates, seen_ids = await search_all_keywords(
+                browser, tuple(req.keywords), tuple(req.company),
+                req.location, req.pages,
+            )
+
+        if not all_candidates:
+            return {"total": 0, "message": "No candidates found"}
+
+        candidate_dicts = [
+            {"maimai_id": c.maimai_id, "name": c.name, "title": c.title,
+             "company": c.company, "location": c.location or "", "profile_url": c.profile_url or ""}
+            for c in all_candidates
+        ]
+
+        if req.dry_run:
+            return {"total": len(all_candidates), "candidates": candidate_dicts, "dry_run": True}
+
+        # --- Confirmation phase ---
+        if not req.auto_send:
+            # Emit awaiting_confirmation and wait for user input
+            emit_progress("awaiting_confirmation", candidates=candidate_dicts)
+
+            # Get the current task from queue and set up confirmation event
+            current = queue.current_task
+            if current:
+                current.confirmation_event = asyncio.Event()
+                current.status = TaskStatus.AWAITING_CONFIRMATION
+
+                # Wait up to 10 minutes for confirmation
+                try:
+                    await asyncio.wait_for(current.confirmation_event.wait(), timeout=600)
+                except asyncio.TimeoutError:
+                    emit_progress("failed", error="Confirmation timed out after 10 minutes")
+                    return {"error": "Confirmation timed out"}
+
+                # Filter candidates to only those confirmed
+                confirmed_ids = set(current.confirmation_data.get("maimai_ids", []))
+                all_candidates = [c for c in all_candidates if c.maimai_id in confirmed_ids]
+
+                if not all_candidates:
+                    return {"total": 0, "message": "No candidates selected"}
+
+                current.status = TaskStatus.RUNNING
+
+        emit_progress("sending_started", total=len(all_candidates))
+
+        # --- Send phase ---
+        if mode == SearchMode.ENTERPRISE:
+            results = await send_batch_enterprise(
+                all_candidates, req.template, req.variables,
+                list(req.keywords), browser, req.skip_messaged,
+                skip_confirmation=True,
+            )
+        else:
+            results = await send_batch(
+                all_candidates, req.template, req.variables,
+                list(req.keywords), browser, req.skip_messaged,
+                skip_confirmation=True,
+            )
+
+        return results
+
+    task = BrowserTask(
+        name=f"pipeline:{','.join(req.keywords)}",
+        coroutine_factory=None,  # set below
+        priority=TaskPriority.LOW,
+    )
+
+    cb = broadcaster.make_progress_callback(task.task_id)
+
+    async def _wrapped():
+        token = set_progress_callback(cb)
+        try:
+            return await _run()
+        finally:
+            set_progress_callback(None)
+
+    task.coroutine_factory = _wrapped
+    await queue.submit(task)
+
+    return TaskResponse(task_id=task.task_id, status="queued", position=queue.queue_size)
+
+
+@router.post("/pipeline/{task_id}/confirm")
+async def confirm_pipeline(
+    task_id: str,
+    req: PipelineConfirmRequest,
+    queue: TaskQueue = Depends(get_queue),
+):
+    """Confirm candidate selection for a waiting pipeline task."""
+    task = queue.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status != TaskStatus.AWAITING_CONFIRMATION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task is not awaiting confirmation (status: {task.status})",
+        )
+
+    task.confirmation_data = {"maimai_ids": req.maimai_ids}
+    task.confirmation_event.set()
+
+    return {"status": "confirmed", "selected": len(req.maimai_ids)}

@@ -1,0 +1,52 @@
+"""Export routes — generate and download candidate data."""
+
+import html
+
+from pathlib import Path
+
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import FileResponse, HTMLResponse
+
+from src.web.app import templates
+from src.modules.export import export_candidates
+
+router = APIRouter()
+
+
+@router.get("/", response_class=HTMLResponse)
+async def export_page(request: Request):
+    """Render export page."""
+    return templates.TemplateResponse("export.html", {"request": request})
+
+
+@router.post("/download")
+async def download_export(
+    request: Request,
+    fmt: str = Form("excel"),
+    include_messages: bool = Form(False),
+):
+    """Generate export file and return as download."""
+    try:
+        path = export_candidates(
+            output_format=fmt,
+            include_messages=include_messages,
+        )
+
+        if not path or not Path(path).exists():
+            return HTMLResponse('<p><mark>导出失败: 没有数据</mark></p>', status_code=400)
+
+        filename = Path(path).name
+        media_type = (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            if fmt == "excel"
+            else "text/csv"
+        )
+
+        return FileResponse(
+            path=path,
+            filename=filename,
+            media_type=media_type,
+        )
+
+    except Exception as e:
+        return HTMLResponse(f'<p><mark>导出失败: {html.escape(str(e))}</mark></p>', status_code=500)

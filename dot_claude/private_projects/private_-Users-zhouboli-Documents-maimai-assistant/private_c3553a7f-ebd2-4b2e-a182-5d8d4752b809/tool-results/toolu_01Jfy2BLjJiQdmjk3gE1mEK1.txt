@@ -1,0 +1,400 @@
+     1→"""Search module for finding candidates on Maimai.
+     2→
+     3→Handles candidate search with filters, pagination,
+     4→and extraction of basic candidate information.
+     5→"""
+     6→
+     7→import asyncio
+     8→from dataclasses import dataclass
+     9→from typing import List, Optional
+    10→
+    11→from patchright.async_api import Page
+    12→from loguru import logger
+    13→from rich.console import Console
+    14→from rich.progress import Progress, SpinnerColumn, TextColumn
+    15→
+    16→from src.core.browser import BrowserManager, get_browser_manager
+    17→from src.core.anti_detection import human_scroll, human_type
+    18→from src.modules.auth import ensure_logged_in
+    19→from src.utils.config import get_config
+    20→from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+    21→from src.utils.delays import async_random_delay
+    22→from src.utils.retry import retry_navigation
+    23→from src.utils.validators import validate_keywords
+    24→from src.utils.captcha import check_captcha
+    25→from src.models.database import Candidate, SearchHistory, get_db_manager
+    26→from src.exceptions.errors import (
+    27→    BrowserError,
+    28→    SessionExpiredError,
+    29→    SelectorNotFoundError,
+    30→)
+    31→
+    32→console = Console()
+    33→
+    34→
+    35→# Maimai search URL
+    36→MAIMAI_SEARCH_URL = "https://maimai.cn/web/search_center"
+    37→
+    38→# Names indicating paid/premium-only profiles that should be skipped
+    39→PREMIUM_PLACEHOLDER_NAMES = {"脉脉高价值人脉"}
+    40→
+    41→# Keywords indicating non-R&D roles (to be filtered out)
+    42→NON_RD_KEYWORDS = {
+    43→    "销售", "运营", "产品", "市场", "电子商务", "电商",
+    44→    "商务", "品牌", "公关", "客服", "采购", "招商",
+    45→    "人力", "人事", "HR", "hr", "HRBP", "行政",
+    46→    "财务", "会计", "审计", "法务", "法律", "合规",
+    47→    "内容", "编辑", "翻译", "教育", "培训", "教学",
+    48→    "物流", "供应链", "仓储",
+    49→}
+    50→
+    51→
+    52→
+    53→def _is_non_rd_title(title: str) -> bool:
+    54→    """Check if a title indicates a non-R&D role.
+    55→
+    56→    Strict mode: if any non-R&D keyword appears, filter out regardless of
+    57→    whether R&D keywords are also present (e.g. "技术产品经理" is filtered).
+    58→    Returns False (keep) only if title is empty or contains no non-R&D keywords.
+    59→    """
+    60→    if not title:
+    61→        return False
+    62→
+    63→    # Strict: any non-R&D keyword present → filter out
+    64→    if any(kw in title for kw in NON_RD_KEYWORDS):
+    65→        return True
+    66→
+    67→    return False
+    68→
+    69→
+    70→@dataclass
+    71→class CandidateBasic:
+    72→    """Basic candidate information from search results."""
+    73→    maimai_id: str
+    74→    name: str
+    75→    title: str
+    76→    company: str
+    77→    location: Optional[str] = None
+    78→    profile_url: Optional[str] = None
+    79→    score: Optional[int] = None  # populated by scoring module
+    80→
+    81→
+    82→async def search_candidates(
+    83→    keywords: str,
+    84→    company: Optional[tuple] = None,
+    85→    location: Optional[str] = None,
+    86→    pages: int = 1,
+    87→    start_page: int = 1,
+    88→    browser: Optional[BrowserManager] = None
+    89→) -> List[CandidateBasic]:
+    90→    """
+    91→    Search for candidates on Maimai.
+    92→
+    93→    Args:
+    94→        keywords: Search keywords (e.g., "高级前端工程师")
+    95→        company: Filter by company names, tuple of strings (optional)
+    96→        location: Filter by location (optional)
+    97→        pages: Number of pages to scrape (default 1)
+    98→        start_page: First page number to scrape (default 1)
+    99→        browser: Browser manager instance
+   100→
+   101→    Returns:
+   102→        List of CandidateBasic objects
+   103→
+   104→    Raises:
+   105→        RateLimitExceededError: If rate limit exceeded
+   106→        SelectorNotFoundError: If page elements not found
+   107→    """
+   108→    # Validate inputs
+   109→    validate_keywords(keywords)
+   110→
+   111→    if browser is None:
+   112→        browser = get_browser_manager()
+   113→
+   114→    config = get_config()
+   115→    rate_limiter = get_rate_limiter()
+   116→    db_manager = get_db_manager()
+   117→
+   118→    # Ensure logged in
+   119→    await ensure_logged_in(browser)
+   120→
+   121→    all_candidates: List[CandidateBasic] = []
+   122→    seen_ids: set = set()  # Deduplicate across infinite-scroll extractions
+   123→
+   124→    with Progress(
+   125→        SpinnerColumn(),
+   126→        TextColumn("[progress.description]{task.description}"),
+   127→        console=console
+   128→    ) as progress:
+   129→
+   130→        end_page = start_page + pages
+   131→        for page_num in range(start_page, end_page):
+   132→            task = progress.add_task(f"Searching page {page_num}/{end_page - 1}...", total=None)
+   133→
+   134→            try:
+   135→                # Check rate limit (waits through min-interval)
+   136→                await async_check_rate_limit('search')
+   137→
+   138→                page = browser.page
+   139→
+   140→                if page_num == start_page:
+   141→                    # First page: interactive search (maimai SPA ignores URL query params)
+   142→                    await retry_navigation(page, MAIMAI_SEARCH_URL, wait_until='domcontentloaded')
+   143→                    await asyncio.sleep(1)
+   144→
+   145→                    # Find search input and type keyword
+   146→                    search_input = (
+   147→                        await page.query_selector('input[placeholder="搜索"]')
+   148→                        or await page.query_selector('input[type="search"]')
+   149→                        or await page.query_selector('.search-input input, .header input[type="text"]')
+   150→                    )
+   151→                    if not search_input:
+   152→                        raise SelectorNotFoundError("Search input not found on search center page")
+   153→
+   154→                    await search_input.click()
+   155→                    await search_input.fill(keywords)
+   156→                    await asyncio.sleep(0.5)
+   157→                    await page.keyboard.press('Enter')
+   158→                    await asyncio.sleep(2)
+   159→
+   160→                    # Default tab is 实名动态(feed); switch to 人脉(contacts)
+   161→                    renmai_tab = await page.query_selector(':text-is("人脉")')
+   162→                    if renmai_tab:
+   163→                        await renmai_tab.click()
+   164→                        await asyncio.sleep(2)
+   165→                    else:
+   166→                        logger.warning("Could not find '人脉' tab on search results page")
+   167→                else:
+   168→                    # Subsequent pages: scroll to load more (infinite scroll)
+   169→                    prev_count = await page.evaluate(
+   170→                        'document.querySelectorAll(\'[id^="contactcard_"]\').length'
+   171→                    )
+   172→                    await human_scroll(page, 'down', distance=1500)
+   173→                    # Wait for new cards to load
+   174→                    try:
+   175→                        await page.wait_for_function(
+   176→                            f'''() => {{
+   177→                                const cards = document.querySelectorAll('[id^="contactcard_"]');
+   178→                                return cards.length > {prev_count};
+   179→                            }}''',
+   180→                            timeout=8000,
+   181→                        )
+   182→                    except TimeoutError:
+   183→                        logger.debug(f"No new cards after scroll (had {prev_count})")
+   184→                    except Exception as e:
+   185→                        logger.warning(f"Error waiting for new cards after scroll: {e}")
+   186→
+   187→                # Wait for contactcard elements
+   188→                try:
+   189→                    await page.wait_for_function(
+   190→                        '''() => {
+   191→                            const cards = document.querySelectorAll('[id^="contactcard_"]');
+   192→                            return cards.length >= 1;
+   193→                        }''',
+   194→                        timeout=8000,
+   195→                    )
+   196→                except TimeoutError:
+   197→                    logger.debug("Timed out waiting for contactcard elements, proceeding anyway")
+   198→                except Exception as e:
+   199→                    logger.warning(f"Error waiting for contactcard elements: {e}")
+   200→
+   201→                # Extract candidates from this page
+   202→                candidates = await _extract_search_results(page, config)
+   203→
+   204→                # Deduplicate: infinite scroll re-extracts all visible cards
+   205→                candidates = [c for c in candidates if c.maimai_id not in seen_ids]
+   206→                for c in candidates:
+   207→                    seen_ids.add(c.maimai_id)
+   208→
+   209→                # Anti-detection: human behavior AFTER extraction
+   210→                await check_captcha(page, report_to_rate_limiter=True)
+   211→                await human_scroll(page, 'down', distance=300)
+   212→                await async_random_delay('action')
+   213→
+   214→                if not candidates:
+   215→                    logger.info(f"No results found on page {page_num}")
+   216→                    await browser.screenshot(f"search_debug_page{page_num}")
+   217→                    progress.update(task, description=f"Page {page_num}: No results")
+   218→                    # Allow one empty page (could be transient), break on second consecutive
+   219→                    if page_num > start_page and not all_candidates:
+   220→                        # First page had no results either — genuinely empty
+   221→                        break
+   222→                    continue
+   223→
+   224→                # Filter out non-R&D roles
+   225→                before_rd_filter = len(candidates)
+   226→                candidates = [c for c in candidates if not _is_non_rd_title(c.title)]
+   227→                rd_filtered = before_rd_filter - len(candidates)
+   228→                if rd_filtered > 0:
+   229→                    logger.info(f"Filtered out {rd_filtered} non-R&D candidates")
+   230→
+   231→                # Apply filters if specified
+   232→                if company:
+   233→                    company_lower = [cn.lower() for cn in company]
+   234→                    candidates = [c for c in candidates if c.company and any(cn in c.company.lower() for cn in company_lower)]
+   235→
+   236→                if location:
+   237→                    candidates = [c for c in candidates if c.location and location.lower() in c.location.lower()]
+   238→
+   239→                all_candidates.extend(candidates)
+   240→                progress.update(task, description=f"Page {page_num}: Found {len(candidates)} candidates")
+   241→
+   242→                # Log the action
+   243→                rate_limiter.log_action('search', {
+   244→                    'keywords': keywords,
+   245→                    'page': page_num,
+   246→                    'results': len(candidates)
+   247→                })
+   248→
+   249→                # Save candidates to database
+   250→                try:
+   251→                    _save_candidates_to_db(db_manager, candidates, keywords)
+   252→                except Exception as e:
+   253→                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+   254→
+   255→                # Delay before next page
+   256→                if page_num < end_page - 1:
+   257→                    await async_random_delay('page_load')
+   258→
+   259→            except (BrowserError, SessionExpiredError):
+   260→                raise  # Critical errors must propagate
+   261→            except Exception as e:
+   262→                logger.error(f"Error on page {page_num}: {e}")
+   263→                progress.update(task, description=f"Page {page_num}: Error - {str(e)[:30]}")
+   264→                # Take screenshot for debugging
+   265→                await browser.screenshot(f"search_error_page{page_num}")
+   266→                continue
+   267→
+   268→    # Log search to history
+   269→    _log_search_history(db_manager, keywords, company, location, pages, len(all_candidates))
+   270→
+   271→    console.print(f"[green]Search complete. Found {len(all_candidates)} candidates.[/green]")
+   272→    return all_candidates
+   273→
+   274→
+   275→async def _extract_search_results(page: Page, config) -> List[CandidateBasic]:
+   276→    """
+   277→    Extract candidate information from search results page.
+   278→
+   279→    Args:
+   280→        page: Playwright page instance
+   281→        config: Config instance
+   282→
+   283→    Returns:
+   284→        List of CandidateBasic objects
+   285→    """
+   286→    candidates = []
+   287→
+   288→    # NOTE: The caller (search_candidates) already waits for contactcard_
+   289→    # elements before calling this function.  Maimai's SPA strips URL
+   290→    # params within ~5-8s and clears results, so we must NOT add long
+   291→    # waits here (no networkidle, no loading-text polling).
+   292→
+   293→    try:
+   294→        # Strategy: Extract candidates by finding avatar images and their associated text
+   295→        candidates_data = await page.evaluate('''() => {
+   296→            const candidates = [];
+   297→            const seenNames = new Set();
+   298→
+   299→            // Find all images that look like avatars
+   300→            const images = document.querySelectorAll('img');
+   301→
+   302→            for (const img of images) {
+   303→                // Skip large images (probably not avatars)
+   304→                const rect = img.getBoundingClientRect();
+   305→                if (rect.width > 100 || rect.height > 100) continue;
+   306→                if (rect.width < 20 || rect.height < 20) continue;
+   307→
+   308→                // Find parent container (the card)
+   309→                let card = img.parentElement;
+   310→                for (let i = 0; i < 8 && card; i++) {
+   311→                    const cardRect = card.getBoundingClientRect();
+   312→                    // Look for a reasonable card size
+   313→                    if (cardRect.width > 200 && cardRect.height > 50 && cardRect.height < 200) {
+   314→                        break;
+   315→                    }
+   316→                    card = card.parentElement;
+   317→                }
+   318→
+   319→                if (!card) continue;
+   320→
+   321→                // Get all text nodes from card, preserving order
+   322→                const textParts = [];
+   323→                const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT, null, false);
+   324→                while (walker.nextNode()) {
+   325→                    const text = walker.currentNode.textContent.trim();
+   326→                    if (text && text.length > 0 && text.length < 100) {
+   327→                        textParts.push(text);
+   328→                    }
+   329→                }
+   330→
+   331→                // Parse candidate info from text parts
+   332→                // Pattern: Name, Activity time, Company+Position, Industry|Department
+   333→                let name = '';
+   334→                let company = '';
+   335→                let title = '';
+   336→                let industry = '';
+   337→
+   338→                // Compound job title patterns (longer patterns first for greedy match)
+   339→                const jobPatterns = [
+   340→                    // Compound titles with prefix modifiers
+   341→                    /(?:高级|资深|首席|初级|中级|senior|junior|staff|principal|lead)?\s*(?:前端|后端|全栈|web|Web|iOS|Android|Java|Python|Go|C\+\+|PHP|.NET|算法|数据|AI|机器学习|深度学习|NLP|大数据|云计算|DevOps|SRE|安全|测试|嵌入式|移动端|客户端|服务端|区块链|具身智能|自动驾驶|机器人)?\s*(?:工程师|开发|架构师|专家|技术经理|技术总监|技术负责人|Tech\s*Lead)/i,
+   342→                    // Management titles
+   343→                    /(?:技术|产品|运营|市场|销售|人力|财务|行政|项目|研发)?\s*(?:总监|经理|主管|负责人|VP|总裁|副总|合伙人|创始人|董事|CEO|CTO|COO|CFO|CMO|CHO|CIO)/i,
+   344→                    // Other roles
+   345→                    /(?:产品|UI|UX|交互|视觉)?\s*(?:设计师|分析师|顾问|运营|助理|实习生?)/i,
+   346→                ];
+   347→
+   348→                // Patterns for text that should be skipped
+   349→                const skipPatterns = [
+   350→                    /^[+＋]\s*好友$/,          // "+ 好友" button
+   351→                    /^\d+个共同好友$/,           // "1个共同好友" social label
+   352→                    /^共同好友/,                 // "共同好友..." variants
+   353→                    /^已关注$/,                  // "已关注" button
+   354→                    /^添加好友$/,                // "添加好友" button
+   355→                    /^关注$/,                    // "关注" button
+   356→                    /^好友$/,                    // "好友" label
+   357→                    /^[|｜·]$/,                  // separators
+   358→                ];
+   359→
+   360→                const isSkippable = (text) => {
+   361→                    if (skipPatterns.some(p => p.test(text))) return true;
+   362→                    // Activity time
+   363→                    if (/天前|小时前|分钟前|刚刚|活跃|在线/.test(text)) return true;
+   364→                    // Social relationship labels
+   365→                    if (/同行|前同事|校友|共同好友/.test(text)) return true;
+   366→                    return false;
+   367→                };
+   368→
+   369→                for (let i = 0; i < textParts.length; i++) {
+   370→                    const part = textParts[i];
+   371→
+   372→                    if (isSkippable(part)) continue;
+   373→
+   374→                    // First short text (2-15 chars, pure CJK/letters) is likely the name
+   375→                    if (!name && part.length >= 2 && part.length <= 15) {
+   376→                        if (/^[\u4e00-\u9fa5a-zA-Z·\s()（）]+$/.test(part)) {
+   377→                            name = part.replace(/[（(][^)）]*[）)]/g, '').trim();
+   378→                            continue;
+   379→                        }
+   380→                    }
+   381→
+   382→                    // After name, next substantial text is company+position
+   383→                    if (name && !company && part.length > 2) {
+   384→                        // Try to split company and position using regex patterns
+   385→                        let splitDone = false;
+   386→                        for (const pattern of jobPatterns) {
+   387→                            const match = part.match(pattern);
+   388→                            if (match && match.index > 0) {
+   389→                                company = part.substring(0, match.index).trim();
+   390→                                title = match[0].trim();
+   391→                                splitDone = true;
+   392→                                break;
+   393→                            }
+   394→                        }
+   395→                        if (!splitDone) {
+   396→                            company = part;
+   397→                        }
+   398→                        continue;
+   399→                    }
+   400→

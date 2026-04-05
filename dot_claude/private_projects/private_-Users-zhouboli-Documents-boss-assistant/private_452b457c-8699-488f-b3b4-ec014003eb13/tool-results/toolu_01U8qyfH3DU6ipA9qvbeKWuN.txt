@@ -1,0 +1,102 @@
+     1→     1→"""Random delay generators for human-like behavior simulation."""
+     2→     2→
+     3→     3→import math
+     4→     4→import random
+     5→     5→import asyncio
+     6→     6→import time
+     7→     7→from loguru import logger
+     8→     8→from src.utils.config import get_config
+     9→     9→
+    10→    10→
+    11→    11→_session_start: float = time.monotonic()
+    12→    12→_action_count: int = 0
+    13→    13→
+    14→    14→
+    15→    15→def reset_session():
+    16→    16→    global _session_start, _action_count
+    17→    17→    _session_start = time.monotonic()
+    18→    18→    _action_count = 0
+    19→    19→
+    20→    20→
+    21→    21→def _lognormal_delay(min_val: float, max_val: float) -> float:
+    22→    22→    mid = (min_val + max_val) / 2
+    23→    23→    mu = math.log(mid)
+    24→    24→    sigma = 0.4
+    25→    25→    delay = random.lognormvariate(mu, sigma)
+    26→    26→    return max(min_val, min(delay, max_val * 1.5))
+    27→    27→
+    28→    28→
+    29→    29→def _fatigue_multiplier() -> float:
+    30→    30→    elapsed_minutes = (time.monotonic() - _session_start) / 60.0
+    31→    31→    if elapsed_minutes < 10:
+    32→    32→        return 1.0
+    33→    33→    factor = 1.0 + 0.006 * min(elapsed_minutes - 10, 100)
+    34→    34→    return min(factor, 1.6)
+    35→    35→
+    36→    36→
+    37→    37→def _maybe_distraction_pause() -> float:
+    38→    38→    global _action_count
+    39→    39→    _action_count += 1
+    40→    40→    if _action_count < 5:
+    41→    41→        return 0.0
+    42→    42→    if random.random() < 0.03:
+    43→    43→        pause = random.uniform(5.0, 30.0)
+    44→    44→        logger.debug(f"Simulating distraction pause: {pause:.1f}s")
+    45→    45→        return pause
+    46→    46→    return 0.0
+    47→    47→
+    48→    48→
+    49→    49→def _time_of_day_multiplier() -> float:
+    50→    50→    import datetime
+    51→    51→    hour = datetime.datetime.now().hour
+    52→    52→    if 23 <= hour or hour < 7:
+    53→    53→        return 1.3
+    54→    54→    elif (10 <= hour <= 12) or (14 <= hour <= 17):
+    55→    55→        return 1.0
+    56→    56→    else:
+    57→    57→        return 1.1
+    58→    58→
+    59→    59→
+    60→    60→def get_random_delay(delay_type: str = 'action') -> float:
+    61→    61→    config = get_config()
+    62→    62→
+    63→    63→    delay_ranges = {
+    64→    64→        'page_load': (
+    65→    65→            config.get('delays.page_load_min', 2),
+    66→    66→            config.get('delays.page_load_max', 5)
+    67→    67→        ),
+    68→    68→        'action': (
+    69→    69→            config.get('delays.action_min', 0.5),
+    70→    70→            config.get('delays.action_max', 2.0)
+    71→    71→        ),
+    72→    72→        'typing': (
+    73→    73→            config.get('delays.typing_min', 0.05),
+    74→    74→            config.get('delays.typing_max', 0.15)
+    75→    75→        ),
+    76→    76→        'scroll': (
+    77→    77→            config.get('delays.scroll_min', 0.5),
+    78→    78→            config.get('delays.scroll_max', 1.5)
+    79→    79→        ),
+    80→    80→        'message': (
+    81→    81→            config.get('delays.action_min', 0.5),
+    82→    82→            config.get('delays.action_max', 2.0)
+    83→    83→        ),
+    84→    84→    }
+    85→    85→
+    86→    86→    min_delay, max_delay = delay_ranges.get(delay_type, (0.5, 2.0))
+    87→    87→    base_delay = _lognormal_delay(min_delay, max_delay)
+    88→    88→
+    89→    89→    if delay_type != 'typing':
+    90→    90→        base_delay *= _fatigue_multiplier()
+    91→    91→        base_delay *= _time_of_day_multiplier()
+    92→    92→
+    93→    93→    if delay_type in ('action', 'page_load', 'message'):
+    94→    94→        base_delay += _maybe_distraction_pause()
+    95→    95→
+    96→    96→    return base_delay
+    97→    97→
+    98→    98→
+    99→    99→async def async_random_delay(delay_type: str = 'action'):
+   100→   100→    delay = get_random_delay(delay_type)
+   101→   101→    await asyncio.sleep(delay)
+   102→   102→

@@ -1,0 +1,314 @@
+# Code Review History
+
+工程审查历史记录，由 code-review-memory skill 自动维护。
+
+---
+
+## Review #1 - 2026-02-13
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/core/browser.py:31-37 | Singleton asyncio.Lock 在多 event loop 下有竞态条件 | 已修复 |
+| 严重 | src/utils/rate_limiter.py:32,59,115,161,179,185,200 | `datetime.utcnow()` 返回 naive datetime，与 DB 的 aware datetime 混用 | 已修复 |
+| 严重 | src/modules/search.py:404-434 | 搜索 URL 参数未经 URL 编码 | 已修复 |
+| 严重 | src/modules/search.py:509-547 | `_save_candidates_to_db` 逐条查询，N+1 问题 | 已修复 |
+| 严重 | scripts/recorder.py:305 | `browser.close` 缺少括号，方法未调用 | 已修复 |
+| 严重 | src/modules/export.py:116-118 | export 中每个候选人单独查消息，N+1 查询 | 已修复 |
+| 严重 | scripts/setup_db.py:33-35 | 原始 SQL 字符串未用 `text()` 包装，SQLAlchemy 2.0 不兼容 | 已修复 |
+| 中等 | src/models/database.py 等多处 | Singleton 全局状态无 reset 机制，测试隔离困难 | 已修复 |
+| 中等 | src/utils/captcha.py:40 | `sys.stdin.readline()` 阻塞 async 事件循环 | 已修复 |
+| 中等 | src/modules/message.py:51-65 | 模板渲染使用简单字符串替换，存在递归替换风险 | 已修复 |
+| 中等 | src/services/pipeline.py:344-411 | batch_pages 分页 start_page 参数未生效（Boss 直聘用无限滚动） | 待处理 |
+| 中等 | src/modules/message.py:267-289 | 非交互模式下失败消息不记录到 DB | 已修复 |
+| 中等 | src/modules/message.py:445-446 | macOS 上 `Control+a` 应为 `Meta+a` | 已修复 |
+| 中等 | src/utils/config.py:15 | 配置路径用相对路径，依赖 CWD | 已修复 |
+| 中等 | src/utils/config.py:40-53 | JSON null 值被 default 覆盖 | 待处理 |
+| 中等 | src/modules/search.py:73-77 | `name+company` MD5 取 12 位，同名碰撞风险 | 已修复 |
+| 中等 | src/services/pipeline.py:310-322 | checkpoint 恢复不验证参数一致性 | 已修复 |
+| 中等 | boss_flow.py:8-11 | async with 块过早关闭，录制回放脚本无法运行 | 已修复 |
+| 中等 | src/models/database.py:12,19 | `declarative_base()` 使用 SA 2.0 废弃 API | 已修复 |
+| 中等 | src/utils/rate_limiter.py:222-233 | 日限额用完时 async_check_rate_limit 可能等待数十天 | 已修复 |
+| 中等 | requirements.txt | pydantic/faker/dotenv 声明但从未使用 | 已修复 |
+| 中等 | src/services/pipeline.py:392-394 | `sent_ids` 记录所有处理过的而非仅成功的 | 已修复 |
+
+### 修复内容
+- **C1 browser.py**: 添加 `threading.Lock` 保护 `__new__`，重建 asyncio.Lock 时检测当前 event loop
+- **C2 rate_limiter.py + checkpoint.py**: 全部 `datetime.utcnow()` 替换为 `datetime.now(timezone.utc)`
+- **C3 search.py**: `_build_search_url` 改用 `urllib.parse.urlencode()` 替代手动拼接
+- **C4 search.py**: `_save_candidates_to_db` 先批量查询已有候选人到 dict，避免 N+1
+- **C5 recorder.py**: `browser.close` → `await browser.close()`
+- **C6 export.py**: 消息查询改为批量 fetch（count + 最新消息）
+- **C7 setup_db.py**: SQL 字符串用 `text()` 包装
+- **M1**: 为 config/db_manager/rate_limiter 添加 `reset_*()` 函数
+- **M2 captcha.py**: `sys.stdin.readline()` 改为 `loop.run_in_executor(None, ...)` 异步读取
+- **M3 message.py**: `render_template` 改用 `re.sub` 单次替换，避免递归
+- **M5 message.py**: 非交互模式失败时也调用 `_save_message_to_db`
+- **M6 message.py**: 根据 `sys.platform` 选择 `Meta+a`（macOS）或 `Control+a`
+- **M7 config.py**: 默认 config_dir 改为基于源文件路径的绝对路径
+- **M9 search.py**: fallback ID 改用 SHA-256 取 20 位，降低碰撞概率
+- **M10 pipeline.py**: checkpoint 恢复时校验 keywords 和 template 是否匹配
+- **M11 boss_flow*.py + recorder.py**: `async with` 改为 `await async_playwright().start()`
+- **M12 database.py**: `from sqlalchemy.ext.declarative import declarative_base` → `from sqlalchemy.orm import declarative_base`
+- **M13 rate_limiter.py**: `async_check_rate_limit` 增加 `max_wait_per_retry=3600` 上限
+- **M14 requirements.txt**: 移除 pydantic/faker/python-dotenv
+- **M15 pipeline.py**: `sent_ids` 去重改用 set 提升效率
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/utils/retry.py | 整个文件删除，`retry_navigation` 从未被调用 | 未调用函数 |
+| src/utils/delays.py:104-107 | `get_retry_delay()` 函数删除 | 未调用函数 |
+| src/services/pipeline.py:477-547 | `generate_pipeline_report()` 函数删除 | 未调用函数 |
+| src/cli/main.py:17-18,23 | 删除未使用的 `Path`, `Tuple`, `Panel` import | 未使用 import |
+| src/modules/search.py:13,14,16,30 | 删除未使用的 `re`, `field`, `quote`, `ExtractionError`, `BrowserError`, `get_config` | 未使用 import |
+| src/modules/message.py:21,29,34,42 | 删除未使用的 `asyncio`, `Table`, `human_click/type/scroll`, `ExtractionError` | 未使用 import |
+| src/modules/profile.py:9,10,16,19 | 删除未使用的 `asyncio`, `List`, `Table`, `get_config` | 未使用 import |
+| src/services/pipeline.py:9,10,21,26 | 删除未使用的 `asyncio`, `datetime`, `Path`, `render_template`, `get_db_manager` | 未使用 import |
+| src/modules/search.py:281 | 删除未使用的 `config = get_config()` | 未使用变量 |
+| src/modules/profile.py:194 | 删除未使用的 `config = get_config()` | 未使用变量 |
+
+### 测试结果
+- 81 个测试全部通过（0.66s）
+- 无回归问题
+
+### 复盘
+- **做得好的**：datetime naive/aware 统一、N+1 查询优化、URL 编码修复 —— 这些都是影响核心功能正确性的关键修复
+- **待改进的**：batch_pages 分页功能实际上因 Boss 直聘的无限滚动机制而无法真正分页，需要重新设计；核心业务模块（search/message/pipeline）缺少单元测试
+- **遗留项**：
+  - M4: batch_pages 分页机制需要重新设计以适配无限滚动
+  - M8: Config.get() 中 JSON null 值处理（极低优先级）
+  - 核心业务模块测试覆盖率低（auth/search/profile/message/pipeline 无测试）
+  - `_error_timestamps` 在 RateLimiter 中永远为空（缺少 `report_error()` 方法）
+  - 多处 `except Exception` 过于宽泛，可考虑细化异常类型
+
+---
+
+## Review #2 - 2026-02-16
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/services/pipeline.py:60-68 | `search_all_keywords` 接收 `start_page` 但从未传给 `search_candidates`，resume/batch 模式每次从头搜索 | 已修复 |
+| 严重 | boss_flow.py:15,20 | `asyncio.sleep(1770800100.0)` ≈ 56年，录制器产物会挂死进程 | 已修复 |
+| 严重 | src/core/browser.py:78-87 | `_ensure_lock()` 依赖 Python 3.10+ 已移除的 `_loop` 属性，lock 永远不会重建 | 已修复 |
+| 严重 | src/services/pipeline.py:465-467 | resume 成功后 checkpoint 不清理，下次运行会重复执行 | 已修复 |
+| 中等 | src/modules/search.py:23 | `human_scroll` 导入但全文件未使用 | 已修复 |
+| 中等 | src/core/anti_detection.py:51-94 | `human_click`/`human_type` 定义但全项目无调用，message.py 直接用 Playwright 原生 API | 待处理 |
+| 中等 | src/cli/main.py:98-101 | search 的 export 未推断 format，导出全部候选人而非当前搜索结果 | 已修复 |
+| 中等 | src/modules/export.py:217-220 | `NaT.strftime()` 返回字符串 "NaT" 而非空值 | 已修复 |
+| 中等 | src/modules/message.py:143-146 | `questionary` 在非 TTY 环境返回 None，所有消息被跳过 | 已修复 |
+| 中等 | requirements.txt:13 | `tenacity` 声明但全项目未使用 | 已修复 |
+| 中等 | src/utils/checkpoint.py:99-100 | `load_latest` 构造 `__loading__` 临时 ID 路径 | 已修复 |
+| 中等 | src/utils/scoring.py:92-128 | 全局缓存在 Config 变更后不刷新 | 已修复 |
+| 中等 | src/modules/export.py:25 | 参数名 `format` 遮蔽 Python 内建函数 | 已修复 |
+| 中等 | src/models/database.py:124-129 | `StaticPool` 单连接在并发场景下有风险 | 已修复(加注释) |
+| 中等 | src/services/pipeline.py:189-195 | `_score` 动态设置在 dataclass 上，类型不安全 | 已修复 |
+| 中等 | src/modules/search.py:404-433 | `_build_search_url` 的 `page` 参数在无限滚动模式下无意义 | 已修复 |
+| 中等 | src/utils/rate_limiter.py:161-170 | min_interval 使用全局最后操作时间，跨类型误拦截 | 已修复 |
+| 中等 | src/utils/config.py:43-56 | JSON null 值被 default 覆盖（R1遗留2） | 已修复 |
+| 中等 | src/utils/rate_limiter.py | `_error_timestamps` 永远为空（R1遗留4） | 已修复 |
+| 轻微 | src/core/anti_detection.py:20 | `distance: int = None` 应为 `Optional[int]` | 已修复 |
+| 轻微 | src/modules/search.py:341-350 | boss_id 与 dedup_key 混用同一个 Set | 已修复 |
+| 轻微 | src/core/browser.py:172-179 | tab/page 关闭时 `except Exception: pass` 吞掉异常 | 已修复 |
+
+### 修复内容
+- **S01 pipeline.py + search.py**: `search_all_keywords` 将 `start_page` 透传给 `search_candidates`；`search_candidates` 新增 `start_page` 参数控制滚动起始位置
+- **S02 boss_flow.py**: 将 2 处 56 年 sleep 修正为 3 秒
+- **S03 browser.py**: `_ensure_lock()` 改用自维护的 `_lock_loop` 类属性跟踪 event loop，不再依赖 `_loop` 私有属性
+- **S04 pipeline.py**: checkpoint 清理条件从 `not resume and checkpoint` 改为 `checkpoint`，成功完成后一律清理
+- **遗留2 config.py**: `Config.get()` 使用 `_MISSING` sentinel 区分"键不存在"和"值为 null"
+- **遗留4 rate_limiter.py**: 添加 `report_error()` 方法并在 search.py 和 message.py 错误路径接入调用
+- **M03 cli/main.py**: search 导出时根据文件扩展名推断 format
+- **M04 export.py**: datetime 列格式化后将 `'NaT'` 替换为空字符串
+- **M05 message.py**: 非 TTY 时跳过 questionary 确认
+- **M06 requirements.txt**: 移除未使用的 `tenacity`
+- **M08 checkpoint.py**: `load_latest` 改用 `object.__new__()` 避免构造 `__loading__` 路径
+- **M09 pipeline.py**: pipeline 启动时调用 `reset_scoring_cache()`
+- **M10 export.py**: `format` 参数重命名为 `output_format`，CLI 层同步更新
+- **M12 search.py**: `CandidateBasic` 添加 `_score: int = field(default=0, init=False)`
+- **M13 search.py**: 移除 `_build_search_url` 的 `page` 参数
+- **M14 rate_limiter.py**: `min_interval` 改为按 `action_type` 查询最后操作时间
+- **L03 anti_detection.py**: `distance` 参数类型修正为 `Optional[int]`
+- **L05 search.py**: boss_id 和 dedup_key 拆分为两个独立 Set
+- **browser.py**: 清理逻辑中空 except 块改为记录 debug 日志
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/modules/search.py:11 | 删除未使用的 `import asyncio` | 未使用 import |
+| src/modules/search.py:23 | 删除未使用的 `from src.core.anti_detection import human_scroll` | 未使用 import |
+| src/core/browser.py:172-179 | 空 `except Exception: pass` 改为 `logger.debug()` | 空异常处理块改进 |
+| src/utils/rate_limiter.py | `report_error()` 方法已定义但无调用 → 接入 search.py 和 message.py 错误路径 | Phase 2 新增冗余修复 |
+
+### 测试结果
+- 81 个测试全部通过（0.66s）
+- 无回归问题
+
+### 复盘
+- **做得好的**：修复了 Review #1 全部 5 个遗留项中的 3 个（start_page 传递链、Config.get null 值、report_error 接入）；BrowserManager lock 管理改为不依赖 Python 私有 API；checkpoint 生命周期管理完善
+- **待改进的**：`human_click`/`human_type` 作为 anti-detection 层定义完整但全项目未启用，message.py 直接使用 Playwright 原生 API 意味着反检测能力未充分发挥
+- **遗留项**：
+  - `human_click`/`human_type` 应在 message.py 的 `_type_and_send_message` 和 `_find_chat_button().click()` 中启用
+  - 核心业务模块测试覆盖率低（auth/search/profile/message/pipeline 无测试）
+  - `validate_boss_id()`/`validate_keywords()` 有定义和测试但未在 CLI 或模块中接入
+  - `get_selector()` 和 selectors.json 机制预留但未启用
+  - BrowserManager 多标签页 API（wait_for_new_tab/switch_to_primary_tab/close_current_tab/screenshot）预留但未使用
+  - 多处 `except Exception` 仍然偏宽泛
+
+---
+
+## Review #3 - 2026-03-03
+
+**范围**: P0（retry+自适应降速）、P1（ContextVars progress+Pydantic schemas）、P2（TaskQueue 优先级队列）全部改动
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/web/routes/pipeline.py:88-138 | `_run()` 缺少 `except asyncio.CancelledError`，取消时 PipelineRun DB 记录永远卡在 running（Python 3.9+ CancelledError 是 BaseException） | 已修复 |
+| 中等 | src/web/routes/pipeline.py:83, search.py:54,77, messages.py:56,108, candidates.py:134 | XSS：错误消息未 `html.escape()` 直接注入 HTMLResponse | 已修复 |
+| 中等 | src/utils/captcha.py:37,75 | `except Exception: continue` 静默吞掉异常，无法追踪 selector 查询失败原因 | 已修复 |
+| 轻微 | src/web/task_queue.py:246,251,258-260 | worker error/cancel 路径先发特定事件再发 done，SSE 客户端收双重终止事件 | 已修复 |
+
+### 修复内容
+- **S01 pipeline.py**: 在 `_run()` 的 `except Exception` 前增加 `except asyncio.CancelledError`，将 PipelineRun 状态更新为 `cancelled` 后 re-raise
+- **M01 pipeline/search/messages/candidates routes**: 所有 `HTMLResponse` 错误消息加 `html.escape()`，防止用户输入或异常信息注入 HTML
+- **M02 captcha.py**: 两处 `except Exception: continue` 改为 `except Exception as e: logger.debug(...)` + `continue`
+- **L01 task_queue.py**: 移除 error/cancel 路径的 `_send_done()` 调用，统一在 finally 发单一 `done` 事件（携带 status 和 message），删除不再使用的 `_send_done()` 方法
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/web/routes/messages.py:52 | `html = ...` 局部变量覆盖 `import html` 模块，重命名为 `preview_html` | 变量遮蔽（Phase 2 修复引入的新 bug） |
+| src/web/routes/messages.py:13 | 删除未使用的 `validate_template_variables` import | 未使用 import |
+| src/web/routes/dashboard.py:3 | 删除未使用的 `timedelta` import | 未使用 import |
+| src/modules/profile.py:11 | 删除未使用的 `Page` import | 未使用 import |
+
+### 测试结果
+- 81 个测试全部通过（0.68s）
+- 无回归问题
+
+### 复盘
+- **做得好的**：CancelledError 处理是 P2 TaskQueue 重构引入的真实 bug，发现及时；XSS 修复覆盖所有 6 处 HTMLResponse 错误输出
+- **待改进的**：XSS 修复时 messages.py 的 `html` 局部变量覆盖了刚导入的 `html` 模块，属于修复引入新 bug，Phase 3 检测到并修正。以后在有同名局部变量的文件中新增 import 时需特别注意命名冲突
+- **遗留项**：
+  - R1 遗留：batch_pages 分页机制需重新设计以适配无限滚动
+  - R2 遗留：`human_click`/`human_type` 应在 message.py 中启用
+  - R2 遗留：`validate_boss_id()`/`validate_keywords()` 有定义但未在 CLI 或模块中接入
+  - R2 遗留：`get_selector()` 和 selectors.json 机制预留但未启用
+  - R2 遗留：BrowserManager 多标签页 API 预留但未使用
+  - 核心业务模块测试覆盖率低（auth/search/profile/message/pipeline 无测试）
+
+---
+
+## Review #4 - 2026-03-03
+
+**范围**: 全量扫描（全部 src/、config/、tests/、scripts/、boss_flow*.py）
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/web/routes/messages.py:95-101 | Web 单发消息永远被取消：`send_msg()` 调用 `send_message()` 未传 `interactive=False`，uvicorn 下 `isatty()=False` 导致 `confirm=False` | 已修复 |
+| 严重 | src/modules/search.py:451-453 | JS 语法错误：`querySelectorAll()` 的选择器字符串跨行，JS 单引号不允许换行，Chrome 报 SyntaxError，搜索滚动失效 | 已修复 |
+| 中等 | src/web/routes/export.py:50 | XSS：导出错误消息 `{e}` 未 `html.escape()`（R3 修了 6 处但漏了 export） | 已修复 |
+| 中等 | src/web/routes/messages.py:51 | XSS：消息预览 `{content}` 直接插入 HTML，候选人名含 `<script>` 可触发 | 已修复 |
+| 中等 | src/web/routes/export.py:24 | Checkbox 逻辑错误：`include_messages: bool = Form(True)` 取消勾选=不发送=默认 True，无法关闭 | 已修复 |
+| 中等 | src/utils/rate_limiter.py:136,157,171 | Naive/aware datetime 混用：SQLite 读回 naive datetime 与 `datetime.now(timezone.utc)` 相减 TypeError（R1 修了大部分，3 个路径漏了） | 已修复 |
+| 中等 | src/utils/llm_scorer.py:145-155 | 同步 httpx.post() 阻塞 async 事件循环，每次 LLM 评分阻塞最长 60s | 已修复 |
+| 中等 | src/web/templates/partials/pipeline_progress.html:3,69 | 重复 SSE 连接：HTMX `sse-connect` + 手动 `new EventSource()` 同时打开两条 SSE | 已修复 |
+| 中等 | config/settings.json:59 | 默认绑定 `0.0.0.0`，无认证下暴露到局域网 | 已修复 |
+| 轻微 | src/modules/export.py:220 | NaT 处理无效：`.replace('NaT', '')` 无法匹配 NaN，应用 `.fillna('')` | 已修复 |
+| 轻微 | boss_flow_search.py:15 | 56 年 sleep：录制器产物 `asyncio.sleep(1770796716.7)` 挂死进程 | 已修复 |
+| 轻微 | src/utils/scoring.py:600 | 无分块查询：`boss_id.in_(boss_ids)` 超 999 条时 SQLite 报 OperationalError | 已修复 |
+
+### 修复内容
+- **S1 messages.py**: `send_msg()` 调用增加 `interactive=False` 参数
+- **S2 search.py**: `querySelectorAll()` 选择器字符串合并为单行，消除 JS 跨行字符串语法错误
+- **M1 export.py**: 添加 `import html`，错误消息用 `html.escape(str(e))` 转义
+- **M2 messages.py**: 预览内容用 `html.escape(content)` 转义
+- **M3 export.py**: `include_messages: bool = Form(True)` 改为 `Form(False)`，配合模板 `checked` 属性实现正确的 checkbox 语义
+- **M4 rate_limiter.py**: 新增 `_ensure_aware()` 静态方法，在 `_get_last_action_time()` 返回值和两处 `oldest_in_window[0]` 上统一处理 timezone
+- **M5 llm_scorer.py**: 全部公共函数改为 async，`httpx.get/post` → `httpx.AsyncClient` 异步调用；pipeline.py 调用点加 `await`；测试改用 `AsyncMock`
+- **M6 pipeline_progress.html**: 删除手动 `new EventSource()`，改为监听 HTMX `htmx:sseMessage` 事件，单一 SSE 连接
+- **M7 settings.json**: `web.host` 从 `0.0.0.0` 改为 `127.0.0.1`
+- **L1 export.py**: `.replace('NaT', '')` 改为 `.fillna('')`
+- **L2 boss_flow_search.py**: 两处超大 sleep 值修正为 3 秒
+- **L3 scoring.py**: `_batch_load_enrichment` 按 500 条分块查询，避免 SQLite 变量限制
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/web/routes/auth.py:6 | 删除未使用的 `chrome_manager` 和 `templates` import | 未使用 import |
+
+### 测试结果
+- 81 个测试全部通过（0.69s）
+- 无回归问题
+
+### 复盘
+- **做得好的**：S1（Web 消息发送失效）和 S2（JS 语法错误导致搜索滚动完全不工作）都是影响核心功能的严重 bug，此前未被发现；M4 统一用 `_ensure_aware()` 处理所有 SQLite datetime 路径，比逐条修更健壮；M5 将 llm_scorer 全面 async 化，从根本上解决事件循环阻塞
+- **待改进的**：R3 刚修完 XSS 就在 R4 发现漏了 export 路由，说明 XSS 修复应该用工具（grep 所有 `HTMLResponse`）全量排查而非逐文件修。checkbox Form(True) 问题是 HTML 表单语义与 FastAPI 类型转换的常见坑，新增 Form 参数时应系统性检查
+- **遗留项**：
+  - R1 遗留：batch_pages 分页机制需重新设计以适配无限滚动
+  - R2 遗留：`human_click`/`human_type` 应在 message.py 中启用
+  - R2 遗留：`validate_boss_id()`/`validate_keywords()` 有定义但未在 CLI/Web 中接入
+  - R2 遗留：`get_selector()` 和 selectors.json 机制预留但未启用
+  - R2 遗留：BrowserManager 多标签页 API 预留但未使用
+  - R2 遗留：核心业务模块测试覆盖率低（auth/search/profile/message/pipeline 无测试）
+  - 新发现：`anti_detection.py` 整个模块无引用（3 个公共函数全部死代码）
+  - 新发现：`CheckpointManager.save()` 的 `company`/`mode`/`total_results` 参数从未被有效使用
+  - 新发现：Migration v2 添加 `retry_count` 列但 ORM 模型无此字段
+  - 新发现：Web 路由（search/candidates/messages）绕过 TaskQueue 直接操作浏览器，可能与 pipeline 冲突
+
+---
+
+## Review #5 - 2026-03-04
+
+**范围**: 全量扫描（全部 src/、config/、tests/、scripts/、root *.py）
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/web/routes/settings.py:36 | XSS：`JSONDecodeError` 的 `{e}` 未 `html.escape()` 直接注入 HTMLResponse | 已修复 |
+| 中等 | src/web/routes/settings.py:33-47 | 任意配置写入：无 schema 校验，可覆盖 `cdp_endpoint`、`rate_limits` 等安全关键项 | 已修复 |
+| 中等 | src/web/routes/messages.py:53 | XSS：`missing` 变量名列表未转义，可通过 templates PUT 路由注入 | 已修复 |
+| 中等 | src/modules/message.py:402-415 | JS 注入：`expect_id` 通过字符串拼接插入 `querySelector` 选择器，未用 `CSS.escape()` | 已修复 |
+| 中等 | src/web/routes/candidates.py:28 | LIKE 通配符：用户输入 `%`/`_` 未转义，搜索结果不准确 | 已修复 |
+| 中等 | src/core/browser.py:78-92 | `_ensure_lock()` lock 重建无互斥保护（R2 修复本身有竞态），多 coroutine 可同时创建新 lock | 已修复 |
+| 中等 | src/web/services/chrome_manager.py:83-84 | `httpx.AsyncClient` 每次健康检查创建新实例（10s 一次），不必要的资源开销 | 已修复 |
+| 轻微 | src/web/services/chrome_manager.py:193 | `send_signal(SIGTERM)` 改用 `terminate()` 更清晰跨平台 | 已修复 |
+
+### 修复内容
+- **S01 settings.py**: 添加 `import html`，错误消息用 `html.escape(str(e))` 转义；新增 `_REQUIRED_KEYS` 集合校验配置必须包含 `browser`/`rate_limits`/`search`/`pipeline`/`web` 五个顶层键；非 dict 类型直接拒绝
+- **M01 messages.py**: `missing` 变量名列表用 `html.escape()` 转义
+- **M02 message.py**: `querySelector` 选择器中 `expectId` 字符串拼接改为 `CSS.escape(expectId)` 防注入
+- **M03 candidates.py**: LIKE 查询前用 `replace` 转义 `%` 和 `_` 通配符
+- **M04 browser.py**: `_ensure_lock()` 增加 `with cls._init_lock` 双重检查锁（double-checked locking），防止多 coroutine 竞态
+- **M05 chrome_manager.py**: 新增 `_http_client` 持久实例和 `_get_http_client()` 方法；`_check_cdp_health` 复用 client；`stop()` 时 `aclose()` 清理
+- **L01 chrome_manager.py**: `send_signal(signal.SIGTERM)` 改为 `terminate()`；删除不再使用的 `import signal`
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/core/anti_detection.py | 整个文件删除（`human_scroll`/`human_click`/`human_type` 三个函数全项目零引用） | 死模块 |
+| src/core/browser.py:232-280 | 删除 `wait_for_new_tab`/`switch_to_primary_tab`/`close_current_tab` 三个方法（全项目零调用） | 未调用方法 |
+| src/core/browser.py:289-305 | 删除 `screenshot` 方法（全项目零调用） | 未调用方法 |
+| src/core/browser.py:10,12 | 删除不再需要的 `from pathlib import Path` 和 `from datetime import datetime` | 未使用 import |
+| src/web/services/chrome_manager.py:10 | 删除不再使用的 `import signal` | 未使用 import |
+
+### 测试结果
+- 81 个测试全部通过（0.58s）
+- 无回归问题
+
+### 复盘
+- **做得好的**：Settings 路由的 XSS + 任意配置写入是 R3/R4 全量修 XSS 时遗漏的盲区（settings 路由没有用户操作的错误消息模式，但 JSONDecodeError 仍可包含用户输入）；`_ensure_lock()` 的竞态是 R2 修复引入的新问题（修了依赖 `_loop` 私有属性的问题，但没加互斥），本次用双重检查锁彻底修复；`anti_detection.py` 作为 R2/R4 反复标记的死代码终于清理
+- **待改进的**：XSS 修复已经做了 4 轮（R3: 6 处、R4: 2 处、R5: 2 处），说明逐文件修复容易遗漏。建议后续新增路由时统一使用模板渲染，避免 `HTMLResponse(f'...')` 模式；Settings 的 schema 校验目前仅检查顶层 key 存在，未校验值的类型和范围
+- **遗留项**：
+  - R1 遗留：batch_pages 分页机制需重新设计以适配无限滚动
+  - R2 遗留：`validate_boss_id()`/`validate_keywords()` 有定义有测试但未在 CLI/Web 中接入
+  - R2 遗留：核心业务模块测试覆盖率低（auth/search/profile/message/pipeline 无测试）
+  - R4 遗留：CheckpointManager.save() 的 `company` 参数始终传 `()`
+  - R4 遗留：Migration v2 添加 `retry_count` 列但 Message ORM 无此字段
+  - R4 遗留：Web 路由（search/candidates/messages）绕过 TaskQueue 直接操作浏览器，可能与 pipeline 冲突
+  - Settings schema 校验仅顶层 key，未校验值类型和范围
+
+---

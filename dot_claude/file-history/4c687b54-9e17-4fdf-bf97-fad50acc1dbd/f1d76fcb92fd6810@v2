@@ -1,0 +1,378 @@
+"""Profile extraction module for Boss直聘.
+
+Extracts candidate profile information from Boss直聘.
+
+CRITICAL LIMITATION (verified 2026-03-03):
+Profile details in the resume overlay are wasm-rendered — the DOM inside
+.resume-detail-wrap is empty. We CANNOT extract detailed resume via DOM.
+
+Profile data sources:
+1. Search card data (from searchFrame iframe) — best source for basic info
+2. Resume overlay header/footer — job position, contact status
+3. Chat page conversation — limited info
+
+The extract_profile function now primarily uses search card data
+and supplements with whatever is available from the resume overlay.
+"""
+
+from typing import Optional, Dict, Any
+
+from patchright.async_api import Page, Frame
+from loguru import logger
+from rich.console import Console
+from rich.panel import Panel
+
+from src.core.browser import BrowserManager, get_browser_manager
+from src.utils.delays import async_random_delay
+from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+from src.utils.captcha import check_captcha
+from src.utils.retry import retry_navigation
+from src.models.database import Candidate, get_db_manager
+from src.exceptions.errors import ExtractionError
+
+console = Console()
+
+
+# JavaScript extraction for candidate profile from search card (inside searchFrame iframe).
+# This extracts all available data from the card since resume detail is wasm-rendered.
+EXTRACT_PROFILE_FROM_CARD_JS = """
+(expectId) => {
+    const link = document.querySelector('a[data-expect="' + expectId + '"]');
+    if (!link) return null;
+
+    const card = link.closest('.geek-info-card');
+    if (!card) return null;
+
+    const result = {
+        name: '',
+        title: '',
+        company: '',
+        location: '',
+        salary_expect: '',
+        work_years: '',
+        education_level: '',
+        basic_info: {},
+        education: [],
+        work_experience: [],
+        skills: []
+    };
+
+    // Name
+    const nameEl = card.querySelector('.name-label');
+    result.name = nameEl ? nameEl.innerText.trim() : '';
+
+    // Info labels: age, work years, education, job status, salary
+    const infoLabels = card.querySelectorAll('.info-labels > .label-text');
+    const infoTexts = Array.from(infoLabels).map(el => el.innerText.trim());
+
+    for (const text of infoTexts) {
+        if (text.includes('岁')) {
+            result.basic_info.age = text;
+        } else if (text.includes('年') && !text.includes('岁')) {
+            result.work_years = text;
+            result.basic_info.work_years = text;
+        } else if (['博士', '硕士', '本科', '大专', '中专', '高中'].some(d => text.includes(d))) {
+            result.education_level = text;
+            result.basic_info.education = text;
+        } else if (text.includes('在职') || text.includes('离职') || text.includes('求职')) {
+            result.basic_info.job_status = text;
+        } else if (text.includes('K') || text.includes('k')) {
+            result.salary_expect = text;
+        }
+    }
+
+    // Active status
+    const activeEl = card.querySelector('.active-desc-text');
+    if (activeEl) result.basic_info.active_status = activeEl.innerText.trim();
+
+    // Labels (e.g. "热搜")
+    const labelEls = card.querySelectorAll('.card-label');
+    result.basic_info.labels = Array.from(labelEls).map(el => el.innerText.trim()).filter(Boolean);
+
+    // Self description
+    const detailEl = card.querySelector('.info-detail');
+    if (detailEl) result.basic_info.self_description = detailEl.innerText.trim();
+
+    // Expect city
+    const expectCityEls = card.querySelectorAll('.expect-exp-box .t-tooltip-slot');
+    result.location = Array.from(expectCityEls).map(el => el.innerText.trim()).filter(Boolean).join(' ');
+
+    // Work experience
+    const workExpEls = card.querySelectorAll('.work-exp-box .t-tooltip-slot');
+    const workTexts = Array.from(workExpEls).map(el => el.innerText.trim()).filter(Boolean);
+    if (workTexts.length >= 1) {
+        result.company = workTexts[0];
+        result.title = workTexts[1] || '';
+        result.work_experience.push({
+            company: workTexts[0],
+            title: workTexts[1] || ''
+        });
+    }
+
+    // Education
+    const eduEls = card.querySelectorAll('.edu-exp-box .t-tooltip-slot');
+    const eduTexts = Array.from(eduEls).map(el => el.innerText.trim()).filter(Boolean);
+    if (eduTexts.length >= 1) {
+        result.education.push({
+            school: eduTexts[0],
+            major: eduTexts[1] || ''
+        });
+    }
+
+    // Elite flag
+    result.basic_info.is_elite = link.dataset.elitegeek === '1';
+
+    return result;
+}
+"""
+
+
+# JavaScript extraction for resume overlay (main page DOM).
+# Limited data since resume content is wasm-rendered.
+EXTRACT_OVERLAY_JS = """
+() => {
+    const dialog = document.querySelector('.dialog-wrap.active .dialog-lib-resume');
+    if (!dialog) return null;
+
+    const result = {};
+
+    // Position info from footer
+    const positionEl = dialog.querySelector('.position-name');
+    if (positionEl) result.chat_position = positionEl.innerText.trim();
+
+    // Chat history from right panel
+    const historyEls = dialog.querySelectorAll('.chat-history-process .action');
+    result.chat_history = Array.from(historyEls).slice(0, 5).map(el => el.innerText.trim());
+
+    // Contact button text
+    const contactBtn = dialog.querySelector('.btn-getcontact');
+    if (contactBtn) result.contact_status = contactBtn.innerText.trim();
+
+    return result;
+}
+"""
+
+
+async def extract_profile(
+    boss_id: str,
+    browser: Optional[BrowserManager] = None,
+) -> Dict[str, Any]:
+    """
+    Extract detailed profile for a candidate.
+
+    Uses search card data as the primary source since the resume
+    overlay is wasm-rendered and has empty DOM.
+
+    Args:
+        boss_id: Boss直聘 candidate ID (e.g., "zp_81137184")
+        browser: Browser manager instance
+
+    Returns:
+        Dictionary with profile data
+
+    Raises:
+        ExtractionError: If profile extraction fails
+    """
+    if browser is None:
+        browser = get_browser_manager()
+
+    page = browser.page
+    if not page:
+        page = await browser.start()
+
+    rate_limiter = get_rate_limiter()
+    db_manager = get_db_manager()
+
+    # Rate limit check
+    await async_check_rate_limit('view_profile')
+
+    expect_id = boss_id.replace('zp_', '') if boss_id.startswith('zp_') else boss_id
+
+    try:
+        profile_data = None
+
+        # Strategy 1: Extract from search card in iframe (best source)
+        search_frame = page.frame(name='searchFrame')
+        if not search_frame:
+            for f in page.frames:
+                if 'frame/search' in (f.url or ''):
+                    search_frame = f
+                    break
+
+        if search_frame:
+            profile_data = await search_frame.evaluate(EXTRACT_PROFILE_FROM_CARD_JS, expect_id)
+
+        # Strategy 2: If not on search page, navigate there
+        if not profile_data:
+            await retry_navigation(page, 'https://www.zhipin.com/web/chat/search',
+                                   wait_until='domcontentloaded')
+            await async_random_delay('page_load')
+            await check_captcha(page, report_to_rate_limiter=True)
+
+            search_frame = page.frame(name='searchFrame')
+            if not search_frame:
+                for f in page.frames:
+                    if 'frame/search' in (f.url or ''):
+                        search_frame = f
+                        break
+
+            if search_frame:
+                profile_data = await search_frame.evaluate(EXTRACT_PROFILE_FROM_CARD_JS, expect_id)
+
+        # Strategy 3: Use database data as fallback
+        if not profile_data:
+            with db_manager.session_scope() as session:
+                candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+                if candidate:
+                    profile_data = {
+                        'name': candidate.name or '',
+                        'title': candidate.title or '',
+                        'company': candidate.company or '',
+                        'location': candidate.location or '',
+                        'salary_expect': candidate.salary_expect or '',
+                        'work_years': candidate.work_years or '',
+                        'education_level': candidate.education_level or '',
+                        'basic_info': candidate.basic_info or {},
+                        'education': candidate.education or [],
+                        'work_experience': candidate.work_experience or [],
+                        'skills': candidate.skills or [],
+                    }
+
+        if not profile_data:
+            raise ExtractionError(f"No profile data found for {boss_id}")
+
+        # Try to supplement with overlay data (if resume dialog is open)
+        try:
+            overlay_data = await page.evaluate(EXTRACT_OVERLAY_JS)
+            if overlay_data:
+                profile_data.setdefault('basic_info', {})
+                if overlay_data.get('chat_position'):
+                    profile_data['basic_info']['chat_position'] = overlay_data['chat_position']
+                if overlay_data.get('contact_status'):
+                    profile_data['basic_info']['contact_status'] = overlay_data['contact_status']
+                if overlay_data.get('chat_history'):
+                    profile_data['basic_info']['chat_history'] = overlay_data['chat_history']
+        except Exception:
+            pass  # Overlay data is supplementary, not critical
+
+        # Log action
+        rate_limiter.log_action('view_profile', {'boss_id': boss_id})
+
+        # Update database
+        _update_profile_in_db(boss_id, profile_data, db_manager)
+
+        # Display profile
+        _display_profile(boss_id, profile_data)
+
+        return profile_data
+
+    except ExtractionError:
+        raise
+    except Exception as e:
+        logger.error(f"Error extracting profile for {boss_id}: {e}")
+        raise ExtractionError(f"Failed to extract profile for {boss_id}: {e}")
+
+
+def _update_profile_in_db(boss_id: str, profile_data: Dict, db_manager) -> None:
+    """Update candidate profile in the database."""
+    with db_manager.session_scope() as session:
+        candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+
+        if not candidate:
+            candidate = Candidate(boss_id=boss_id)
+            session.add(candidate)
+
+        # Update fields
+        candidate.name = profile_data.get('name') or candidate.name
+        candidate.title = profile_data.get('title') or candidate.title
+        candidate.company = profile_data.get('company') or candidate.company
+        candidate.location = profile_data.get('location') or candidate.location
+        candidate.salary_expect = profile_data.get('salary_expect') or candidate.salary_expect
+        candidate.work_years = profile_data.get('work_years') or candidate.work_years
+        candidate.education_level = profile_data.get('education_level') or candidate.education_level
+        candidate.basic_info = profile_data.get('basic_info')
+        candidate.education = profile_data.get('education')
+        candidate.work_experience = profile_data.get('work_experience')
+        candidate.skills = profile_data.get('skills')
+
+
+def _display_profile(boss_id: str, profile_data: Dict) -> None:
+    """Display extracted profile in Rich format."""
+    name = profile_data.get('name', 'Unknown')
+    title = profile_data.get('title', '')
+    company = profile_data.get('company', '')
+    location = profile_data.get('location', '')
+    salary = profile_data.get('salary_expect', '')
+    work_years = profile_data.get('work_years', '')
+    education_level = profile_data.get('education_level', '')
+
+    # Header
+    header = f"[bold]{name}[/bold]"
+    if title:
+        header += f" - {title}"
+    if company:
+        header += f" @ {company}"
+
+    console.print(Panel(header, title=f"Profile: {boss_id}", border_style="green"))
+
+    # Basic info
+    info_parts = []
+    if location:
+        info_parts.append(f"Location: {location}")
+    if salary:
+        info_parts.append(f"Expected Salary: {salary}")
+    if work_years:
+        info_parts.append(f"Experience: {work_years}")
+    if education_level:
+        info_parts.append(f"Education: {education_level}")
+
+    basic_info = profile_data.get('basic_info', {})
+    if basic_info.get('age'):
+        info_parts.append(f"Age: {basic_info['age']}")
+    if basic_info.get('job_status'):
+        info_parts.append(f"Status: {basic_info['job_status']}")
+    if basic_info.get('active_status'):
+        info_parts.append(f"Active: {basic_info['active_status']}")
+
+    if info_parts:
+        console.print("  " + " | ".join(info_parts))
+
+    # Education
+    education = profile_data.get('education', [])
+    if education:
+        console.print("\n  [cyan]Education:[/cyan]")
+        for edu in education:
+            parts = []
+            if edu.get('school'):
+                parts.append(edu['school'])
+            if edu.get('degree'):
+                parts.append(edu['degree'])
+            if edu.get('major'):
+                parts.append(edu['major'])
+            console.print(f"    - {' | '.join(parts)}")
+
+    # Work experience
+    work_exp = profile_data.get('work_experience', [])
+    if work_exp:
+        console.print("\n  [cyan]Work Experience:[/cyan]")
+        for work in work_exp:
+            line = ""
+            if work.get('company'):
+                line += work['company']
+            if work.get('title'):
+                line += f" - {work['title']}"
+            if work.get('period'):
+                line += f" ({work['period']})"
+            console.print(f"    - {line}")
+
+    # Skills
+    skills = profile_data.get('skills', [])
+    if skills:
+        console.print(f"\n  [cyan]Skills:[/cyan] {', '.join(skills)}")
+
+    # Self description
+    if basic_info.get('self_description'):
+        desc = basic_info['self_description'][:200]
+        console.print(f"\n  [cyan]Self Description:[/cyan]\n    {desc}")
+
+    console.print()

@@ -1,0 +1,157 @@
+     1→     1→     1→"""Session management for persistent browser sessions.
+     2→     2→     2→
+     3→     3→     3→Handles saving and loading browser sessions (cookies, localStorage)
+     4→     4→     4→to enable resuming without re-login.
+     5→     5→     5→"""
+     6→     6→     6→
+     7→     7→     7→import json
+     8→     8→     8→import os
+     9→     9→     9→import stat
+    10→    10→    10→import tempfile
+    11→    11→    11→from pathlib import Path
+    12→    12→    12→from datetime import datetime, timezone
+    13→    13→    13→from typing import Optional
+    14→    14→    14→
+    15→    15→    15→from cryptography.fernet import Fernet
+    16→    16→    16→from patchright.async_api import BrowserContext
+    17→    17→    17→from loguru import logger
+    18→    18→    18→
+    19→    19→    19→from src.utils.config import get_config
+    20→    20→    20→
+    21→    21→    21→
+    22→    22→    22→class SessionManager:
+    23→    23→    23→    """Manages browser session persistence."""
+    24→    24→    24→
+    25→    25→    25→    def __init__(self, session_path: Optional[str] = None):
+    26→    26→    26→        if session_path is None:
+    27→    27→    27→            config = get_config()
+    28→    28→    28→            session_path = config.get('data.session_path', 'data/.session/boss_session.json')
+    29→    29→    29→
+    30→    30→    30→        self.session_path = Path(session_path)
+    31→    31→    31→        self._key_path = self.session_path.parent / '.session_key'
+    32→    32→    32→        self._fernet: Optional[Fernet] = None
+    33→    33→    33→        self._ensure_session_dir()
+    34→    34→    34→
+    35→    35→    35→    def _ensure_session_dir(self) -> None:
+    36→    36→    36→        """Ensure session directory exists with restrictive permissions."""
+    37→    37→    37→        session_dir = self.session_path.parent
+    38→    38→    38→        session_dir.mkdir(parents=True, exist_ok=True)
+    39→    39→    39→        try:
+    40→    40→    40→            os.chmod(session_dir, stat.S_IRWXU)
+    41→    41→    41→        except OSError:
+    42→    42→    42→            logger.warning("Could not set restrictive permissions on session directory")
+    43→    43→    43→
+    44→    44→    44→    def _get_fernet(self) -> Fernet:
+    45→    45→    45→        """Get or create Fernet encryption instance."""
+    46→    46→    46→        if self._fernet is not None:
+    47→    47→    47→            return self._fernet
+    48→    48→    48→
+    49→    49→    49→        if self._key_path.exists():
+    50→    50→    50→            key = self._key_path.read_bytes().strip()
+    51→    51→    51→        else:
+    52→    52→    52→            key = Fernet.generate_key()
+    53→    53→    53→            fd = os.open(str(self._key_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    54→    54→    54→            try:
+    55→    55→    55→                os.write(fd, key)
+    56→    56→    56→            finally:
+    57→    57→    57→                os.close(fd)
+    58→    58→    58→
+    59→    59→    59→        self._fernet = Fernet(key)
+    60→    60→    60→        return self._fernet
+    61→    61→    61→
+    62→    62→    62→    def _decrypt_session_data(self) -> dict:
+    63→    63→    63→        """Decrypt and parse the stored session file."""
+    64→    64→    64→        encrypted = self.session_path.read_bytes()
+    65→    65→    65→        plaintext = self._get_fernet().decrypt(encrypted)
+    66→    66→    66→        return json.loads(plaintext.decode('utf-8'))
+    67→    67→    67→
+    68→    68→    68→    def _write_secure(self, path: Path, data: bytes) -> None:
+    69→    69→    69→        """Atomically write data to file with owner-only permissions (0600)."""
+    70→    70→    70→        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    71→    71→    71→        try:
+    72→    72→    72→            os.write(tmp_fd, data)
+    73→    73→    73→            os.close(tmp_fd)
+    74→    74→    74→            tmp_fd = -1
+    75→    75→    75→            os.chmod(tmp_path, 0o600)
+    76→    76→    76→            os.replace(tmp_path, str(path))
+    77→    77→    77→        except BaseException:
+    78→    78→    78→            if tmp_fd >= 0:
+    79→    79→    79→                os.close(tmp_fd)
+    80→    80→    80→            try:
+    81→    81→    81→                os.unlink(tmp_path)
+    82→    82→    82→            except OSError:
+    83→    83→    83→                pass
+    84→    84→    84→            raise
+    85→    85→    85→
+    86→    86→    86→    def has_saved_session(self) -> bool:
+    87→    87→    87→        return self.session_path.exists()
+    88→    88→    88→
+    89→    89→    89→    async def save(self, context: BrowserContext) -> None:
+    90→    90→    90→        try:
+    91→    91→    91→            storage_state = await context.storage_state()
+    92→    92→    92→            session_data = {
+    93→    93→    93→                'saved_at': datetime.now(timezone.utc).isoformat(),
+    94→    94→    94→                'storage_state': storage_state
+    95→    95→    95→            }
+    96→    96→    96→            plaintext = json.dumps(session_data, ensure_ascii=False).encode('utf-8')
+    97→    97→    97→            encrypted = self._get_fernet().encrypt(plaintext)
+    98→    98→    98→            self._write_secure(self.session_path, encrypted)
+    99→    99→    99→            logger.info(f"Session saved (encrypted) to {self.session_path}")
+   100→   100→   100→        except Exception as e:
+   101→   101→   101→            logger.error(f"Failed to save session: {e}")
+   102→   102→   102→            raise
+   103→   103→   103→
+   104→   104→   104→    async def clear(self) -> None:
+   105→   105→   105→        """Clear saved session and encryption key."""
+   106→   106→   106→        if self.session_path.exists():
+   107→   107→   107→            self.session_path.unlink()
+   108→   108→   108→            logger.info("Session cleared")
+   109→   109→   109→
+   110→   110→   110→        state_path = self.session_path.parent / 'storage_state.json'
+   111→   111→   111→        if state_path.exists():
+   112→   112→   112→            state_path.unlink()
+   113→   113→   113→
+   114→   114→   114→        if self._key_path.exists():
+   115→   115→   115→            self._key_path.unlink()
+   116→   116→   116→        self._fernet = None
+   117→   117→   117→
+   118→   118→   118→    def get_session_info(self) -> Optional[dict]:
+   119→   119→   119→        if not self.has_saved_session():
+   120→   120→   120→            return None
+   121→   121→   121→
+   122→   122→   122→        try:
+   123→   123→   123→            session_data = self._decrypt_session_data()
+   124→   124→   124→            saved_at = session_data.get('saved_at')
+   125→   125→   125→            storage_state = session_data.get('storage_state', {})
+   126→   126→   126→            cookies = storage_state.get('cookies', [])
+   127→   127→   127→
+   128→   128→   128→            if saved_at:
+   129→   129→   129→                saved_datetime = datetime.fromisoformat(saved_at)
+   130→   130→   130→                if saved_datetime.tzinfo is None:
+   131→   131→   131→                    saved_datetime = saved_datetime.replace(tzinfo=timezone.utc)
+   132→   132→   132→                age = datetime.now(timezone.utc) - saved_datetime
+   133→   133→   133→                age_str = f"{age.days}d {age.seconds // 3600}h"
+   134→   134→   134→            else:
+   135→   135→   135→                age_str = "unknown"
+   136→   136→   136→
+   137→   137→   137→            return {
+   138→   138→   138→                'saved_at': saved_at,
+   139→   139→   139→                'age': age_str,
+   140→   140→   140→                'cookie_count': len(cookies),
+   141→   141→   141→            }
+   142→   142→   142→        except Exception as e:
+   143→   143→   143→            logger.error(f"Failed to get session info: {e}")
+   144→   144→   144→            return None
+   145→   145→   145→
+   146→   146→   146→
+   147→   147→   147→# Global session manager instance
+   148→   148→   148→_session_manager = None
+   149→   149→   149→
+   150→   150→   150→
+   151→   151→   151→def get_session_manager() -> SessionManager:
+   152→   152→   152→    """Get global session manager instance."""
+   153→   153→   153→    global _session_manager
+   154→   154→   154→    if _session_manager is None:
+   155→   155→   155→        _session_manager = SessionManager()
+   156→   156→   156→    return _session_manager
+   157→   157→   157→

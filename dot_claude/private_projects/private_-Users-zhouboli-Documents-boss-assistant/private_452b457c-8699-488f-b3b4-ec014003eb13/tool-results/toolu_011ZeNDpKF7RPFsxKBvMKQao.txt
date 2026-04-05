@@ -1,0 +1,79 @@
+     1→"""Shared captcha detection utility.
+     2→
+     3→Detects captcha elements on page and pauses for manual resolution.
+     4→Boss直聘 may use Geetest slider captcha or similar mechanisms.
+     5→
+     6→In Web mode, emits an SSE notification via emit_progress and polls
+     7→until the captcha element disappears (user solves it in Chrome).
+     8→"""
+     9→
+    10→import asyncio
+    11→
+    12→from patchright.async_api import Page
+    13→from loguru import logger
+    14→
+    15→from src.utils.progress import emit_progress
+    16→
+    17→
+    18→CAPTCHA_SELECTORS = [
+    19→    '[class*="captcha"]',
+    20→    '[class*="verify"]',
+    21→    '[id*="captcha"]',
+    22→    '[class*="slider"]',
+    23→    '[class*="geetest"]',
+    24→    'iframe[src*="captcha"]',
+    25→    '[class*="verify-wrap"]',
+    26→    '[class*="slide-verify"]',
+    27→]
+    28→
+    29→
+    30→async def _captcha_still_visible(page: Page) -> bool:
+    31→    """Check if any captcha selector is still visible on the page."""
+    32→    for selector in CAPTCHA_SELECTORS:
+    33→        try:
+    34→            elem = await page.query_selector(selector)
+    35→            if elem and await elem.is_visible():
+    36→                return True
+    37→        except Exception as e:
+    38→            logger.debug(f"Captcha selector check failed for '{selector}': {e}")
+    39→            continue
+    40→    return False
+    41→
+    42→
+    43→async def check_captcha(
+    44→    page: Page,
+    45→    report_to_rate_limiter: bool = False,
+    46→) -> None:
+    47→    """Detect captcha elements on page and pause for manual resolution.
+    48→
+    49→    In Web mode (emit_progress callback set), polls until captcha disappears.
+    50→    In CLI mode, blocks on stdin for user to solve manually.
+    51→    """
+    52→    for selector in CAPTCHA_SELECTORS:
+    53→        try:
+    54→            elem = await page.query_selector(selector)
+    55→            if elem and await elem.is_visible():
+    56→                if report_to_rate_limiter:
+    57→                    from src.utils.rate_limiter import get_rate_limiter
+    58→                    rate_limiter = get_rate_limiter()
+    59→                    rate_limiter.report_captcha()
+    60→
+    61→                emit_progress("captcha_detected")
+    62→                logger.warning("Captcha detected — waiting for user to solve in Chrome")
+    63→
+    64→                # Poll until captcha disappears (works for both Web and CLI)
+    65→                max_wait = 300  # 5 minutes
+    66→                elapsed = 0
+    67→                while elapsed < max_wait:
+    68→                    await asyncio.sleep(3)
+    69→                    elapsed += 3
+    70→                    if not await _captcha_still_visible(page):
+    71→                        logger.info("Captcha resolved")
+    72→                        await page.wait_for_timeout(2000)
+    73→                        return
+    74→                logger.error("Captcha timeout after 5 minutes")
+    75→                return
+    76→        except Exception as e:
+    77→            logger.debug(f"Captcha detection failed for '{selector}': {e}")
+    78→            continue
+    79→

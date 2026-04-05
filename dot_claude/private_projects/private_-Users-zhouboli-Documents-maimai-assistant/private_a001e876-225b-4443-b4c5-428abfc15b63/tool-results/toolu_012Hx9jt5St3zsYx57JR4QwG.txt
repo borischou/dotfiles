@@ -1,0 +1,59 @@
+     1→[tool.poetry]
+     2→name = "maimai-assistant"
+     3→version = "0.1.0"
+     4→description = "Semi-automated recruitment assistant for Maimai platform"
+     5→authors = ["Your Name <your.email@example.com>"]
+     6→readme = "README.md"
+     7→license = "MIT"
+     8→
+     9→[tool.poetry.dependencies]
+    10→python = "^3.10"
+    11→patchright = "^1.5.0"
+    12→click = "^8.1.7"
+    13→rich = "^13.7.0"
+    14→questionary = "^2.0.1"
+    15→pandas = "^2.2.0"
+    16→openpyxl = "^3.1.2"
+    17→sqlalchemy = "^2.0.25"
+    18→loguru = "^0.7.2"
+    19→pydantic = "^2.5.3"
+    20→tenacity = "^8.2.3"
+    21→python-dotenv = "^1.0.0"
+    22→faker = "^22.0.0"
+    23→httpx = "^0.26.0"
+    24→emunium = "^0.3.0"
+    25→cryptography = ">=41.0.0"
+    26→opencv-python-headless = "^4.9.0"
+    27→
+    28→[tool.poetry.dev-dependencies]
+    29→pytest = "^7.4.3"
+    30→pytest-asyncio = "^0.21.1"
+    31→black = "^23.12.1"
+    32→ruff = "^0.1.9"
+    33→mypy = "^1.8.0"
+    34→
+    35→[tool.poetry.scripts]
+    36→maimai = "src.cli.main:cli"
+    37→
+    38→[build-system]
+    39→requires = ["poetry-core"]
+    40→build-backend = "poetry.core.masonry.api"
+    41→
+    42→[tool.black]
+    43→line-length = 100
+    44→target-version = ['py310']
+    45→
+    46→[tool.ruff]
+    47→line-length = 100
+    48→target-version = "py310"
+    49→
+    50→[tool.mypy]
+    51→python_version = "3.10"
+    52→warn_return_any = true
+    53→warn_unused_configs = true
+    54→disallow_untyped_defs = false
+    55→
+    56→[tool.pytest.ini_options]
+    57→asyncio_mode = "auto"
+    58→testpaths = ["tests"]
+    59→

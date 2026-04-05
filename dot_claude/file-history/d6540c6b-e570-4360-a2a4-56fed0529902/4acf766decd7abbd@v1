@@ -1,0 +1,96 @@
+# CLAUDE.md
+
+## Project Overview
+
+脉脉半自动招聘助手。通过 CDP 连接用户 Chrome，自动化搜索、提取、触达候选人。两种使用方式：CLI（单人终端）和 Web（团队浏览器访问），共享底层模块。
+
+## Quick Start
+
+```bash
+pip install -r requirements.txt
+patchright install chrome
+python scripts/setup_db.py
+
+# 1. 启动 Chrome（手动登录脉脉）
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+    --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile
+
+# 2a. Web 服务（团队使用）
+python -m src.web.app --host 0.0.0.0 --port 8000
+# 访问 http://localhost:8000 或 http://<mac-ip>:8000
+
+# 2b. CLI（单人使用，不能和 Web 同时跑）
+python src/cli/main.py --help
+python src/cli/main.py search -k "前端" -p 2
+python src/cli/main.py pipeline -k "前端" -t greeting -p 2
+python src/cli/main.py pipeline -k "算法" -t ganlin -m talent_bank --min-years 5 --exchange-phone -p 2
+```
+
+## Architecture
+
+```
+CLI (Click)  /  Web (FastAPI + Jinja2 + WebSocket)
+                     ├── task_queue.py   串行浏览器任务队列
+                     └── progress.py     contextvars 进度回调
+                 ↓
+Modules    → src/modules/ (auth, search, profile, message, export)
+Services   → src/services/pipeline.py (SearchMode: SEARCH_CENTER | ENTERPRISE | TALENT_BANK)
+Core       → src/core/ (browser CDP singleton, session, anti_detection)
+Infra      → SQLAlchemy (WAL mode) + config (3 JSON) + utils (rate_limiter, delays, retry)
+```
+
+### 三种搜索路径
+
+| 路径 | CLI 参数 | 入口 | 消息发送 | 特有功能 |
+|------|---------|------|---------|---------|
+| 搜索中心 (Path A) | `-m search_center` | 首页搜索框 | 跳转聊天页 | 地点筛选 |
+| 企业直聘 (Path B) | `-m enterprise` | "招聘"按钮→新 tab | tab 内联发送 | 公司 UI 筛选 |
+| 人才银行 (Path C) | `-m talent_bank` | "招人"→"搜索" tab | SPA 内联发送 | `--min-years`、`--exchange-phone/wechat` |
+
+## Web API
+
+浏览器操作走队列，返回 `task_id`，通过 WebSocket 或轮询获取结果。
+
+| Method | Endpoint | 说明 |
+|--------|----------|------|
+| GET | `/api/auth/status` | Chrome 连接 + 登录状态 |
+| POST | `/api/search` | 搜索（排队） |
+| POST | `/api/pipeline` | Pipeline：搜索+发消息（排队） |
+| POST | `/api/pipeline/{id}/confirm` | 手动模式确认候选人 |
+| POST | `/api/message`, `/api/message/batch` | 发消息（排队） |
+| GET | `/api/candidates`, `/api/messages` | DB 直查，分页 |
+| GET | `/api/templates` | 消息模板列表 |
+| GET | `/api/status`, `/api/queue`, `/api/task/{id}` | 系统/队列/任务状态 |
+| POST | `/api/export` | 导出 xlsx/csv |
+| WS | `/ws/task/{id}`, `/ws/global` | 实时进度推送 |
+
+页面：`/`(Dashboard) `/data`(Candidates+Messages)
+
+## Key Constraints
+
+- **CDP 模式** — 连接用户 Chrome（`--remote-debugging-port=9222`），`close()` 只断开不关浏览器
+- **CLI / Web 互斥** — 共享同一个 CDP 连接
+- **浏览器串行** — Web 模式所有浏览器操作走 `TaskQueue`（优先级：HIGH > NORMAL > LOW）
+- **DB** — `session_scope()` 上下文管理器；QueuePool + WAL 模式支持并发读
+- **asyncio** — CLI 用 `asyncio.run()`；Web 共享 FastAPI 事件循环；用 `get_running_loop()`
+- **进度回调** — `emit_progress()` 基于 `contextvars`，CLI 模式静默忽略
+- **Rate limit** — `config/settings.json` 可配，自适应降速（检测到验证码自动收紧）
+- **搜索 ID** — 优先 `contactcard_{user_id}` 真实 ID（`mm_` 前缀），fallback hash(name+company+title)
+- **导航重试** — `page.goto()` 走 `retry_navigation()`（tenacity, 3次, 指数退避）
+- **iframe 交互** — IM 聊天 iframe 内用 `frame.evaluate()` + JS click（Playwright 高级选择器在 iframe 中不可靠）
+- **React 受控组件** — textarea 填充用 JS native setter（`HTMLTextAreaElement.prototype.value.set` + dispatchEvent）
+- **Emunium CDP fallback** — viewport_size=None 时 Emunium 失败，自动 fallback 到原生 click/type
+- **Python 3.9+**
+
+## Config
+
+- `config/settings.json` — 运行时配置（浏览器、延迟、路径）
+- `config/selectors.json` — CSS 选择器（主要提取逻辑用 `page.evaluate()`）
+- `config/message_templates.json` — 消息模板 + 变量替换
+
+## Testing
+
+```bash
+pytest --cov=src tests/
+black src/ tests/ && ruff check src/ tests/ && mypy src/
+```

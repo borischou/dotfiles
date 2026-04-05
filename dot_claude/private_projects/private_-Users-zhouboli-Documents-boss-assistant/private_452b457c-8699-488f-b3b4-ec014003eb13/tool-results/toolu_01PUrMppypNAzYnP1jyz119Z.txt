@@ -1,0 +1,50 @@
+     1→"""Settings routes — view and edit configuration."""
+     2→
+     3→import json
+     4→from pathlib import Path
+     5→
+     6→from fastapi import APIRouter, Request, Form
+     7→from fastapi.responses import HTMLResponse, RedirectResponse
+     8→
+     9→from src.web.app import templates
+    10→from src.utils.config import get_config
+    11→
+    12→router = APIRouter()
+    13→
+    14→
+    15→@router.get("/", response_class=HTMLResponse)
+    16→async def settings_page(request: Request):
+    17→    """Render settings page with current configuration."""
+    18→    config = get_config()
+    19→
+    20→    return templates.TemplateResponse("settings.html", {
+    21→        "request": request,
+    22→        "settings": config._settings,
+    23→        "settings_json": json.dumps(config._settings, ensure_ascii=False, indent=2),
+    24→    })
+    25→
+    26→
+    27→@router.post("/")
+    28→async def save_settings(request: Request, settings_json: str = Form(...)):
+    29→    """Save settings to disk."""
+    30→    config = get_config()
+    31→
+    32→    try:
+    33→        new_settings = json.loads(settings_json)
+    34→    except json.JSONDecodeError as e:
+    35→        return HTMLResponse(
+    36→            f'<p><mark>JSON 格式错误: {e}</mark></p>',
+    37→            status_code=400,
+    38→        )
+    39→
+    40→    # Update in-memory
+    41→    config._settings = new_settings
+    42→
+    43→    # Persist to disk
+    44→    settings_path = Path(config.config_dir) / "settings.json"
+    45→    with open(settings_path, 'w', encoding='utf-8') as f:
+    46→        json.dump(new_settings, f, ensure_ascii=False, indent=2)
+    47→        f.write('\n')
+    48→
+    49→    return RedirectResponse(url="/settings", status_code=303)
+    50→

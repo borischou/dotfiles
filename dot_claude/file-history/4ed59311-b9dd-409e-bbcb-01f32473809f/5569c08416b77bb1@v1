@@ -1,0 +1,67 @@
+"""Pytest configuration and fixtures."""
+
+import pytest
+import sys
+from pathlib import Path
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.models.database import Base, DatabaseManager
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+
+@pytest.fixture(scope='session')
+def test_db():
+    """Create a test database."""
+    engine = create_engine('sqlite:///:memory:')
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    yield Session
+    Base.metadata.drop_all(engine)
+
+
+@pytest.fixture
+def db_session(test_db):
+    """Provide a database session for a test."""
+    session = test_db()
+    yield session
+    session.rollback()
+    session.close()
+
+
+@pytest.fixture
+def sample_candidate_data():
+    """Sample candidate data for testing."""
+    return {
+        'maimai_id': '123456',
+        'name': '张三',
+        'title': '高级前端工程师',
+        'company': '阿里巴巴',
+        'location': '杭州',
+        'profile_url': 'https://maimai.cn/contact/123456',
+        'basic_info': {
+            'experience_years': 5,
+            'current_salary': '50-60万'
+        },
+        'education': [
+            {
+                'school': '浙江大学',
+                'degree': '本科',
+                'major': '计算机科学',
+                'start_date': '2015-09',
+                'end_date': '2019-06'
+            }
+        ],
+        'work_experience': [
+            {
+                'company': '阿里巴巴',
+                'position': '高级前端工程师',
+                'start_date': '2021-07',
+                'end_date': 'present',
+                'description': '负责前端架构设计'
+            }
+        ],
+        'skills': ['React', 'Vue', 'TypeScript', 'Node.js']
+    }

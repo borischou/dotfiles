@@ -1,0 +1,124 @@
+"""Smart filtering utilities for candidates.
+
+自动过滤低质量候选人，提升搜索效率。
+"""
+
+from typing import List
+from loguru import logger
+
+
+def is_recruiter(title: str) -> bool:
+    """
+    判断是否是 HR/猎头.
+
+    Args:
+        title: 职位名称
+
+    Returns:
+        True if is recruiter
+    """
+    if not title:
+        return False
+
+    title_lower = title.lower()
+    hr_keywords = [
+        '招聘', 'hr', 'hrbp', '人力', '猎头', 'recruiter',
+        'headhunter', '人事', 'talent acquisition',
+        'hr manager', 'hr director', '人力资源',
+    ]
+
+    return any(kw in title_lower for kw in hr_keywords)
+
+
+
+def filter_candidates(
+    candidates: List[dict],
+    auto_filter: bool = True,
+    include_recruiters: bool = False
+) -> List[dict]:
+    """
+    智能过滤候选人列表.
+
+    Args:
+        candidates: List of candidate dicts
+        auto_filter: Enable auto filtering (default True)
+        include_recruiters: If True, don't filter out recruiters
+
+    Returns:
+        Filtered candidate list
+    """
+    if not auto_filter:
+        return candidates
+
+    filtered = []
+    stats = {
+        'hash_id': 0,
+        'incomplete': 0,
+        'recruiter': 0,
+    }
+
+    for c in candidates:
+        # Check ID
+        if not c.get('maimai_id', '').startswith('mm_'):
+            stats['hash_id'] += 1
+            continue
+
+        # Check completeness
+        if not c.get('name') or not c.get('title') or not c.get('company'):
+            stats['incomplete'] += 1
+            continue
+
+        # Check recruiter
+        if not include_recruiters and is_recruiter(c.get('title', '')):
+            stats['recruiter'] += 1
+            continue
+
+        filtered.append(c)
+
+    if len(filtered) < len(candidates):
+        logger.info(
+            f"Auto-filter: {len(candidates)} → {len(filtered)} candidates "
+            f"(removed: {stats['hash_id']} hash ID, {stats['incomplete']} incomplete, "
+            f"{stats['recruiter']} recruiters)"
+        )
+
+    return filtered
+
+
+def filter_by_titles(
+    candidates: list,
+    title_keywords: list,
+) -> list:
+    """
+    严格按岗位关键词过滤候选人。
+
+    候选人的 title 必须包含至少一个 title_keyword 才保留。
+    支持 CandidateBasic 对象和 dict。
+
+    Args:
+        candidates: 候选人列表
+        title_keywords: 岗位关键词列表，如 ["数据BP", "BI负责人"]
+
+    Returns:
+        过滤后的候选人列表
+    """
+    if not title_keywords:
+        return candidates
+
+    # Normalize keywords to lowercase
+    kw_lower = [k.lower() for k in title_keywords]
+
+    filtered = []
+    for c in candidates:
+        title = (c.get('title', '') if isinstance(c, dict) else getattr(c, 'title', '')) or ''
+        title_lower = title.lower()
+        if any(k in title_lower for k in kw_lower):
+            filtered.append(c)
+
+    if len(filtered) < len(candidates):
+        logger.info(
+            f"Title filter: {len(candidates)} → {len(filtered)} candidates "
+            f"(keywords: {title_keywords})"
+        )
+
+    return filtered

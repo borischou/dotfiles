@@ -1,0 +1,36 @@
+<h3>搜索结果: {{ candidates|length }} 个候选人 ({{ keywords }})</h3>
+
+{% if candidates %}
+<table>
+    <thead>
+        <tr>
+            <th>姓名</th>
+            <th>职位</th>
+            <th>公司</th>
+            <th>城市</th>
+            <th>经验</th>
+            <th>学历</th>
+            <th>期望薪资</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in candidates %}
+        <tr>
+            <td><a href="/candidates/{{ c.boss_id }}">{{ c.name }}</a></td>
+            <td>{{ c.title[:30] if c.title else "" }}</td>
+            <td>{{ c.company[:20] if c.company else "" }}</td>
+            <td>{{ c.location or "" }}</td>
+            <td>{{ c.work_years or "" }}</td>
+            <td>{{ c.education_level or "" }}</td>
+            <td>{{ c.salary_expect or "" }}</td>
+            <td>
+                <a href="/candidates/{{ c.boss_id }}">详情</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>没有找到候选人</p>
+{% endif %}

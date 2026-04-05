@@ -1,0 +1,53 @@
+     1→     1→"""Export routes — generate and download candidate data."""
+     2→     2→
+     3→     3→import html
+     4→     4→
+     5→     5→from pathlib import Path
+     6→     6→
+     7→     7→from fastapi import APIRouter, Request, Form
+     8→     8→from fastapi.responses import FileResponse, HTMLResponse
+     9→     9→
+    10→    10→from src.web.app import templates
+    11→    11→from src.modules.export import export_candidates
+    12→    12→
+    13→    13→router = APIRouter()
+    14→    14→
+    15→    15→
+    16→    16→@router.get("/", response_class=HTMLResponse)
+    17→    17→async def export_page(request: Request):
+    18→    18→    """Render export page."""
+    19→    19→    return templates.TemplateResponse("export.html", {"request": request})
+    20→    20→
+    21→    21→
+    22→    22→@router.post("/download")
+    23→    23→async def download_export(
+    24→    24→    request: Request,
+    25→    25→    fmt: str = Form("excel"),
+    26→    26→    include_messages: bool = Form(False),
+    27→    27→):
+    28→    28→    """Generate export file and return as download."""
+    29→    29→    try:
+    30→    30→        path = export_candidates(
+    31→    31→            output_format=fmt,
+    32→    32→            include_messages=include_messages,
+    33→    33→        )
+    34→    34→
+    35→    35→        if not path or not Path(path).exists():
+    36→    36→            return HTMLResponse('<p><mark>导出失败: 没有数据</mark></p>', status_code=400)
+    37→    37→
+    38→    38→        filename = Path(path).name
+    39→    39→        media_type = (
+    40→    40→            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    41→    41→            if fmt == "excel"
+    42→    42→            else "text/csv"
+    43→    43→        )
+    44→    44→
+    45→    45→        return FileResponse(
+    46→    46→            path=path,
+    47→    47→            filename=filename,
+    48→    48→            media_type=media_type,
+    49→    49→        )
+    50→    50→
+    51→    51→    except Exception as e:
+    52→    52→        return HTMLResponse(f'<p><mark>导出失败: {html.escape(str(e))}</mark></p>', status_code=500)
+    53→    53→

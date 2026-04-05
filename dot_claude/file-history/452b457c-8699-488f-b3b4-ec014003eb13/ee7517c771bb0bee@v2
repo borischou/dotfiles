@@ -1,0 +1,110 @@
+"""Messages routes — preview and send."""
+
+import html
+
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import HTMLResponse
+
+from src.web.app import task_queue
+from src.core.browser import get_browser_manager
+from src.modules.auth import ensure_logged_in
+from src.modules.message import render_template, send_message
+from src.utils.config import get_config
+from src.models.database import Candidate, get_db_manager
+
+router = APIRouter()
+
+
+@router.post("/preview", response_class=HTMLResponse)
+async def preview_message(
+    request: Request,
+    boss_id: str = Form(...),
+    template_name: str = Form(...),
+):
+    """Preview a rendered message for a candidate."""
+    if not template_name:
+        return HTMLResponse("")
+
+    try:
+        config = get_config()
+        template = config.get_template(template_name)
+        db = get_db_manager()
+
+        variables = {}
+        with db.session_scope() as session:
+            candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+            if candidate:
+                if candidate.name:
+                    variables['name'] = candidate.name
+                if candidate.company:
+                    variables['company'] = candidate.company
+                if candidate.title:
+                    variables['position'] = candidate.title
+
+        content = render_template(template, variables)
+
+        missing = []
+        for var in template.get('variables', []):
+            if var not in variables:
+                missing.append(var)
+
+        preview_html = f'<blockquote>{html.escape(content)}</blockquote>'
+        if missing:
+            preview_html += f'<p><small>缺少变量: {html.escape(", ".join(missing))}</small></p>'
+        return HTMLResponse(preview_html)
+
+    except Exception as e:
+        return HTMLResponse(f'<p><mark>预览失败: {html.escape(str(e))}</mark></p>')
+
+
+@router.post("/send", response_class=HTMLResponse)
+async def send_msg(
+    request: Request,
+    boss_id: str = Form(...),
+    template_name: str = Form(...),
+):
+    """Send a message to a candidate (non-interactive, no confirmation)."""
+    if task_queue.is_busy:
+        return HTMLResponse(
+            '<p><mark>Pipeline 运行中，无法发送消息</mark></p>',
+            status_code=409,
+        )
+
+    if not template_name:
+        return HTMLResponse('<p><mark>请选择消息模板</mark></p>', status_code=400)
+
+    try:
+        browser = get_browser_manager()
+        await ensure_logged_in(browser)
+
+        config = get_config()
+        template = config.get_template(template_name)
+        db = get_db_manager()
+
+        variables = {}
+        with db.session_scope() as session:
+            candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+            if candidate:
+                if candidate.name:
+                    variables['name'] = candidate.name
+                if candidate.company:
+                    variables['company'] = candidate.company
+                if candidate.title:
+                    variables['position'] = candidate.title
+
+        result = await send_message(
+            boss_id=boss_id,
+            template_name=template_name,
+            variables=variables,
+            preview_only=False,
+            interactive=False,
+            browser=browser,
+        )
+
+        if result:
+            return HTMLResponse('<p>消息发送成功！</p>')
+        else:
+            return HTMLResponse('<p><mark>消息发送失败</mark></p>')
+
+    except Exception as e:
+        return HTMLResponse(f'<p><mark>发送失败: {html.escape(str(e))}</mark></p>', status_code=500)

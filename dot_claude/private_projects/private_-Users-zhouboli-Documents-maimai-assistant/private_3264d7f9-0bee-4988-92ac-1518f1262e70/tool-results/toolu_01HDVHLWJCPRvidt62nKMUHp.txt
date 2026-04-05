@@ -1,0 +1,413 @@
+src/services/pipeline.py:52:    except Exception as e:
+/Users/zhouboli/Documents/maimai-assistant/src/services/pipeline.py-53-        # Backup failure should not crash pipeline
+--
+src/services/pipeline.py:516:        except (json.JSONDecodeError, IOError):
+/Users/zhouboli/Documents/maimai-assistant/src/services/pipeline.py-517-            logger.warning("Failed to read run_history.json, starting fresh")
+--
+src/modules/search.py:183:                    except TimeoutError:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/search.py-184-                        logger.debug(f"No new cards after scroll (had {prev_count})")
+src/modules/search.py:185:                    except Exception as e:
+src/modules/search.py-186-                        logger.warning(f"Error waiting for new cards after scroll: {e}")
+--
+src/modules/search.py:197:                except TimeoutError:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/search.py-198-                    logger.debug("Timed out waiting for contactcard elements, proceeding anyway")
+src/modules/search.py:199:                except Exception as e:
+src/modules/search.py-200-                    logger.warning(f"Error waiting for contactcard elements: {e}")
+--
+src/modules/search.py:253:                except Exception as e:
+src/modules/search.py-254-                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+--
+src/modules/search.py:260:            except (BrowserError, SessionExpiredError):
+/Users/zhouboli/Documents/maimai-assistant/src/modules/search.py-261-                raise  # Critical errors must propagate
+src/modules/search.py:262:            except Exception as e:
+src/modules/search.py-263-                logger.error(f"Error on page {page_num}: {e}")
+--
+src/modules/search.py:567:                except Exception as e:
+src/modules/search.py-568-                    logger.debug(f"Contactcard lookup failed for '{c.name}': {e}")
+--
+src/modules/search.py:626:                        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/search.py-627-                            pass  # Best-effort text parsing; proceed with partial data
+--
+src/modules/search.py:639:                except Exception as e:
+src/modules/search.py-640-                    logger.debug(f"Failed to extract from link: {e}")
+--
+src/modules/search.py:674:                except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/search.py-675-                    continue
+--
+src/modules/search.py:686:    except Exception as e:
+src/modules/search.py-687-        logger.error(f"Error extracting search results: {e}")
+--
+src/modules/search.py:748:    except Exception as e:
+src/modules/search.py-749-        logger.error(f"Failed to save candidates to database: {e}")
+--
+src/modules/search.py:774:    except Exception as e:
+src/modules/search.py-775-        logger.error(f"Failed to log search history: {e}")
+--
+src/modules/search.py:830:    except Exception as e:
+src/modules/search.py-831-        logger.debug(f"_click_avatar_for_profile_url error for '{name}': {e}")
+--
+src/modules/search.py:921:            except Exception:
+src/modules/search.py-922-                logger.warning(f"Enterprise URL marker not found, current URL: {page.url}")
+--
+src/modules/search.py:969:                    except Exception:
+src/modules/search.py-970-                        logger.debug(f"Company suggestion not found for: {co_name}")
+--
+src/modules/search.py:1004:                except Exception as e:
+src/modules/search.py-1005-                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+--
+src/modules/search.py:1013:        except Exception as e:
+src/modules/search.py-1014-            logger.error(f"Enterprise search error: {e}")
+--
+src/modules/search.py:1022:                except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/search.py-1023-                    pass  # Best-effort cleanup; tab may already be closed
+--
+src/modules/search.py:1047:    except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/search.py-1048-        pass  # Continue even if networkidle times out
+--
+src/modules/search.py:1213:    except Exception as e:
+src/modules/search.py-1214-        logger.error(f"Error extracting enterprise results: {e}")
+--
+src/modules/search.py:1298:            except Exception:
+src/modules/search.py-1299-                logger.warning(f"Talent bank URL not matched, current: {page.url}")
+--
+src/modules/search.py:1330:                except Exception as e:
+src/modules/search.py-1331-                    logger.warning(f"Failed to set year filter: {e}")
+--
+src/modules/search.py:1386:                except Exception as e:
+src/modules/search.py-1387-                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+--
+src/modules/search.py:1395:        except Exception as e:
+src/modules/search.py-1396-            logger.error(f"Talent bank search error: {e}")
+--
+src/modules/search.py:1422:    except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/search.py-1423-        pass
+--
+src/modules/search.py:1578:    except Exception as e:
+src/modules/search.py-1579-        logger.error(f"Error extracting talent bank results: {e}")
+--
+src/modules/search.py:1669:            except Exception:
+src/modules/search.py-1670-                logger.warning(f"search_v2 URL not matched, current: {page.url}")
+--
+src/modules/search.py:1737:                                except Exception:
+src/modules/search.py-1738-                                    logger.debug(f"Could not click add condition button for year: {label}")
+--
+src/modules/search.py:1745:                except Exception as e:
+src/modules/search.py-1746-                    logger.warning(f"Failed to set year filter: {e}")
+--
+src/modules/search.py:1778:                            except Exception:
+src/modules/search.py-1779-                                logger.debug(f"Could not click add condition button for company: {co_name}")
+--
+src/modules/search.py:1786:                except Exception as e:
+src/modules/search.py-1787-                    logger.warning(f"Failed to set company filter: {e}")
+--
+src/modules/search.py:1828:                except Exception as e:
+src/modules/search.py-1829-                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+--
+src/modules/search.py:1837:        except Exception as e:
+src/modules/search.py-1838-            logger.error(f"Recruit manage search error: {e}")
+--
+src/modules/auth.py:124:        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/auth.py-125-            # Timeout = no redirect happened, which is the happy path
+--
+src/modules/auth.py:174:    except Exception as e:
+src/modules/auth.py-175-        logger.error(f"Error checking login status: {e}")
+--
+src/modules/message.py:224:    except Exception as e:
+src/modules/message.py-225-        logger.debug(f"Failed to extract contact quota: {e}")
+--
+src/modules/message.py:252:    except Exception as e:
+src/modules/message.py-253-        logger.debug(f"Failed to fetch contact quota: {e}")
+--
+src/modules/message.py:420:        except (json.JSONDecodeError, TypeError):
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-421-            resp_data = {}
+--
+src/modules/message.py:441:    except PermanentFailureError:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-442-        raise  # Let quota exhaustion etc. propagate to abort the batch
+src/modules/message.py:443:    except Exception as e:
+src/modules/message.py-444-        logger.error(f"Quick contact handling failed: {e}\n{traceback.format_exc()}")
+--
+src/modules/message.py:485:    except Exception as e:
+src/modules/message.py-486-        logger.debug(f"VIP paywall detection failed: {e}")
+--
+src/modules/message.py:533:    except Exception as e:
+src/modules/message.py-534-        raise ValidationError(f"Template not found: {template_name}")
+--
+src/modules/message.py:627:        except Exception as e:
+src/modules/message.py-628-            logger.debug(f"Awaiting-response check failed for {maimai_id}: {e}")
+--
+src/modules/message.py:741:    except PermanentFailureError:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-742-        raise
+src/modules/message.py:743:    except Exception as e:
+src/modules/message.py-744-        logger.error(f"Error sending message: {e}")
+--
+src/modules/message.py:783:    except Exception:
+src/modules/message.py-784-        raise ValidationError(f"Template not found: {template_name}")
+--
+src/modules/message.py:929:            except RateLimitExceededError as e:
+src/modules/message.py-930-                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+--
+src/modules/message.py:956:            except ValidationError as e:
+src/modules/message.py-957-                logger.error(f"Template rendering failed for {c['name']}: {e}")
+--
+src/modules/message.py:1061:            except asyncio.TimeoutError:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1062-                console.print(
+--
+src/modules/message.py:1072:            except QuotaExhaustedError as e:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1073-                console.print(f"\n[red]联系券已用尽，终止批量发送[/red]")
+--
+src/modules/message.py:1082:            except PermanentFailureError as e:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1083-                console.print(f"[yellow]{e}. Skipping.[/yellow]")
+--
+src/modules/message.py:1091:            except RateLimitExceededError as e:
+src/modules/message.py-1092-                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+--
+src/modules/message.py:1101:            except Exception as e:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1102-                last_error = str(e)
+--
+src/modules/message.py:1143:        except Exception as e:
+src/modules/message.py-1144-            logger.warning(f"Could not scroll to card for '{c['name']}': {e}")
+--
+src/modules/message.py:1218:                    except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1219-                        chat_btn_handle = None
+src/modules/message.py:1220:        except Exception as e:
+src/modules/message.py-1221-            logger.warning(f"Could not locate card button for '{c['name']}': {e}")
+--
+src/modules/message.py:1451:    except KeyboardInterrupt:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1452-        return None
+--
+src/modules/message.py:1471:        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1472-            continue
+--
+src/modules/message.py:1506:                except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1507-                    # URL may not change if chat opens as overlay/modal
+--
+src/modules/message.py:1526:                    except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1527-                        continue
+--
+src/modules/message.py:1533:        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1534-            continue
+--
+src/modules/message.py:1565:        except Exception as e:
+src/modules/message.py-1566-            logger.debug(f"Chat selector '{selector}' failed: {e}")
+--
+src/modules/message.py:1585:            except Exception as e:
+src/modules/message.py-1586-                logger.debug(f"Broad selector '{selector}' failed: {e}")
+--
+src/modules/message.py:1727:                except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1728-                    continue
+--
+src/modules/message.py:1730:        except Exception as e:
+src/modules/message.py-1731-            logger.warning(f"Message verification poll failed: {e}")
+--
+src/modules/message.py:1837:    except Exception as e:
+src/modules/message.py-1838-        # Conservative: assume conversation exists to avoid duplicate messages.
+--
+src/modules/message.py:1878:    except Exception as e:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-1879-        logger.warning(
+--
+src/modules/message.py:1905:    except Exception as e:
+src/modules/message.py-1906-        logger.debug(f"Popup close skipped: {e}")
+--
+src/modules/message.py:1915:    except Exception as e:
+src/modules/message.py-1916-        logger.debug(f"Modal close skipped: {e}")
+--
+src/modules/message.py:1989:    except Exception as e:
+src/modules/message.py-1990-        logger.error(f"Enterprise inline send failed: {e}")
+--
+src/modules/message.py:2119:            except Exception as e:
+src/modules/message.py-2120-                logger.debug(f"Talent bank: exchange phone failed: {e}")
+--
+src/modules/message.py:2142:            except Exception as e:
+src/modules/message.py-2143-                logger.debug(f"Talent bank: exchange wechat failed: {e}")
+--
+src/modules/message.py:2145:    except Exception as e:
+src/modules/message.py-2146-        logger.error(f"Talent bank exchange error: {e}")
+--
+src/modules/message.py:2156:    except Exception as e:
+src/modules/message.py-2157-        logger.debug(f"Talent bank: IM tab cleanup: {e}")
+--
+src/modules/message.py:2225:        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-2226-            logger.debug(
+--
+src/modules/message.py:2263:        except Exception as e:
+src/modules/message.py-2264-            logger.debug(f"Talent bank: close modal best-effort failed: {e}")
+--
+src/modules/message.py:2269:    except Exception as e:
+src/modules/message.py-2270-        logger.error(f"Talent bank inline send failed: {e}")
+--
+src/modules/message.py:2347:            except Exception as e:
+src/modules/message.py-2348-                logger.debug(f"Recruit manage: exchange phone failed: {e}")
+--
+src/modules/message.py:2363:                    except Exception:
+src/modules/message.py-2364-                        logger.info("Recruit manage: clicked 交换微信 (no confirm dialog)")
+src/modules/message.py:2365:            except Exception as e:
+src/modules/message.py-2366-                logger.debug(f"Recruit manage: exchange wechat failed: {e}")
+--
+src/modules/message.py:2368:    except Exception as e:
+src/modules/message.py-2369-        logger.error(f"Recruit manage exchange error: {e}")
+--
+src/modules/message.py:2446:        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-2447-            logger.debug(
+--
+src/modules/message.py:2489:    except Exception as e:
+src/modules/message.py-2490-        logger.error(f"Recruit manage inline send failed: {e}")
+--
+src/modules/message.py:2517:        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-2518-            pass
+--
+src/modules/message.py:2550:                    except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py-2551-                        chat_btn_handle = None
+src/modules/message.py:2552:        except Exception as e:
+src/modules/message.py-2553-            logger.warning(f"Could not locate card button for '{c['name']}': {e}")
+--
+src/modules/profile.py:136:    except Exception as e:
+src/modules/profile.py-137-        logger.error(f"Error extracting profile: {e}")
+--
+src/modules/profile.py:242:        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/profile.py-243-            continue
+--
+src/modules/profile.py:262:        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/profile.py-263-            continue
+--
+src/modules/profile.py:331:            except Exception as e:
+src/modules/profile.py-332-                logger.debug(f"Error extracting education item: {e}")
+--
+src/modules/profile.py:335:    except Exception as e:
+src/modules/profile.py-336-        logger.debug(f"Error extracting education section: {e}")
+--
+src/modules/profile.py:389:            except Exception as e:
+src/modules/profile.py-390-                logger.debug(f"Error extracting work item: {e}")
+--
+src/modules/profile.py:393:    except Exception as e:
+src/modules/profile.py-394-        logger.debug(f"Error extracting work experience section: {e}")
+--
+src/modules/profile.py:427:            except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/modules/profile.py-428-                continue
+--
+src/modules/profile.py:430:    except Exception as e:
+src/modules/profile.py-431-        logger.debug(f"Error extracting skills: {e}")
+--
+src/modules/profile.py:505:    except Exception as e:
+src/modules/profile.py-506-        logger.error(f"Failed to update candidate in database: {e}")
+--
+src/models/database.py:171:        except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/models/database.py-172-            session.rollback()
+--
+src/modules/selector_discovery.py:259:            except Exception as e:
+src/modules/selector_discovery.py-260-                logger.warning(f"Failed to click chat button: {e}")
+--
+src/modules/selector_discovery.py:269:            except Exception as e:
+src/modules/selector_discovery.py-270-                logger.warning(f"Failed to type message: {e}")
+--
+src/modules/selector_discovery.py:287:            except Exception as e:
+src/modules/selector_discovery.py-288-                logger.warning(f"Failed to click send: {e}")
+--
+src/modules/selector_discovery.py:294:    except Exception as e:
+src/modules/selector_discovery.py-295-        logger.error(f"Error applying discovered selectors: {e}")
+--
+src/utils/config.py:35:        except FileNotFoundError:
+src/utils/config.py-36-            raise ConfigurationError(f"Configuration file not found: {filepath}")
+src/utils/config.py:37:        except json.JSONDecodeError as e:
+src/utils/config.py-38-            raise ConfigurationError(f"Invalid JSON in {filepath}: {e}")
+--
+src/utils/config.py:132:        except json.JSONDecodeError as e:
+src/utils/config.py-133-            raise ConfigurationError(f"Invalid JSON in profile settings: {profile_settings_path}: {e}")
+--
+src/cli/main.py:77:    except Exception as e:
+src/cli/main.py-78-        console.print(f"[red]Failed to initialize application: {e}[/red]")
+--
+src/cli/main.py:487:                    except Exception as e:
+src/cli/main.py-488-                        console.print(f"[red]渲染失败: {e}[/red]\n")
+--
+src/cli/main.py:572:    except Exception as e:
+src/cli/main.py-573-        console.print(f"[red]Error loading templates: {e}[/red]")
+--
+src/cli/main.py:647:                    except Exception as e:
+src/cli/main.py-648-                        status_table.add_row("联系券余额", f"[dim]查询失败: {e}[/dim]")
+--
+src/cli/main.py:652:        except Exception as e:
+src/cli/main.py-653-            status_table.add_row("Chrome 连接", f"[red]✗ 连接失败: {e}[/red]")
+--
+src/cli/main.py:813:    except MaimaiAssistantError as e:
+src/cli/main.py-814-        console.print(f"[red]Error: {e}[/red]")
+--
+src/cli/main.py:816:    except KeyboardInterrupt:
+/Users/zhouboli/Documents/maimai-assistant/src/cli/main.py-817-        console.print("\n[yellow]Operation cancelled by user[/yellow]")
+--
+src/cli/main.py:819:    except Exception as e:
+src/cli/main.py-820-        console.print(f"[red]Unexpected error: {e}[/red]")
+--
+src/core/browser.py:153:            except Exception as e:
+src/core/browser.py-154-                logger.error(f"Failed to connect to Chrome via CDP: {e}")
+--
+src/core/browser.py:180:                except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/core/browser.py-181-                    pass  # Tab may already be closed by user
+--
+src/core/browser.py:188:                except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/core/browser.py-189-                    pass  # Page may already be closed
+--
+src/core/browser.py:201:                except Exception as e:
+src/core/browser.py-202-                    logger.error(f"Error closing browser connection: {e}")
+--
+src/core/browser.py:209:                except Exception as e:
+src/core/browser.py-210-                    logger.error(f"Error stopping Playwright: {e}")
+--
+src/core/browser.py:216:        except Exception as e:
+src/core/browser.py-217-            logger.error(f"Error disconnecting from Chrome: {e}")
+--
+src/core/browser.py:246:        except Exception as e:
+src/core/browser.py-247-            raise BrowserError(f"No new tab opened within {timeout}ms: {e}")
+--
+src/core/browser.py:286:        except Exception as e:
+src/core/browser.py-287-            logger.warning(f"Error closing tab: {e}")
+--
+src/utils/captcha.py:51:        except Exception as e:
+/Users/zhouboli/Documents/maimai-assistant/src/utils/captcha.py-52-            # Log non-trivial errors (e.g. broken CDP connection) instead of
+--
+src/core/session.py:48:        except OSError:
+/Users/zhouboli/Documents/maimai-assistant/src/core/session.py-49-            logger.warning("Could not set restrictive permissions on session directory")
+--
+src/core/session.py:96:        except BaseException:
+src/core/session.py-97-            if tmp_fd >= 0:
+--
+src/core/session.py:101:            except OSError:
+/Users/zhouboli/Documents/maimai-assistant/src/core/session.py-102-                pass
+--
+src/core/session.py:129:        except Exception as e:
+src/core/session.py-130-            logger.error(f"Failed to save session: {e}")
+--
+src/utils/rate_limiter.py:281:        except Exception as e:
+src/utils/rate_limiter.py-282-            logger.error(f"Failed to prune ActionLog entries: {e}")
+--
+src/utils/rate_limiter.py:343:        except RateLimitExceededError as e:
+/Users/zhouboli/Documents/maimai-assistant/src/utils/rate_limiter.py-344-            elapsed = time.monotonic() - start
+--
+src/utils/checkpoint.py:27:    except Exception:
+/Users/zhouboli/Documents/maimai-assistant/src/utils/checkpoint.py-28-        return project_root / "data" / ".checkpoints"
+--
+src/utils/checkpoint.py:104:            except BaseException:
+src/utils/checkpoint.py-105-                try:
+--
+src/utils/checkpoint.py:107:                except OSError:
+/Users/zhouboli/Documents/maimai-assistant/src/utils/checkpoint.py-108-                    pass
+--
+src/utils/checkpoint.py:111:        except Exception as e:
+src/utils/checkpoint.py-112-            logger.error(f"Failed to save checkpoint: {e}")
+--
+src/utils/checkpoint.py:139:        except Exception as e:
+src/utils/checkpoint.py-140-            logger.error(f"Failed to load checkpoint: {e}")
+--
+src/utils/checkpoint.py:192:        except Exception as e:
+src/utils/checkpoint.py-193-            logger.error(f"Failed to delete checkpoint: {e}")
+--
+src/core/anti_detection.py:69:    except Exception as e:
+src/core/anti_detection.py-70-        if "timeout" in str(type(e).__name__).lower() or "timeout" in str(e).lower():
+--
+src/core/anti_detection.py:80:    except Exception:
+src/core/anti_detection.py-81-        # Fallback: emunium may fail in CDP mode (viewport_size=None → TypeError,
+--
+src/core/anti_detection.py:98:    except Exception as e:
+src/core/anti_detection.py-99-        if "timeout" in str(type(e).__name__).lower() or "timeout" in str(e).lower():
+--
+src/core/anti_detection.py:109:    except Exception:
+src/core/anti_detection.py-110-        # Fallback: emunium may fail in CDP mode (viewport_size=None → TypeError,

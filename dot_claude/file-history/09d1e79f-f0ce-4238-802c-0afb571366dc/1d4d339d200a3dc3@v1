@@ -1,0 +1,519 @@
+"""Message sending module for Boss直聘.
+
+Handles sending templated messages to candidates through Boss直聘's
+chat system. Supports single and batch message sending with
+human confirmation and rate limiting.
+
+Boss直聘 chat flow:
+1. From search page (/web/chat/search), click "搜索畅聊卡" button
+2. Click "查看对话" to open the chat window
+3. Type message in #boss-chat-global-input
+4. Click "发送" button
+5. Close chat via div.iboss.iboss-close
+
+Key differences from Maimai:
+- Boss直聘 uses "搜索畅聊卡" as the primary contact action from search
+- Chat input is a div with id #boss-chat-global-input (not textarea)
+- Chat opens as an overlay on the current page
+- Main page URL: /web/chat/search
+"""
+
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+
+from patchright.async_api import Page
+from loguru import logger
+from rich.console import Console
+from rich.panel import Panel
+
+import questionary
+
+from src.core.browser import BrowserManager, get_browser_manager
+from src.utils.config import get_config
+from src.utils.delays import async_random_delay
+from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+from src.utils.captcha import check_captcha
+from src.utils.validators import validate_template_variables
+from src.models.database import Candidate, Message, get_db_manager
+from src.exceptions.errors import (
+    BrowserError,
+    PermanentFailureError,
+    SelectorNotFoundError,
+)
+
+console = Console()
+
+
+def render_template(template: Dict, variables: Dict[str, str]) -> str:
+    """
+    Render a message template with variable substitution.
+
+    Uses a single-pass approach to avoid recursive replacement issues
+    (e.g., variable values containing {other_var} patterns).
+
+    Args:
+        template: Template dict with 'content' and 'variables' keys
+        variables: Variable name-value pairs
+
+    Returns:
+        Rendered message string
+    """
+    import re
+
+    content = template['content']
+
+    def replacer(match):
+        var_name = match.group(1)
+        if var_name in variables:
+            return str(variables[var_name])
+        return match.group(0)  # Keep original if no matching variable
+
+    content = re.sub(r'\{(\w+)\}', replacer, content)
+    return content
+
+
+async def send_message(
+    boss_id: str,
+    template_name: str,
+    variables: Optional[Dict[str, str]] = None,
+    preview_only: bool = False,
+    interactive: bool = True,
+    browser: Optional[BrowserManager] = None,
+) -> bool:
+    """
+    Send a templated message to a candidate on Boss直聘.
+
+    Args:
+        boss_id: Candidate Boss ID
+        template_name: Name of the message template
+        variables: Template variable overrides
+        preview_only: If True, only preview the message without sending
+        browser: Browser manager instance
+
+    Returns:
+        True if message sent successfully
+    """
+    if browser is None:
+        browser = get_browser_manager()
+
+    page = browser.page
+    if not page:
+        page = await browser.start()
+
+    config = get_config()
+    rate_limiter = get_rate_limiter()
+    db_manager = get_db_manager()
+
+    # Load template
+    template = config.get_template(template_name)
+
+    # Merge variables
+    final_vars = dict(variables or {})
+
+    # Try to fill candidate info from database
+    with db_manager.session_scope() as session:
+        candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+        if candidate:
+            if 'name' not in final_vars and candidate.name:
+                final_vars['name'] = candidate.name
+            if 'company' not in final_vars and candidate.company:
+                final_vars['company'] = candidate.company
+            if 'position' not in final_vars and candidate.title:
+                final_vars['position'] = candidate.title
+
+    # Validate variables
+    validate_template_variables(template, final_vars)
+
+    # Render message
+    message_content = render_template(template, final_vars)
+
+    # Preview
+    console.print(Panel(
+        f"[bold]To:[/bold] {boss_id}\n"
+        f"[bold]Template:[/bold] {template_name}\n"
+        f"[bold]Message:[/bold]\n{message_content}",
+        title="Message Preview",
+        border_style="cyan"
+    ))
+
+    if preview_only:
+        console.print("[dim]Preview only — message not sent.[/dim]")
+        return False
+
+    # Confirm send — skip confirmation in non-interactive mode (Web)
+    import sys
+    if not interactive:
+        confirm = True
+    elif sys.stdin.isatty():
+        confirm = questionary.confirm(
+            "Send this message?",
+            default=False,
+        ).ask()
+    else:
+        confirm = False
+
+    if not confirm:
+        console.print("[yellow]Message cancelled.[/yellow]")
+        # Record cancellation
+        _save_message_to_db(boss_id, template_name, message_content, 'cancelled', db_manager)
+        return False
+
+    # Rate limit check
+    await async_check_rate_limit('send_message')
+
+    try:
+        # Navigate to chat with the candidate
+        success = await _navigate_to_chat(page, boss_id, db_manager)
+        if not success:
+            raise BrowserError(f"Failed to open chat with {boss_id}")
+
+        # Type and send the message
+        await _type_and_send_message(page, message_content)
+
+        # Log success
+        rate_limiter.log_action('send_message', {'boss_id': boss_id, 'template': template_name})
+        _save_message_to_db(boss_id, template_name, message_content, 'sent', db_manager)
+
+        console.print(f"[green]Message sent to {boss_id}![/green]")
+        return True
+
+    except PermanentFailureError as e:
+        logger.error(f"Permanent failure sending to {boss_id}: {e}")
+        _save_message_to_db(boss_id, template_name, message_content, 'failed', db_manager)
+        rate_limiter.report_error()
+        console.print(f"[red]Failed to send: {e}[/red]")
+        return False
+    except Exception as e:
+        logger.error(f"Error sending message to {boss_id}: {e}")
+        _save_message_to_db(boss_id, template_name, message_content, 'failed', db_manager)
+        rate_limiter.report_error()
+        console.print(f"[red]Error: {e}[/red]")
+        return False
+
+
+async def send_message_batch(
+    candidates: list,
+    template_name: str,
+    variables: Optional[Dict[str, str]] = None,
+    interactive: bool = True,
+    skip_messaged: bool = True,
+    dry_run: bool = False,
+    browser: Optional[BrowserManager] = None,
+) -> Dict[str, int]:
+    """
+    Send messages to multiple candidates.
+
+    Args:
+        candidates: List of CandidateBasic or dicts with boss_id
+        template_name: Template name
+        variables: Shared template variables
+        interactive: Confirm each message individually
+        skip_messaged: Skip candidates already messaged
+        dry_run: Simulate without actually sending
+        browser: Browser manager instance
+
+    Returns:
+        Dict with counts: sent, failed, skipped, cancelled
+    """
+    if browser is None:
+        browser = get_browser_manager()
+
+    config = get_config()
+    db_manager = get_db_manager()
+    rate_limiter = get_rate_limiter()
+
+    stats = {'sent': 0, 'failed': 0, 'skipped': 0, 'cancelled': 0}
+
+    for i, candidate in enumerate(candidates):
+        if isinstance(candidate, dict):
+            boss_id = candidate.get('boss_id', '')
+            name = candidate.get('name', '')
+            title = candidate.get('title', '')
+            company = candidate.get('company', '')
+        else:
+            boss_id = getattr(candidate, 'boss_id', '')
+            name = getattr(candidate, 'name', '')
+            title = getattr(candidate, 'title', '')
+            company = getattr(candidate, 'company', '')
+
+        if not boss_id:
+            stats['skipped'] += 1
+            continue
+
+        console.print(f"\n[cyan]({i+1}/{len(candidates)})[/cyan] {name} - {title} @ {company}")
+
+        # Check if already messaged
+        if skip_messaged:
+            with db_manager.session_scope() as session:
+                existing_msg = session.query(Message).filter_by(
+                    candidate_boss_id=boss_id, status='sent'
+                ).first()
+                if existing_msg:
+                    console.print(f"  [dim]Already messaged, skipping[/dim]")
+                    stats['skipped'] += 1
+                    continue
+
+        if dry_run:
+            console.print(f"  [dim]Dry run — would send '{template_name}' template[/dim]")
+            stats['sent'] += 1
+            continue
+
+        # Build per-candidate variables
+        per_vars = dict(variables or {})
+        if name:
+            per_vars.setdefault('name', name)
+        if company:
+            per_vars.setdefault('company', company)
+        if title:
+            per_vars.setdefault('position', title)
+
+        try:
+            if interactive:
+                # Use single send (with preview + confirmation)
+                result = await send_message(
+                    boss_id=boss_id,
+                    template_name=template_name,
+                    variables=per_vars,
+                    browser=browser,
+                )
+                if result:
+                    stats['sent'] += 1
+                else:
+                    stats['cancelled'] += 1
+            else:
+                # Non-interactive: send without confirmation
+                await async_check_rate_limit('send_message')
+
+                template = config.get_template(template_name)
+                validate_template_variables(template, per_vars)
+                message_content = render_template(template, per_vars)
+
+                page = browser.page
+                success = await _navigate_to_chat(page, boss_id, db_manager)
+                if success:
+                    await _type_and_send_message(page, message_content)
+                    rate_limiter.log_action('send_message', {'boss_id': boss_id})
+                    _save_message_to_db(boss_id, template_name, message_content, 'sent', db_manager)
+                    stats['sent'] += 1
+                    console.print(f"  [green]Sent![/green]")
+                else:
+                    _save_message_to_db(boss_id, template_name, message_content, 'failed', db_manager)
+                    stats['failed'] += 1
+                    console.print(f"  [red]Failed to open chat[/red]")
+
+        except Exception as e:
+            logger.error(f"Error sending to {boss_id}: {e}")
+            stats['failed'] += 1
+            console.print(f"  [red]Error: {e}[/red]")
+
+        # Delay between messages
+        if i < len(candidates) - 1:
+            await async_random_delay('message')
+
+    # Summary
+    console.print(Panel(
+        f"[green]Sent: {stats['sent']}[/green] | "
+        f"[red]Failed: {stats['failed']}[/red] | "
+        f"[yellow]Skipped: {stats['skipped']}[/yellow] | "
+        f"[dim]Cancelled: {stats['cancelled']}[/dim]",
+        title="Batch Message Summary",
+    ))
+
+    return stats
+
+
+async def _navigate_to_chat(page: Page, boss_id: str, db_manager) -> bool:
+    """
+    Navigate to the chat window for a candidate.
+
+    Tries multiple strategies:
+    1. Direct chat URL (if known)
+    2. Navigate to candidate profile and click "立即沟通"
+    3. Search in existing conversations
+
+    Args:
+        page: Playwright page instance
+        boss_id: Candidate Boss ID
+        db_manager: Database manager
+
+    Returns:
+        True if chat window is ready
+    """
+    encrypt_id = boss_id.replace('zp_', '') if boss_id.startswith('zp_') else boss_id
+
+    # Get profile URL from database
+    profile_url = None
+    with db_manager.session_scope() as session:
+        candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+        if candidate and candidate.profile_url:
+            profile_url = candidate.profile_url
+
+    # Strategy 1: Navigate to profile and click chat button
+    if profile_url:
+        try:
+            await page.goto(profile_url, wait_until='domcontentloaded')
+            await async_random_delay('page_load')
+            await check_captcha(page, report_to_rate_limiter=True)
+
+            # Look for "立即沟通" button
+            chat_button = await _find_chat_button(page)
+            if chat_button:
+                await chat_button.click()
+                await async_random_delay('action')
+                # Wait for chat to load
+                await page.wait_for_timeout(2000)
+                return True
+        except Exception as e:
+            logger.warning(f"Strategy 1 (profile click) failed for {boss_id}: {e}")
+
+    # Strategy 2: Try direct geek URL
+    try:
+        geek_url = f"https://www.zhipin.com/web/geek/{encrypt_id}"
+        await page.goto(geek_url, wait_until='domcontentloaded')
+        await async_random_delay('page_load')
+        await check_captcha(page, report_to_rate_limiter=True)
+
+        chat_button = await _find_chat_button(page)
+        if chat_button:
+            await chat_button.click()
+            await async_random_delay('action')
+            await page.wait_for_timeout(2000)
+            return True
+    except Exception as e:
+        logger.warning(f"Strategy 2 (direct geek URL) failed for {boss_id}: {e}")
+
+    # Strategy 3: Try to find a chat link on the current page
+    try:
+        # Check if there's a chat link on the current page
+        chat_link = await page.query_selector(
+            'a[href*="chat"], a[href*="im"], [class*="chat-link"]'
+        )
+        if chat_link:
+            await chat_link.click()
+            await page.wait_for_timeout(2000)
+            return True
+    except Exception as e:
+        logger.warning(f"Strategy 3 (chat link) failed for {boss_id}: {e}")
+
+    logger.error(f"All chat navigation strategies failed for {boss_id}")
+    return False
+
+
+async def _find_chat_button(page: Page):
+    """Find the chat/communication button on the page."""
+    selectors = [
+        'button:has-text("搜索畅聊卡")',
+        'button:has-text("立即沟通")',
+        'a:has-text("立即沟通")',
+        'button:has-text("开始沟通")',
+        'button:has-text("继续沟通")',
+        '[class*="btn-chat"]',
+        '[class*="chat-btn"]',
+    ]
+
+    for selector in selectors:
+        try:
+            element = await page.query_selector(selector)
+            if element and await element.is_visible():
+                return element
+        except Exception:
+            continue
+
+    return None
+
+
+async def _type_and_send_message(page: Page, message: str) -> None:
+    """
+    Type a message into the chat input and send it.
+
+    Args:
+        page: Playwright page instance
+        message: Message text to send
+    """
+    # Find the message input
+    # Recording confirmed: #boss-chat-global-input is the primary chat input (a div element)
+    input_selectors = [
+        '#boss-chat-global-input',
+        '[contenteditable="true"]',
+        '[class*="chat-input"] textarea',
+        '[class*="input-area"] textarea',
+        'textarea[class*="message"]',
+        'textarea',
+    ]
+
+    input_element = None
+    for selector in input_selectors:
+        try:
+            element = await page.query_selector(selector)
+            if element and await element.is_visible():
+                input_element = element
+                break
+        except Exception:
+            continue
+
+    if not input_element:
+        raise SelectorNotFoundError("Chat message input not found")
+
+    # Click to focus
+    await input_element.click()
+    await page.wait_for_timeout(300)
+
+    # Clear any existing content (use Meta+a on macOS, Control+a elsewhere)
+    import sys
+    select_all_key = "Meta+a" if sys.platform == "darwin" else "Control+a"
+    await page.keyboard.press(select_all_key)
+    await page.keyboard.press("Backspace")
+    await page.wait_for_timeout(200)
+
+    # Type message with human-like timing
+    # For longer messages, use fill() to avoid timeout, then add small delay
+    if len(message) > 50:
+        await input_element.fill(message)
+    else:
+        await input_element.type(message, delay=80)
+
+    await async_random_delay('action')
+
+    # Find and click send button
+    # Recording confirmed: send button contains text "发送" (span inside button)
+    send_selectors = [
+        'text="发送"',
+        'button:has-text("发送")',
+        '[class*="btn-send"]',
+        '[class*="send-btn"]',
+    ]
+
+    for selector in send_selectors:
+        try:
+            btn = await page.query_selector(selector)
+            if btn and await btn.is_visible():
+                await btn.click()
+                await page.wait_for_timeout(1000)
+                logger.info("Message sent via send button click")
+                return
+        except Exception:
+            continue
+
+    # Fallback: try pressing Enter to send
+    await page.keyboard.press("Enter")
+    await page.wait_for_timeout(1000)
+    logger.info("Message sent via Enter key")
+
+
+def _save_message_to_db(
+    boss_id: str,
+    template_name: str,
+    content: str,
+    status: str,
+    db_manager,
+) -> None:
+    """Save a message record to the database."""
+    with db_manager.session_scope() as session:
+        message = Message(
+            candidate_boss_id=boss_id,
+            template_name=template_name,
+            content=content,
+            status=status,
+            sent_at=datetime.now(timezone.utc) if status == 'sent' else None,
+        )
+        session.add(message)

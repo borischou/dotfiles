@@ -1,0 +1,125 @@
+"""Lightweight database migration system.
+
+Tracks schema versions in a dedicated table and applies incremental
+migrations on startup.  Each migration is a plain function that
+receives a SQLAlchemy connection.
+"""
+
+from typing import Callable, List, Tuple
+
+from sqlalchemy import text, inspect
+from loguru import logger
+
+
+# Migration registry: list of (version, description, migration_fn)
+# Append new migrations at the end; never reorder or remove existing entries.
+_migrations: List[Tuple[int, str, Callable]] = []
+
+
+def migration(version: int, description: str):
+    """Decorator to register a migration function."""
+    def decorator(fn: Callable):
+        _migrations.append((version, description, fn))
+        return fn
+    return decorator
+
+
+# ---------------------------------------------------------------------------
+#  Built-in migrations
+# ---------------------------------------------------------------------------
+
+@migration(1, "Initial schema — create core tables if missing")
+def _m001_initial_schema(conn):
+    """Ensure core tables exist (safe for existing databases)."""
+    # SQLAlchemy create_all is called before migrations, so tables should
+    # already exist.  This migration just marks the baseline version.
+    pass
+
+
+@migration(2, "Add retry_count column to messages table")
+def _m002_messages_retry_count(conn):
+    inspector = inspect(conn)
+    columns = [c["name"] for c in inspector.get_columns("messages")]
+    if "retry_count" not in columns:
+        conn.execute(text("ALTER TABLE messages ADD COLUMN retry_count INTEGER DEFAULT 0"))
+
+
+@migration(3, "Create web_tasks table for web service task tracking")
+def _m003_web_tasks(conn):
+    inspector = inspect(conn)
+    if "web_tasks" not in inspector.get_table_names():
+        conn.execute(text("""
+            CREATE TABLE web_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id VARCHAR(50) NOT NULL UNIQUE,
+                name VARCHAR(200) NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'queued',
+                priority VARCHAR(20) DEFAULT 'NORMAL',
+                user VARCHAR(100) DEFAULT 'anonymous',
+                params JSON,
+                result JSON,
+                error TEXT,
+                created_at TIMESTAMP,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP
+            )
+        """))
+        conn.execute(text("CREATE INDEX idx_web_tasks_task_id ON web_tasks (task_id)"))
+        conn.execute(text("CREATE INDEX idx_web_tasks_status ON web_tasks (status)"))
+
+
+@migration(4, "Drop web_tasks table (web layer removed)")
+def _m004_drop_web_tasks(conn):
+    inspector = inspect(conn)
+    if "web_tasks" in inspector.get_table_names():
+        conn.execute(text("DROP TABLE web_tasks"))
+
+
+# ---------------------------------------------------------------------------
+#  Migration runner
+# ---------------------------------------------------------------------------
+
+def _ensure_version_table(conn) -> None:
+    """Create the schema_version table if it doesn't exist."""
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            description TEXT NOT NULL,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.commit()
+
+
+def _current_version(conn) -> int:
+    """Return highest applied migration version, or 0 if none."""
+    result = conn.execute(text("SELECT MAX(version) FROM schema_version"))
+    row = result.fetchone()
+    return row[0] or 0 if row else 0
+
+
+def run_migrations(engine) -> None:
+    """Apply all pending migrations against *engine*.
+
+    Called automatically by DatabaseManager.init_db().
+    """
+    with engine.connect() as conn:
+        _ensure_version_table(conn)
+        current = _current_version(conn)
+
+        pending = [(v, d, fn) for v, d, fn in _migrations if v > current]
+        if not pending:
+            logger.debug(f"Database schema is up-to-date (version {current})")
+            return
+
+        for version, description, fn in sorted(pending):
+            logger.info(f"Applying migration v{version}: {description}")
+            fn(conn)
+            conn.execute(
+                text("INSERT INTO schema_version (version, description) VALUES (:v, :d)"),
+                {"v": version, "d": description},
+            )
+            conn.commit()
+
+        final = _current_version(conn)
+        logger.info(f"Migrations complete — schema version {final}")

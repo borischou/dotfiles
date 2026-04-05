@@ -1,0 +1,2234 @@
+src/modules/search.py:167:                except Exception as e:
+src/modules/search.py:168:                    logger.debug(f"Could not click 人脉 tab: {e}")
+src/modules/search.py:169:
+src/modules/search.py:170:                # Simulate human behavior
+src/modules/search.py:171:                await human_scroll(page, 'down', distance=300)
+src/modules/search.py:172:                await async_random_delay('action')
+src/modules/search.py:173:
+src/modules/search.py:174:                # Extract candidates from this page
+src/modules/search.py:175:                candidates = await _extract_search_results(page, config)
+src/modules/search.py:176:
+src/modules/search.py:177:                if not candidates:
+src/modules/search.py:178:                    logger.info(f"No results found on page {page_num}")
+src/modules/search.py:179:                    await browser.screenshot(f"search_debug_page{page_num}")
+src/modules/search.py:180:                    progress.update(task, description=f"Page {page_num}: No results")
+src/modules/search.py:181:                    # Allow one empty page (could be transient), break on second consecutive
+src/modules/search.py:182:                    if page_num > start_page and not all_candidates:
+src/modules/search.py:183:                        # First page had no results either — genuinely empty
+src/modules/search.py:184:                        break
+src/modules/search.py:185:                    continue
+src/modules/search.py:186:
+src/modules/search.py:187:                # Filter out non-R&D roles
+src/modules/search.py:188:                before_rd_filter = len(candidates)
+src/modules/search.py:189:                candidates = [c for c in candidates if not _is_non_rd_title(c.title)]
+src/modules/search.py:190:                rd_filtered = before_rd_filter - len(candidates)
+src/modules/search.py:191:                if rd_filtered > 0:
+src/modules/search.py:192:                    logger.info(f"Filtered out {rd_filtered} non-R&D candidates")
+src/modules/search.py:193:
+src/modules/search.py:194:                # Apply filters if specified
+src/modules/search.py:195:                if company:
+src/modules/search.py:196:                    company_lower = [cn.lower() for cn in company]
+src/modules/search.py:197:                    candidates = [c for c in candidates if any(cn in c.company.lower() for cn in company_lower)]
+src/modules/search.py:198:
+src/modules/search.py:199:                if location:
+src/modules/search.py:200:                    candidates = [c for c in candidates if c.location and location.lower() in c.location.lower()]
+src/modules/search.py:201:
+src/modules/search.py:202:                all_candidates.extend(candidates)
+src/modules/search.py:203:                progress.update(task, description=f"Page {page_num}: Found {len(candidates)} candidates")
+src/modules/search.py:204:
+src/modules/search.py:205:                # Log the action
+src/modules/search.py:206:                rate_limiter.log_action('search', {
+src/modules/search.py:207:                    'keywords': keywords,
+src/modules/search.py:208:                    'page': page_num,
+src/modules/search.py:209:                    'results': len(candidates)
+src/modules/search.py:210:                })
+src/modules/search.py:211:
+src/modules/search.py:212:                # Save candidates to database
+src/modules/search.py:213:                _save_candidates_to_db(db_manager, candidates, keywords)
+src/modules/search.py:214:
+src/modules/search.py:215:                # Delay before next page
+src/modules/search.py:216:                if page_num < end_page - 1:
+src/modules/search.py:217:                    await async_random_delay('page_load')
+src/modules/search.py:218:
+src/modules/search.py:219:            except (BrowserError, SessionExpiredError):
+src/modules/search.py:220:                raise  # Critical errors must propagate
+src/modules/search.py:221:            except Exception as e:
+src/modules/search.py:222:                logger.error(f"Error on page {page_num}: {e}")
+src/modules/search.py:223:                progress.update(task, description=f"Page {page_num}: Error - {str(e)[:30]}")
+src/modules/search.py:224:                # Take screenshot for debugging
+src/modules/search.py:225:                await browser.screenshot(f"search_error_page{page_num}")
+src/modules/search.py:226:                continue
+src/modules/search.py:227:
+src/modules/search.py:228:    # Log search to history
+src/modules/search.py:229:    _log_search_history(db_manager, keywords, company, location, pages, len(all_candidates))
+src/modules/search.py:230:
+src/modules/search.py:231:    console.print(f"[green]Search complete. Found {len(all_candidates)} candidates.[/green]")
+src/modules/search.py:232:    return all_candidates
+src/modules/search.py:233:
+src/modules/search.py:234:
+src/modules/search.py:235:async def _extract_search_results(page: Page, config) -> List[CandidateBasic]:
+src/modules/search.py:236:    """
+src/modules/search.py:237:    Extract candidate information from search results page.
+src/modules/search.py:238:
+src/modules/search.py:239:    Args:
+src/modules/search.py:240:        page: Playwright page instance
+src/modules/search.py:241:        config: Config instance
+src/modules/search.py:242:
+src/modules/search.py:243:    Returns:
+src/modules/search.py:244:        List of CandidateBasic objects
+src/modules/search.py:245:    """
+src/modules/search.py:246:    candidates = []
+src/modules/search.py:247:
+src/modules/search.py:248:    try:
+src/modules/search.py:249:        # Wait for page to be fully loaded
+src/modules/search.py:250:        await page.wait_for_load_state('networkidle', timeout=10000)
+src/modules/search.py:251:    except Exception:
+src/modules/search.py:252:        pass  # Continue even if networkidle times out
+src/modules/search.py:253:
+src/modules/search.py:254:    # Wait for actual result cards to render (avoid "搜索数据中..." race condition)
+src/modules/search.py:255:    try:
+src/modules/search.py:256:        await page.wait_for_function(
+src/modules/search.py:257:            '''() => {
+src/modules/search.py:258:                const body = document.body ? document.body.innerText : '';
+src/modules/search.py:259:                if (body.includes('搜索数据中') || body.includes('加载中')) return false;
+src/modules/search.py:260:                // Check for avatar images indicating result cards are rendered
+src/modules/search.py:261:                const imgs = document.querySelectorAll('img');
+src/modules/search.py:262:                let avatarCount = 0;
+src/modules/search.py:263:                for (const img of imgs) {
+src/modules/search.py:264:                    const rect = img.getBoundingClientRect();
+src/modules/search.py:265:                    if (rect.width >= 20 && rect.width <= 100 && rect.height >= 20 && rect.height <= 100) {
+src/modules/search.py:266:                        avatarCount++;
+src/modules/search.py:267:                    }
+src/modules/search.py:268:                }
+src/modules/search.py:269:                return avatarCount >= 1;
+src/modules/search.py:270:            }''',
+src/modules/search.py:271:            timeout=8000,
+src/modules/search.py:272:        )
+src/modules/search.py:273:    except Exception:
+src/modules/search.py:274:        logger.debug("Timed out waiting for result cards to render, proceeding with extraction")
+src/modules/search.py:275:
+src/modules/search.py:276:    try:
+src/modules/search.py:277:        # Strategy: Extract candidates by finding avatar images and their associated text
+src/modules/search.py:278:        candidates_data = await page.evaluate('''() => {
+src/modules/search.py:279:            const candidates = [];
+src/modules/search.py:280:            const seenNames = new Set();
+src/modules/search.py:281:
+src/modules/search.py:282:            // Find all images that look like avatars
+src/modules/search.py:283:            const images = document.querySelectorAll('img');
+src/modules/search.py:284:
+src/modules/search.py:285:            for (const img of images) {
+src/modules/search.py:286:                // Skip large images (probably not avatars)
+src/modules/search.py:287:                const rect = img.getBoundingClientRect();
+src/modules/search.py:288:                if (rect.width > 100 || rect.height > 100) continue;
+src/modules/search.py:289:                if (rect.width < 20 || rect.height < 20) continue;
+src/modules/search.py:290:
+src/modules/search.py:291:                // Find parent container (the card)
+src/modules/search.py:292:                let card = img.parentElement;
+src/modules/search.py:293:                for (let i = 0; i < 8 && card; i++) {
+src/modules/search.py:294:                    const cardRect = card.getBoundingClientRect();
+src/modules/search.py:295:                    // Look for a reasonable card size
+src/modules/search.py:296:                    if (cardRect.width > 200 && cardRect.height > 50 && cardRect.height < 200) {
+src/modules/search.py:297:                        break;
+src/modules/search.py:298:                    }
+src/modules/search.py:299:                    card = card.parentElement;
+src/modules/search.py:300:                }
+src/modules/search.py:301:
+src/modules/search.py:302:                if (!card) continue;
+src/modules/search.py:303:
+src/modules/search.py:304:                // Get all text nodes from card, preserving order
+src/modules/search.py:305:                const textParts = [];
+src/modules/search.py:306:                const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT, null, false);
+src/modules/search.py:307:                while (walker.nextNode()) {
+src/modules/search.py:308:                    const text = walker.currentNode.textContent.trim();
+src/modules/search.py:309:                    if (text && text.length > 0 && text.length < 100) {
+src/modules/search.py:310:                        textParts.push(text);
+src/modules/search.py:311:                    }
+src/modules/search.py:312:                }
+src/modules/search.py:313:
+src/modules/search.py:314:                // Parse candidate info from text parts
+src/modules/search.py:315:                // Pattern: Name, Activity time, Company+Position, Industry|Department
+src/modules/search.py:316:                let name = '';
+src/modules/search.py:317:                let company = '';
+src/modules/search.py:318:                let title = '';
+src/modules/search.py:319:                let industry = '';
+src/modules/search.py:320:
+src/modules/search.py:321:                // Compound job title patterns (longer patterns first for greedy match)
+src/modules/search.py:322:                const jobPatterns = [
+src/modules/search.py:323:                    // Compound titles with prefix modifiers
+src/modules/search.py:324:                    /(?:高级|资深|首席|初级|中级|senior|junior|staff|principal|lead)?\s*(?:前端|后端|全栈|web|Web|iOS|Android|Java|Python|Go|C\+\+|PHP|.NET|算法|数据|AI|机器学习|深度学习|NLP|大数据|云计算|DevOps|SRE|安全|测试|嵌入式|移动端|客户端|服务端|区块链|具身智能|自动驾驶|机器人)?\s*(?:工程师|开发|架构师|专家|技术经理|技术总监|技术负责人|Tech\s*Lead)/i,
+src/modules/search.py:325:                    // Management titles
+src/modules/search.py:326:                    /(?:技术|产品|运营|市场|销售|人力|财务|行政|项目|研发)?\s*(?:总监|经理|主管|负责人|VP|总裁|副总|合伙人|创始人|董事|CEO|CTO|COO|CFO|CMO|CHO|CIO)/i,
+src/modules/search.py:327:                    // Other roles
+src/modules/search.py:328:                    /(?:产品|UI|UX|交互|视觉)?\s*(?:设计师|分析师|顾问|运营|助理|实习生?)/i,
+src/modules/search.py:329:                ];
+src/modules/search.py:330:
+src/modules/search.py:331:                // Patterns for text that should be skipped
+src/modules/search.py:332:                const skipPatterns = [
+src/modules/search.py:333:                    /^[+＋]\s*好友$/,          // "+ 好友" button
+src/modules/search.py:334:                    /^\d+个共同好友$/,           // "1个共同好友" social label
+src/modules/search.py:335:                    /^共同好友/,                 // "共同好友..." variants
+src/modules/search.py:336:                    /^已关注$/,                  // "已关注" button
+src/modules/search.py:337:                    /^添加好友$/,                // "添加好友" button
+src/modules/search.py:338:                    /^关注$/,                    // "关注" button
+src/modules/search.py:339:                    /^好友$/,                    // "好友" label
+src/modules/search.py:340:                    /^[|｜·]$/,                  // separators
+src/modules/search.py:341:                ];
+src/modules/search.py:342:
+src/modules/search.py:343:                const isSkippable = (text) => {
+src/modules/search.py:344:                    if (skipPatterns.some(p => p.test(text))) return true;
+src/modules/search.py:345:                    // Activity time
+src/modules/search.py:346:                    if (/天前|小时前|分钟前|刚刚|活跃|在线/.test(text)) return true;
+src/modules/search.py:347:                    return false;
+src/modules/search.py:348:                };
+src/modules/search.py:349:
+src/modules/search.py:350:                for (let i = 0; i < textParts.length; i++) {
+src/modules/search.py:351:                    const part = textParts[i];
+src/modules/search.py:352:
+src/modules/search.py:353:                    if (isSkippable(part)) continue;
+src/modules/search.py:354:
+src/modules/search.py:355:                    // First short text (2-15 chars, pure CJK/letters) is likely the name
+src/modules/search.py:356:                    if (!name && part.length >= 2 && part.length <= 15) {
+src/modules/search.py:357:                        if (/^[\u4e00-\u9fa5a-zA-Z·\s]+$/.test(part)) {
+src/modules/search.py:358:                            name = part;
+src/modules/search.py:359:                            continue;
+src/modules/search.py:360:                        }
+src/modules/search.py:361:                    }
+src/modules/search.py:362:
+src/modules/search.py:363:                    // After name, next substantial text is company+position
+src/modules/search.py:364:                    if (name && !company && part.length > 2) {
+src/modules/search.py:365:                        // Try to split company and position using regex patterns
+src/modules/search.py:366:                        let splitDone = false;
+src/modules/search.py:367:                        for (const pattern of jobPatterns) {
+src/modules/search.py:368:                            const match = part.match(pattern);
+src/modules/search.py:369:                            if (match && match.index > 0) {
+src/modules/search.py:370:                                company = part.substring(0, match.index).trim();
+src/modules/search.py:371:                                title = match[0].trim();
+src/modules/search.py:372:                                splitDone = true;
+src/modules/search.py:373:                                break;
+src/modules/search.py:374:                            }
+src/modules/search.py:375:                        }
+src/modules/search.py:376:                        if (!splitDone) {
+src/modules/search.py:377:                            company = part;
+src/modules/search.py:378:                        }
+src/modules/search.py:379:                        continue;
+src/modules/search.py:380:                    }
+src/modules/search.py:381:
+src/modules/search.py:382:                    // Next part is industry|department info
+src/modules/search.py:383:                    if (name && company && !industry && part.length > 2) {
+src/modules/search.py:384:                        industry = part;
+src/modules/search.py:385:                        // If title wasn't split from company, use industry as fallback context
+src/modules/search.py:386:                        if (!title) {
+src/modules/search.py:387:                            title = industry;
+src/modules/search.py:388:                        }
+src/modules/search.py:389:                        break;
+src/modules/search.py:390:                    }
+src/modules/search.py:391:                }
+src/modules/search.py:392:
+src/modules/search.py:393:                // Skip if no name found or premium placeholder
+src/modules/search.py:394:                if (!name) continue;
+src/modules/search.py:395:                if (name === '脉脉高价值人脉') continue;
+src/modules/search.py:396:
+src/modules/search.py:397:                // Extract user ID from DOM patterns on card and ancestor elements.
+src/modules/search.py:398:                // Two patterns exist:
+src/modules/search.py:399:                //   1. contactcard_{numeric_id} — on ancestors (colleagues layout)
+src/modules/search.py:400:                //   2. member_entry_{numeric_id} — on descendants (standard layout)
+src/modules/search.py:401:                let userId = '';
+src/modules/search.py:402:
+src/modules/search.py:403:                // Check ancestors for numeric contactcard_{id}
+src/modules/search.py:404:                let el = card;
+src/modules/search.py:405:                while (el) {
+src/modules/search.py:406:                    const elId = el.id || '';
+src/modules/search.py:407:                    const ccMatch = elId.match(/^contactcard_(\d+)$/);
+src/modules/search.py:408:                    if (ccMatch) {
+src/modules/search.py:409:                        userId = ccMatch[1];
+src/modules/search.py:410:                        break;
+src/modules/search.py:411:                    }
+src/modules/search.py:412:                    el = el.parentElement;
+src/modules/search.py:413:                }
+src/modules/search.py:414:
+src/modules/search.py:415:                // Check descendants for member_entry_{id} (most common pattern)
+src/modules/search.py:416:                if (!userId) {
+src/modules/search.py:417:                    const meEl = card.querySelector('[id^="member_entry_"]');
+src/modules/search.py:418:                    if (meEl) {
+src/modules/search.py:419:                        const meMatch = meEl.id.match(/^member_entry_(\d+)$/);
+src/modules/search.py:420:                        if (meMatch) {
+src/modules/search.py:421:                            userId = meMatch[1];
+src/modules/search.py:422:                        }
+src/modules/search.py:423:                    }
+src/modules/search.py:424:                }
+src/modules/search.py:425:
+src/modules/search.py:426:                // Also check ancestor descendants for contactcard with numeric ID
+src/modules/search.py:427:                if (!userId) {
+src/modules/search.py:428:                    const ccEl = card.querySelector('[id^="contactcard_"]');
+src/modules/search.py:429:                    if (ccEl) {
+src/modules/search.py:430:                        const ccMatch = ccEl.id.match(/^contactcard_(\d+)$/);
+src/modules/search.py:431:                        if (ccMatch) {
+src/modules/search.py:432:                            userId = ccMatch[1];
+src/modules/search.py:433:                        }
+src/modules/search.py:434:                    }
+src/modules/search.py:435:                }
+src/modules/search.py:436:
+src/modules/search.py:437:                // Use real user_id as maimai_id when available, fall back to hash
+src/modules/search.py:438:                let maimaiId;
+src/modules/search.py:439:                if (userId) {
+src/modules/search.py:440:                    maimaiId = 'mm_' + userId;
+src/modules/search.py:441:                } else {
+src/modules/search.py:442:                    const idSource = (name || '') + '|' + (company || '') + '|' + (title || '');
+src/modules/search.py:443:                    let hash = 0;
+src/modules/search.py:444:                    for (let j = 0; j < idSource.length; j++) {
+src/modules/search.py:445:                        const ch = idSource.charCodeAt(j);
+src/modules/search.py:446:                        hash = ((hash << 5) - hash) + ch;
+src/modules/search.py:447:                        hash = hash & hash; // Convert to 32bit integer
+src/modules/search.py:448:                    }
+src/modules/search.py:449:                    maimaiId = 'mm_' + Math.abs(hash).toString(16).padStart(8, '0');
+src/modules/search.py:450:                }
+src/modules/search.py:451:
+src/modules/search.py:452:                // Skip duplicates based on the computed ID
+src/modules/search.py:453:                if (seenNames.has(maimaiId)) continue;
+src/modules/search.py:454:                seenNames.add(maimaiId);
+src/modules/search.py:455:
+src/modules/search.py:456:                // Build profile URL from user ID when available
+src/modules/search.py:457:                let profileUrl = '';
+src/modules/search.py:458:                if (userId) {
+src/modules/search.py:459:                    profileUrl = 'https://maimai.cn/contact/detail/' + userId + '?dstu=' + userId;
+src/modules/search.py:460:                }
+src/modules/search.py:461:
+src/modules/search.py:462:                // Fallback: extract profile URL from <a> tags inside the card
+src/modules/search.py:463:                if (!profileUrl) {
+src/modules/search.py:464:                    let fallbackUrl = '';
+src/modules/search.py:465:
+src/modules/search.py:466:                    // First: check <a> ancestors between img and card
+src/modules/search.py:467:                    let ancestor = img.parentElement;
+src/modules/search.py:468:                    while (ancestor && ancestor !== card) {
+src/modules/search.py:469:                        if (ancestor.tagName === 'A' && ancestor.href) {
+src/modules/search.py:470:                            const href = ancestor.getAttribute('href') || '';
+src/modules/search.py:471:                            if (href.includes('/profile/detail') || href.includes('/contact/detail/') || href.includes('/u/') || href.includes('egid=') || href.includes('dstu=')) {
+src/modules/search.py:472:                                profileUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+src/modules/search.py:473:                                break;
+src/modules/search.py:474:                            }
+src/modules/search.py:475:                        }
+src/modules/search.py:476:                        ancestor = ancestor.parentElement;
+src/modules/search.py:477:                    }
+src/modules/search.py:478:
+src/modules/search.py:479:                    // Second: search all <a> descendants inside the card
+src/modules/search.py:480:                    if (!profileUrl) {
+src/modules/search.py:481:                        const links = card.querySelectorAll('a[href]');
+src/modules/search.py:482:                        for (const link of links) {
+src/modules/search.py:483:                            const href = link.getAttribute('href') || '';
+src/modules/search.py:484:                            if (href.includes('/profile/detail') || href.includes('/contact/detail/') || href.includes('/u/') || href.includes('egid=') || href.includes('dstu=')) {
+src/modules/search.py:485:                                profileUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+src/modules/search.py:486:                                break;
+src/modules/search.py:487:                            }
+src/modules/search.py:488:                            if (!fallbackUrl && href && !href.startsWith('javascript:') && (href.startsWith('/') || href.includes('maimai.cn'))) {
+src/modules/search.py:489:                                fallbackUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+src/modules/search.py:490:                            }
+src/modules/search.py:491:                        }
+src/modules/search.py:492:                    }
+src/modules/search.py:493:                    if (!profileUrl && fallbackUrl) {
+src/modules/search.py:494:                        profileUrl = fallbackUrl;
+src/modules/search.py:495:                    }
+src/modules/search.py:496:                }
+src/modules/search.py:497:
+src/modules/search.py:498:                // Extract location: look for remaining short text parts after name/company/title
+src/modules/search.py:499:                // Common patterns: city names like "北京", "上海", "深圳" etc.
+src/modules/search.py:500:                let location = '';
+src/modules/search.py:501:                const locationPatterns = /^(北京|上海|广州|深圳|杭州|成都|南京|武汉|西安|苏州|长沙|天津|重庆|郑州|东莞|青岛|大连|宁波|厦门|合肥|佛山|福州|昆明|济南|珠海|无锡|常州|海外|远程|香港|台北|新加坡|美国|日本|韩国|英国|全国|其他)/;
+src/modules/search.py:502:                for (let i = 0; i < textParts.length; i++) {
+src/modules/search.py:503:                    const part = textParts[i];
+src/modules/search.py:504:                    if (part === name || part === company || part === title || part === industry) continue;
+src/modules/search.py:505:                    if (isSkippable(part)) continue;
+src/modules/search.py:506:                    if (locationPatterns.test(part) && part.length <= 10) {
+src/modules/search.py:507:                        location = part;
+src/modules/search.py:508:                        break;
+src/modules/search.py:509:                    }
+src/modules/search.py:510:                }
+src/modules/search.py:511:
+src/modules/search.py:512:                candidates.push({
+src/modules/search.py:513:                    name: name,
+src/modules/search.py:514:                    title: title || '',
+src/modules/search.py:515:                    company: company || '',
+src/modules/search.py:516:                    maimai_id: maimaiId,
+src/modules/search.py:517:                    profile_url: profileUrl,
+src/modules/search.py:518:                    location: location,
+src/modules/search.py:519:                });
+src/modules/search.py:520:            }
+src/modules/search.py:521:
+src/modules/search.py:522:            return candidates;
+src/modules/search.py:523:        }''')
+src/modules/search.py:524:
+src/modules/search.py:525:        logger.info(f"JavaScript extraction found {len(candidates_data)} candidates")
+src/modules/search.py:526:
+src/modules/search.py:527:        for data in candidates_data:
+src/modules/search.py:528:            if data.get('name'):
+src/modules/search.py:529:                candidates.append(CandidateBasic(
+src/modules/search.py:530:                    maimai_id=data.get('maimai_id', ''),
+src/modules/search.py:531:                    name=data.get('name', ''),
+src/modules/search.py:532:                    title=data.get('title', ''),
+src/modules/search.py:533:                    company=data.get('company', ''),
+src/modules/search.py:534:                    location=data.get('location', ''),
+src/modules/search.py:535:                    profile_url=data.get('profile_url', '')
+src/modules/search.py:536:                ))
+src/modules/search.py:537:
+src/modules/search.py:538:        # For candidates missing profile_url, try extracting from contactcard DOM
+src/modules/search.py:539:        missing_url = [c for c in candidates if not c.profile_url]
+src/modules/search.py:540:        if missing_url:
+src/modules/search.py:541:            logger.info(f"{len(missing_url)} candidates missing profile_url, searching contactcard DOM")
+src/modules/search.py:542:            for c in missing_url:
+src/modules/search.py:543:                try:
+src/modules/search.py:544:                    profile_url = await _click_avatar_for_profile_url(page, c.name, c.company)
+src/modules/search.py:545:                    if profile_url:
+src/modules/search.py:546:                        c.profile_url = profile_url
+src/modules/search.py:547:                except Exception as e:
+src/modules/search.py:548:                    logger.debug(f"Contactcard lookup failed for '{c.name}': {e}")
+src/modules/search.py:549:
+src/modules/search.py:550:        # Fallback: Strategy 1 - Find all profile links directly
+src/modules/search.py:551:        if not candidates:
+src/modules/search.py:552:            profile_links = await page.query_selector_all('a[href*="/contact/"], a[href*="/u/"], a[href*="egid="], a[href*="profile"]')
+src/modules/search.py:553:        else:
+src/modules/search.py:554:            profile_links = []
+src/modules/search.py:555:
+src/modules/search.py:556:        if profile_links and not candidates:
+src/modules/search.py:557:            logger.debug(f"Found {len(profile_links)} profile links")
+src/modules/search.py:558:
+src/modules/search.py:559:            seen_ids = set()
+src/modules/search.py:560:            for link in profile_links:
+src/modules/search.py:561:                try:
+src/modules/search.py:562:                    href = await link.get_attribute('href')
+src/modules/search.py:563:                    if not href:
+src/modules/search.py:564:                        continue
+src/modules/search.py:565:
+src/modules/search.py:566:                    # Extract maimai_id from URL
+src/modules/search.py:567:                    maimai_id = None
+src/modules/search.py:568:                    if '/contact/detail/' in href:
+src/modules/search.py:569:                        maimai_id = href.split('/contact/detail/')[-1].split('?')[0].split('/')[0]
+src/modules/search.py:570:                    elif '/u/' in href:
+src/modules/search.py:571:                        maimai_id = href.split('/u/')[-1].split('?')[0].split('/')[0]
+src/modules/search.py:572:
+src/modules/search.py:573:                    if not maimai_id or maimai_id in seen_ids:
+src/modules/search.py:574:                        continue
+src/modules/search.py:575:                    seen_ids.add(maimai_id)
+src/modules/search.py:576:
+src/modules/search.py:577:                    # Get name from link text
+src/modules/search.py:578:                    name = await link.inner_text()
+src/modules/search.py:579:                    name = name.strip()
+src/modules/search.py:580:                    if not name or len(name) > 50:  # Skip if no name or too long (probably not a name)
+src/modules/search.py:581:                        continue
+src/modules/search.py:582:
+src/modules/search.py:583:                    # Try to get parent container for more info
+src/modules/search.py:584:                    parent = await link.evaluate_handle('el => el.closest("div, li, article") || el.parentElement.parentElement')
+src/modules/search.py:585:
+src/modules/search.py:586:                    title = ""
+src/modules/search.py:587:                    company = ""
+src/modules/search.py:588:
+src/modules/search.py:589:                    if parent:
+src/modules/search.py:590:                        # Get all text content and try to parse
+src/modules/search.py:591:                        try:
+src/modules/search.py:592:                            full_text = await parent.inner_text()
+src/modules/search.py:593:                            lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+src/modules/search.py:594:
+src/modules/search.py:595:                            # Usually: name, then title/company info
+src/modules/search.py:596:                            for line in lines:
+src/modules/search.py:597:                                if line == name:
+src/modules/search.py:598:                                    continue
+src/modules/search.py:599:                                if '好友' in line or '关注' in line:
+src/modules/search.py:600:                                    continue
+src/modules/search.py:601:                                if not title and len(line) < 50:
+src/modules/search.py:602:                                    title = line
+src/modules/search.py:603:                                elif not company and len(line) < 50:
+src/modules/search.py:604:                                    company = line
+src/modules/search.py:605:                                    break
+src/modules/search.py:606:                        except Exception:
+src/modules/search.py:607:                            pass
+src/modules/search.py:608:
+src/modules/search.py:609:                    profile_url = href if href.startswith('http') else f"https://maimai.cn{href}"
+src/modules/search.py:610:
+src/modules/search.py:611:                    candidates.append(CandidateBasic(
+src/modules/search.py:612:                        maimai_id=maimai_id,
+src/modules/search.py:613:                        name=name,
+src/modules/search.py:614:                        title=title,
+src/modules/search.py:615:                        company=company,
+src/modules/search.py:616:                        profile_url=profile_url
+src/modules/search.py:617:                    ))
+src/modules/search.py:618:
+src/modules/search.py:619:                except Exception as e:
+src/modules/search.py:620:                    logger.debug(f"Failed to extract from link: {e}")
+src/modules/search.py:621:                    continue
+src/modules/search.py:622:
+src/modules/search.py:623:        # Strategy 2: If no links found, try button-based detection
+src/modules/search.py:624:        if not candidates:
+src/modules/search.py:625:            logger.debug("Trying button-based detection")
+src/modules/search.py:626:            buttons = await page.query_selector_all('button:has-text("好友"), button:has-text("关注")')
+src/modules/search.py:627:
+src/modules/search.py:628:            for button in buttons:
+src/modules/search.py:629:                try:
+src/modules/search.py:630:                    parent = await button.evaluate_handle('el => el.closest("div, li, article")')
+src/modules/search.py:631:                    if not parent:
+src/modules/search.py:632:                        continue
+src/modules/search.py:633:
+src/modules/search.py:634:                    # Find link in parent
+src/modules/search.py:635:                    link = await parent.query_selector('a[href*="/contact"], a[href*="/u/"]')
+src/modules/search.py:636:                    if link:
+src/modules/search.py:637:                        href = await link.get_attribute('href')
+src/modules/search.py:638:                        name = await link.inner_text()
+src/modules/search.py:639:
+src/modules/search.py:640:                        maimai_id = None
+src/modules/search.py:641:                        if '/contact/detail/' in href:
+src/modules/search.py:642:                            maimai_id = href.split('/contact/detail/')[-1].split('?')[0]
+src/modules/search.py:643:                        elif '/u/' in href:
+src/modules/search.py:644:                            maimai_id = href.split('/u/')[-1].split('?')[0]
+src/modules/search.py:645:
+src/modules/search.py:646:                        if maimai_id and name:
+src/modules/search.py:647:                            candidates.append(CandidateBasic(
+src/modules/search.py:648:                                maimai_id=maimai_id,
+src/modules/search.py:649:                                name=name.strip(),
+src/modules/search.py:650:                                title="",
+src/modules/search.py:651:                                company="",
+src/modules/search.py:652:                                profile_url=href
+src/modules/search.py:653:                            ))
+src/modules/search.py:654:                except Exception:
+src/modules/search.py:655:                    continue
+src/modules/search.py:656:
+src/modules/search.py:657:        # Filter out premium placeholder profiles
+src/modules/search.py:658:        before_filter = len(candidates)
+src/modules/search.py:659:        candidates = [c for c in candidates if c.name not in PREMIUM_PLACEHOLDER_NAMES]
+src/modules/search.py:660:        filtered_count = before_filter - len(candidates)
+src/modules/search.py:661:        if filtered_count > 0:
+src/modules/search.py:662:            logger.info(f"Filtered out {filtered_count} premium placeholder profiles")
+src/modules/search.py:663:
+src/modules/search.py:664:        logger.info(f"Extracted {len(candidates)} candidates from page")
+src/modules/search.py:665:
+src/modules/search.py:666:    except Exception as e:
+src/modules/search.py:667:        logger.error(f"Error extracting search results: {e}")
+src/modules/search.py:668:
+src/modules/search.py:669:    return candidates
+src/modules/search.py:670:
+src/modules/search.py:671:
+src/modules/search.py:672:def _save_candidates_to_db(db_manager, candidates: List[CandidateBasic], source_search: str) -> None:
+src/modules/search.py:673:    """
+src/modules/search.py:674:    Save or update candidates in database.
+src/modules/search.py:675:
+src/modules/search.py:676:    Args:
+src/modules/search.py:677:        db_manager: Database manager instance
+src/modules/search.py:678:        candidates: List of candidates to save
+src/modules/search.py:679:        source_search: Search keywords that found these candidates
+src/modules/search.py:680:    """
+src/modules/search.py:681:    try:
+src/modules/search.py:682:        with db_manager.session_scope() as session:
+src/modules/search.py:683:            # Batch pre-fetch existing candidates to avoid N+1 queries
+src/modules/search.py:684:            maimai_ids = [c.maimai_id for c in candidates]
+src/modules/search.py:685:            existing_by_id = {
+src/modules/search.py:686:                row.maimai_id: row
+src/modules/search.py:687:                for row in session.query(Candidate).filter(
+src/modules/search.py:688:                    Candidate.maimai_id.in_(maimai_ids)
+src/modules/search.py:689:                ).all()
+src/modules/search.py:690:            }
+src/modules/search.py:691:
+src/modules/search.py:692:            # Also batch-fetch by name+company for dedup
+src/modules/search.py:693:            name_company_pairs = [(c.name, c.company) for c in candidates]
+src/modules/search.py:694:            from sqlalchemy import tuple_
+src/modules/search.py:695:            existing_by_name = {}
+src/modules/search.py:696:            if name_company_pairs:
+src/modules/search.py:697:                for row in session.query(Candidate).filter(
+src/modules/search.py:698:                    tuple_(Candidate.name, Candidate.company).in_(name_company_pairs)
+src/modules/search.py:699:                ).all():
+src/modules/search.py:700:                    existing_by_name[(row.name, row.company)] = row
+src/modules/search.py:701:
+src/modules/search.py:702:            for c in candidates:
+src/modules/search.py:703:                existing = existing_by_id.get(c.maimai_id)
+src/modules/search.py:704:                if not existing:
+src/modules/search.py:705:                    existing = existing_by_name.get((c.name, c.company))
+src/modules/search.py:706:
+src/modules/search.py:707:                if existing:
+src/modules/search.py:708:                    existing.name = c.name
+src/modules/search.py:709:                    existing.title = c.title
+src/modules/search.py:710:                    existing.company = c.company
+src/modules/search.py:711:                    existing.location = c.location
+src/modules/search.py:712:                    existing.profile_url = c.profile_url
+src/modules/search.py:713:                else:
+src/modules/search.py:714:                    candidate = Candidate(
+src/modules/search.py:715:                        maimai_id=c.maimai_id,
+src/modules/search.py:716:                        name=c.name,
+src/modules/search.py:717:                        title=c.title,
+src/modules/search.py:718:                        company=c.company,
+src/modules/search.py:719:                        location=c.location,
+src/modules/search.py:720:                        profile_url=c.profile_url,
+src/modules/search.py:721:                        source_search=source_search
+src/modules/search.py:722:                    )
+src/modules/search.py:723:                    session.add(candidate)
+src/modules/search.py:724:
+src/modules/search.py:725:            logger.debug(f"Saved {len(candidates)} candidates to database")
+src/modules/search.py:726:
+src/modules/search.py:727:    except Exception as e:
+src/modules/search.py:728:        logger.error(f"Failed to save candidates: {e}")
+src/modules/search.py:729:
+src/modules/search.py:730:
+src/modules/search.py:731:def _log_search_history(
+src/modules/search.py:732:    db_manager,
+src/modules/search.py:733:    keywords: str,
+src/modules/search.py:734:    company: Optional[tuple],
+src/modules/search.py:735:    location: Optional[str],
+src/modules/search.py:736:    pages: int,
+src/modules/search.py:737:    results_count: int
+src/modules/search.py:738:) -> None:
+src/modules/search.py:739:    """Log search to history table."""
+src/modules/search.py:740:    try:
+src/modules/search.py:741:        with db_manager.session_scope() as session:
+src/modules/search.py:742:            history = SearchHistory(
+src/modules/search.py:743:                criteria={
+src/modules/search.py:744:                    'keywords': keywords,
+src/modules/search.py:745:                    'company': list(company) if company else None,
+src/modules/search.py:746:                    'location': location,
+src/modules/search.py:747:                    'pages': pages
+src/modules/search.py:748:                },
+src/modules/search.py:749:                results_count=results_count
+src/modules/search.py:750:            )
+src/modules/search.py:751:            session.add(history)
+src/modules/search.py:752:    except Exception as e:
+src/modules/search.py:753:        logger.error(f"Failed to log search history: {e}")
+src/modules/search.py:754:
+src/modules/search.py:755:
+src/modules/search.py:756:async def _click_avatar_for_profile_url(page: Page, name: str, company: str) -> Optional[str]:
+src/modules/search.py:757:    """Try to extract profile URL for a candidate from the DOM contactcard pattern.
+src/modules/search.py:758:
+src/modules/search.py:759:    Searches the current page for a contactcard element whose parent card
+src/modules/search.py:760:    contains the candidate's name (and optionally company), then constructs
+src/modules/search.py:761:    the profile URL from the extracted user ID.
+src/modules/search.py:762:
+src/modules/search.py:763:    Args:
+src/modules/search.py:764:        page: Playwright page on the search results
+src/modules/search.py:765:        name: Candidate name to match
+src/modules/search.py:766:        company: Candidate company to help disambiguate
+src/modules/search.py:767:
+src/modules/search.py:768:    Returns:
+src/modules/search.py:769:        Profile URL string, or None if not found
+src/modules/search.py:770:    """
+src/modules/search.py:771:    try:
+src/modules/search.py:772:        user_id = await page.evaluate('''(args) => {
+src/modules/search.py:773:            const { name, company } = args;
+src/modules/search.py:774:            // Check contactcard_{numeric_id} ancestors
+src/modules/search.py:775:            const ccElements = document.querySelectorAll('[id^="contactcard_"]');
+src/modules/search.py:776:            for (const el of ccElements) {
+src/modules/search.py:777:                const text = el.textContent || '';
+src/modules/search.py:778:                if (!text.includes(name)) continue;
+src/modules/search.py:779:                if (company && !text.includes(company)) continue;
+src/modules/search.py:780:                const match = el.id.match(/^contactcard_(\\d+)$/);
+src/modules/search.py:781:                if (match) return match[1];
+src/modules/search.py:782:            }
+src/modules/search.py:783:            // Check member_entry_{numeric_id} descendants
+src/modules/search.py:784:            const meElements = document.querySelectorAll('[id^="member_entry_"]');
+src/modules/search.py:785:            for (const el of meElements) {
+src/modules/search.py:786:                // Walk up to find the card containing this member_entry
+src/modules/search.py:787:                let card = el.parentElement;
+src/modules/search.py:788:                for (let i = 0; i < 8 && card; i++) {
+src/modules/search.py:789:                    const text = card.textContent || '';
+src/modules/search.py:790:                    if (text.includes(name) && (!company || text.includes(company))) {
+src/modules/search.py:791:                        const match = el.id.match(/^member_entry_(\\d+)$/);
+src/modules/search.py:792:                        if (match) return match[1];
+src/modules/search.py:793:                    }
+src/modules/search.py:794:                    card = card.parentElement;
+src/modules/search.py:795:                }
+src/modules/search.py:796:            }
+src/modules/search.py:797:            return null;
+src/modules/search.py:798:        }''', {'name': name, 'company': company})
+src/modules/search.py:799:
+src/modules/search.py:800:        if user_id:
+src/modules/search.py:801:            profile_url = f"https://maimai.cn/contact/detail/{user_id}?dstu={user_id}"
+src/modules/search.py:802:            logger.info(f"Resolved profile_url for '{name}' via contactcard: {profile_url}")
+src/modules/search.py:803:            return profile_url
+src/modules/search.py:804:
+src/modules/search.py:805:        logger.debug(f"No contactcard found for '{name}'")
+src/modules/search.py:806:        return None
+src/modules/search.py:807:
+src/modules/search.py:808:    except Exception as e:
+src/modules/search.py:809:        logger.debug(f"_click_avatar_for_profile_url error for '{name}': {e}")
+src/modules/search.py:810:        return None
+src/modules/search.py:811:
+src/modules/search.py:812:
+src/modules/search.py:813:# ---------------------------------------------------------------------------
+src/modules/search.py:814:# Enterprise recruitment path (Path B)
+src/modules/search.py:815:# ---------------------------------------------------------------------------
+src/modules/search.py:816:
+src/modules/search.py:817:MAIMAI_HOME_URL = "https://maimai.cn"
+src/modules/search.py:818:ENTERPRISE_URL_MARKER = "ent/talents/discover"
+src/modules/search.py:819:
+src/modules/search.py:820:
+src/modules/search.py:821:async def search_candidates_enterprise(
+src/modules/search.py:822:    keywords: str,
+src/modules/search.py:823:    company: Optional[tuple] = None,
+src/modules/search.py:824:    pages: int = 1,
+src/modules/search.py:825:    browser: Optional[BrowserManager] = None,
+src/modules/search.py:826:    keep_tab_open: bool = False,
+src/modules/search.py:827:) -> List[CandidateBasic]:
+src/modules/search.py:828:    """Search for candidates via the enterprise recruitment path.
+src/modules/search.py:829:
+src/modules/search.py:830:    Flow:
+src/modules/search.py:831:    1. Switch to primary tab -> navigate to homepage -> click "招聘" tab (opens new tab)
+src/modules/search.py:832:    2. Wait for enterprise page to load
+src/modules/search.py:833:    3. Add keyword filter -> submit
+src/modules/search.py:834:    4. Optionally add company filter
+src/modules/search.py:835:    5. Extract candidates from enterprise card layout
+src/modules/search.py:836:    6. For additional pages, scroll to trigger infinite scroll
+src/modules/search.py:837:    7. Close enterprise tab unless keep_tab_open is True
+src/modules/search.py:838:
+src/modules/search.py:839:    Args:
+src/modules/search.py:840:        keywords: Search keywords
+src/modules/search.py:841:        company: Filter by company names (optional)
+src/modules/search.py:842:        pages: Number of scroll-pages to extract
+src/modules/search.py:843:        browser: Browser manager instance
+src/modules/search.py:844:        keep_tab_open: If True, leave enterprise tab open (for inline messaging)
+src/modules/search.py:845:
+src/modules/search.py:846:    Returns:
+src/modules/search.py:847:        List of CandidateBasic objects
+src/modules/search.py:848:    """
+src/modules/search.py:849:    validate_keywords(keywords)
+src/modules/search.py:850:
+src/modules/search.py:851:    if browser is None:
+src/modules/search.py:852:        browser = get_browser_manager()
+src/modules/search.py:853:
+src/modules/search.py:854:    config = get_config()
+src/modules/search.py:855:    rate_limiter = get_rate_limiter()
+src/modules/search.py:856:    db_manager = get_db_manager()
+src/modules/search.py:857:
+src/modules/search.py:858:    await ensure_logged_in(browser)
+src/modules/search.py:859:
+src/modules/search.py:860:    all_candidates: List[CandidateBasic] = []
+src/modules/search.py:861:    enterprise_tab_opened = False
+src/modules/search.py:862:
+src/modules/search.py:863:    with Progress(
+src/modules/search.py:864:        SpinnerColumn(),
+src/modules/search.py:865:        TextColumn("[progress.description]{task.description}"),
+src/modules/search.py:866:        console=console,
+src/modules/search.py:867:    ) as progress:
+src/modules/search.py:868:        task = progress.add_task("Opening enterprise recruitment...", total=None)
+src/modules/search.py:869:
+src/modules/search.py:870:        try:
+src/modules/search.py:871:            await async_check_rate_limit("search")
+src/modules/search.py:872:
+src/modules/search.py:873:            # Always start from the primary tab to avoid navigating user's open content
+src/modules/search.py:874:            browser.switch_to_primary_tab()
+src/modules/search.py:875:            page = browser.page
+src/modules/search.py:876:
+src/modules/search.py:877:            # Step 1: Navigate to homepage and click 招聘 tab
+src/modules/search.py:878:            await retry_navigation(page, MAIMAI_HOME_URL, wait_until="domcontentloaded")
+src/modules/search.py:879:            await async_random_delay("page_load")
+src/modules/search.py:880:
+src/modules/search.py:881:            sel = config.get_selector("enterprise.recruitment_tab")
+src/modules/search.py:882:            recruitment_tab = await page.wait_for_selector(sel, timeout=5000)
+src/modules/search.py:883:            if not recruitment_tab:
+src/modules/search.py:884:                raise SelectorNotFoundError(f"Could not find recruitment tab: {sel}")
+src/modules/search.py:885:
+src/modules/search.py:886:            # Click opens a new tab — use BrowserManager API
+src/modules/search.py:887:            await recruitment_tab.click()
+src/modules/search.py:888:            page = await browser.wait_for_new_tab(timeout=15000)
+src/modules/search.py:889:            enterprise_tab_opened = True
+src/modules/search.py:890:
+src/modules/search.py:891:            progress.update(task, description="Enterprise page loaded")
+src/modules/search.py:892:
+src/modules/search.py:893:            # Wait for the enterprise page URL
+src/modules/search.py:894:            try:
+src/modules/search.py:895:                await page.wait_for_url(
+src/modules/search.py:896:                    lambda url: ENTERPRISE_URL_MARKER in url,
+src/modules/search.py:897:                    timeout=15000,
+src/modules/search.py:898:                )
+src/modules/search.py:899:            except Exception:
+src/modules/search.py:900:                logger.warning(f"Enterprise URL marker not found, current URL: {page.url}")
+src/modules/search.py:901:
+src/modules/search.py:902:            await async_random_delay("action")
+src/modules/search.py:903:
+src/modules/search.py:904:            # Step 2: Add keyword
+src/modules/search.py:905:            progress.update(task, description=f"Adding keyword: {keywords}")
+src/modules/search.py:906:
+src/modules/search.py:907:            add_kw_sel = config.get_selector("enterprise.add_keyword_button")
+src/modules/search.py:908:            add_kw_btn = await page.wait_for_selector(add_kw_sel, timeout=5000)
+src/modules/search.py:909:            if add_kw_btn:
+src/modules/search.py:910:                await add_kw_btn.click()
+src/modules/search.py:911:                await async_random_delay("action")
+src/modules/search.py:912:
+src/modules/search.py:913:            kw_input_sel = config.get_selector("enterprise.keyword_input")
+src/modules/search.py:914:            await page.wait_for_selector(kw_input_sel, timeout=5000)
+src/modules/search.py:915:            await human_type(page, kw_input_sel, keywords)
+src/modules/search.py:916:            await async_random_delay("action")
+src/modules/search.py:917:
+src/modules/search.py:918:            kw_submit_sel = config.get_selector("enterprise.keyword_submit")
+src/modules/search.py:919:            submit_btn = await page.wait_for_selector(kw_submit_sel, timeout=3000)
+src/modules/search.py:920:            if submit_btn:
+src/modules/search.py:921:                await submit_btn.click()
+src/modules/search.py:922:                await async_random_delay("page_load")
+src/modules/search.py:923:
+src/modules/search.py:924:            # Step 3: Add company filter if specified
+src/modules/search.py:925:            if company:
+src/modules/search.py:926:                progress.update(task, description="Adding company filter...")
+src/modules/search.py:927:                add_co_sel = config.get_selector("enterprise.add_company_button")
+src/modules/search.py:928:                add_co_btn = await page.wait_for_selector(add_co_sel, timeout=5000)
+src/modules/search.py:929:                if add_co_btn:
+src/modules/search.py:930:                    await add_co_btn.click()
+src/modules/search.py:931:                    await async_random_delay("action")
+src/modules/search.py:932:
+src/modules/search.py:933:                co_input_sel = config.get_selector("enterprise.company_input")
+src/modules/search.py:934:                for co_name in company:
+src/modules/search.py:935:                    await page.wait_for_selector(co_input_sel, timeout=5000)
+src/modules/search.py:936:                    await human_type(page, co_input_sel, co_name)
+src/modules/search.py:937:                    await async_random_delay("action")
+src/modules/search.py:938:
+src/modules/search.py:939:                    # Click suggestion dropdown item
+src/modules/search.py:940:                    try:
+src/modules/search.py:941:                        suggestion = await page.wait_for_selector(
+src/modules/search.py:942:                            f"text='{co_name}'", timeout=3000
+src/modules/search.py:943:                        )
+src/modules/search.py:944:                        if suggestion:
+src/modules/search.py:945:                            await suggestion.click()
+src/modules/search.py:946:                            await async_random_delay("action")
+src/modules/search.py:947:                    except Exception:
+src/modules/search.py:948:                        logger.debug(f"Company suggestion not found for: {co_name}")
+src/modules/search.py:949:
+src/modules/search.py:950:            # Step 4: Wait for results and extract
+src/modules/search.py:951:            await page.wait_for_timeout(3000)
+src/modules/search.py:952:            await check_captcha(page, report_to_rate_limiter=True)
+src/modules/search.py:953:
+src/modules/search.py:954:            for page_num in range(1, pages + 1):
+src/modules/search.py:955:                progress.update(task, description=f"Extracting page {page_num}/{pages}...")
+src/modules/search.py:956:
+src/modules/search.py:957:                candidates = await _extract_enterprise_results(page)
+src/modules/search.py:958:
+src/modules/search.py:959:                if not candidates:
+src/modules/search.py:960:                    logger.info(f"No enterprise results on page {page_num}")
+src/modules/search.py:961:                    break
+src/modules/search.py:962:
+src/modules/search.py:963:                # Filter non-R&D roles
+src/modules/search.py:964:                before_filter = len(candidates)
+src/modules/search.py:965:                candidates = [c for c in candidates if not _is_non_rd_title(c.title)]
+src/modules/search.py:966:                filtered = before_filter - len(candidates)
+src/modules/search.py:967:                if filtered > 0:
+src/modules/search.py:968:                    logger.info(f"Filtered out {filtered} non-R&D candidates")
+src/modules/search.py:969:
+src/modules/search.py:970:                all_candidates.extend(candidates)
+src/modules/search.py:971:                progress.update(task, description=f"Page {page_num}: Found {len(candidates)} candidates")
+src/modules/search.py:972:
+src/modules/search.py:973:                rate_limiter.log_action("search", {
+src/modules/search.py:974:                    "keywords": keywords,
+src/modules/search.py:975:                    "page": page_num,
+src/modules/search.py:976:                    "results": len(candidates),
+src/modules/search.py:977:                    "mode": "enterprise",
+src/modules/search.py:978:                })
+src/modules/search.py:979:
+src/modules/search.py:980:                _save_candidates_to_db(db_manager, candidates, keywords)
+src/modules/search.py:981:
+src/modules/search.py:982:                # Scroll for next page (infinite scroll)
+src/modules/search.py:983:                if page_num < pages:
+src/modules/search.py:984:                    await human_scroll(page, "down", distance=800)
+src/modules/search.py:985:                    await async_random_delay("page_load")
+src/modules/search.py:986:                    await page.wait_for_timeout(2000)
+src/modules/search.py:987:
+src/modules/search.py:988:        except Exception as e:
+src/modules/search.py:989:            logger.error(f"Enterprise search error: {e}")
+src/modules/search.py:990:            await browser.screenshot("enterprise_search_error")
+src/modules/search.py:991:            progress.update(task, description=f"Error: {str(e)[:40]}")
+src/modules/search.py:992:        finally:
+src/modules/search.py:993:            # Close the enterprise tab unless caller wants it open for inline messaging
+src/modules/search.py:994:            if enterprise_tab_opened and not keep_tab_open:
+src/modules/search.py:995:                try:
+src/modules/search.py:996:                    await browser.close_current_tab()
+src/modules/search.py:997:                except Exception:
+src/modules/search.py:998:                    pass
+src/modules/search.py:999:
+src/modules/search.py:1000:    _log_search_history(db_manager, keywords, company, None, pages, len(all_candidates))
+src/modules/search.py:1001:
+src/modules/search.py:1002:    console.print(f"[green]Enterprise search complete. Found {len(all_candidates)} candidates.[/green]")
+src/modules/search.py:1003:    return all_candidates
+src/modules/search.py:1004:
+src/modules/search.py:1005:
+src/modules/search.py:1006:async def _extract_enterprise_results(page: Page) -> List[CandidateBasic]:
+src/modules/search.py:1007:    """Extract candidate information from enterprise recruitment results page.
+src/modules/search.py:1008:
+src/modules/search.py:1009:    The enterprise UI has a different card layout from search_center.
+src/modules/search.py:1010:    Uses JS-based extraction tailored to the enterprise talent cards.
+src/modules/search.py:1011:
+src/modules/search.py:1012:    Args:
+src/modules/search.py:1013:        page: Playwright page instance on the enterprise results page
+src/modules/search.py:1014:
+src/modules/search.py:1015:    Returns:
+src/modules/search.py:1016:        List of CandidateBasic objects
+src/modules/search.py:1017:    """
+src/modules/search.py:1018:    candidates = []
+src/modules/search.py:1019:
+src/modules/search.py:1020:    try:
+src/modules/search.py:1021:        await page.wait_for_load_state("networkidle", timeout=10000)
+src/modules/search.py:1022:    except Exception:
+src/modules/search.py:1023:        pass
+src/core/session.py:48:        except OSError:
+src/core/session.py:49:            logger.warning("Could not set restrictive permissions on session directory")
+src/core/session.py:50:
+src/core/session.py:51:    def _get_fernet(self) -> Fernet:
+src/core/session.py:52:        """Get or create Fernet encryption instance."""
+src/core/session.py:53:        if self._fernet is not None:
+src/core/session.py:54:            return self._fernet
+src/core/session.py:55:
+src/core/session.py:56:        if self._key_path.exists():
+src/core/session.py:57:            key = self._key_path.read_bytes().strip()
+src/core/session.py:58:        else:
+src/core/session.py:59:            key = Fernet.generate_key()
+src/core/session.py:60:            # Write key with owner-only permissions
+src/core/session.py:61:            fd = os.open(str(self._key_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+src/core/session.py:62:            try:
+src/core/session.py:63:                os.write(fd, key)
+src/core/session.py:64:            finally:
+src/core/session.py:65:                os.close(fd)
+src/core/session.py:66:
+src/core/session.py:67:        self._fernet = Fernet(key)
+src/core/session.py:68:        return self._fernet
+src/core/session.py:69:
+src/core/session.py:70:    def _decrypt_session_data(self) -> dict:
+src/core/session.py:71:        """Decrypt and parse the stored session file.
+src/core/session.py:72:
+src/core/session.py:73:        Returns:
+src/core/session.py:74:            Parsed session data dict.
+src/core/session.py:75:
+src/core/session.py:76:        Raises:
+src/core/session.py:77:            Exception: If decryption or JSON parsing fails.
+src/core/session.py:78:        """
+src/core/session.py:79:        encrypted = self.session_path.read_bytes()
+src/core/session.py:80:        plaintext = self._get_fernet().decrypt(encrypted)
+src/core/session.py:81:        return json.loads(plaintext.decode('utf-8'))
+src/core/session.py:82:
+src/core/session.py:83:    def _write_secure(self, path: Path, data: bytes) -> None:
+src/core/session.py:84:        """Atomically write data to file with owner-only permissions (0600).
+src/core/session.py:85:
+src/core/session.py:86:        Writes to a temp file first, then renames to target path so that
+src/core/session.py:87:        a crash mid-write never corrupts the existing file.
+src/core/session.py:88:        """
+src/core/session.py:89:        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+src/core/session.py:90:        try:
+src/core/session.py:91:            os.write(tmp_fd, data)
+src/core/session.py:92:            os.close(tmp_fd)
+src/core/session.py:93:            tmp_fd = -1  # mark as closed
+src/core/session.py:94:            os.chmod(tmp_path, 0o600)
+src/core/session.py:95:            os.replace(tmp_path, str(path))
+src/core/session.py:96:        except BaseException:
+src/core/session.py:97:            if tmp_fd >= 0:
+src/core/session.py:98:                os.close(tmp_fd)
+src/core/session.py:99:            try:
+src/core/session.py:100:                os.unlink(tmp_path)
+src/core/session.py:101:            except OSError:
+src/core/session.py:102:                pass
+src/core/browser.py:150:            except Exception as e:
+src/core/browser.py:151:                logger.error(f"Failed to connect to Chrome via CDP: {e}")
+src/core/browser.py:152:                await self._close_internal()
+src/core/browser.py:153:                raise BrowserError(
+src/core/browser.py:154:                    f"Failed to connect to Chrome via CDP at {endpoint}. "
+src/core/browser.py:155:                    f"Make sure Chrome is running with --remote-debugging-port=9222. "
+src/core/browser.py:156:                    f"Error: {e}"
+src/core/browser.py:157:                )
+src/core/browser.py:158:
+src/core/browser.py:159:    async def close(self) -> None:
+src/core/browser.py:160:        """Disconnect from Chrome via CDP. Does NOT close the user's Chrome."""
+src/core/browser.py:161:        self._ensure_lock()
+src/core/browser.py:162:        async with self._lock:
+src/core/browser.py:163:            await self._close_internal()
+src/core/browser.py:164:
+src/core/browser.py:165:    async def _close_internal(self) -> None:
+src/core/browser.py:166:        """Actual cleanup logic — callable without acquiring _lock.
+src/core/browser.py:167:
+src/core/browser.py:168:        Must only be called while the lock is already held, or from
+src/core/browser.py:169:        start()'s except block (which already holds the lock).
+src/core/browser.py:170:        """
+src/core/browser.py:171:        try:
+src/core/browser.py:172:            # Close tabs we opened during the session
+src/core/browser.py:173:            for tab in self._opened_tabs:
+src/core/browser.py:174:                try:
+src/core/browser.py:175:                    if not tab.is_closed():
+src/core/browser.py:176:                        await tab.close()
+src/core/browser.py:177:                except Exception:
+src/core/browser.py:178:                    pass
+src/core/browser.py:179:            self._opened_tabs = []
+src/core/browser.py:180:
+src/core/browser.py:181:            # Only close pages we created, not the user's existing tabs
+src/core/browser.py:182:            if self._page and self._owned_page:
+src/core/browser.py:183:                try:
+src/core/browser.py:184:                    await self._page.close()
+src/core/browser.py:185:                except Exception:
+src/core/browser.py:186:                    pass
+src/utils/checkpoint.py:23:    except Exception:
+src/utils/checkpoint.py:24:        return Path("data/.checkpoints")
+src/utils/checkpoint.py:25:
+src/utils/checkpoint.py:26:
+src/utils/checkpoint.py:27:class CheckpointManager:
+src/utils/checkpoint.py:28:    """Manages pipeline checkpoint save/load for resume support."""
+src/utils/checkpoint.py:29:
+src/utils/checkpoint.py:30:    def __init__(self, checkpoint_id: Optional[str] = None):
+src/utils/checkpoint.py:31:        checkpoint_dir = _get_checkpoint_dir()
+src/utils/checkpoint.py:32:        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+src/utils/checkpoint.py:33:
+src/utils/checkpoint.py:34:        if checkpoint_id:
+src/utils/checkpoint.py:35:            self.checkpoint_path = checkpoint_dir / f"{checkpoint_id}.json"
+src/utils/checkpoint.py:36:        else:
+src/utils/checkpoint.py:37:            # Generate ID from timestamp
+src/utils/checkpoint.py:38:            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+src/utils/checkpoint.py:39:            self.checkpoint_path = checkpoint_dir / f"pipeline_{ts}.json"
+src/utils/checkpoint.py:40:
+src/utils/checkpoint.py:41:        self._data: Dict[str, Any] = {}
+src/utils/checkpoint.py:42:
+src/utils/checkpoint.py:43:    def save(
+src/utils/checkpoint.py:44:        self,
+src/utils/checkpoint.py:45:        keywords: tuple,
+src/utils/checkpoint.py:46:        template: str,
+src/utils/checkpoint.py:47:        variables: dict,
+src/utils/checkpoint.py:48:        company: tuple,
+src/utils/checkpoint.py:49:        location: Optional[str],
+src/utils/checkpoint.py:50:        max_pages: int,
+src/utils/checkpoint.py:51:        batch_pages: int,
+src/utils/checkpoint.py:52:        skip_messaged: bool,
+src/utils/checkpoint.py:53:        interactive: bool,
+src/utils/checkpoint.py:54:        completed_pages: int,
+src/utils/checkpoint.py:55:        sent_ids: List[str],
+src/utils/checkpoint.py:56:        seen_ids: List[str],
+src/utils/checkpoint.py:57:        total_results: Optional[dict] = None,
+src/utils/checkpoint.py:58:        mode: str = "search_center",
+src/utils/checkpoint.py:59:        dry_run: bool = False,
+src/utils/checkpoint.py:60:    ) -> None:
+src/utils/checkpoint.py:61:        """Save current pipeline state to checkpoint file."""
+src/utils/checkpoint.py:62:        self._data = {
+src/utils/checkpoint.py:63:            "created_at": self._data.get("created_at", datetime.now(timezone.utc).isoformat()),
+src/utils/checkpoint.py:64:            "updated_at": datetime.now(timezone.utc).isoformat(),
+src/utils/checkpoint.py:65:            "params": {
+src/utils/checkpoint.py:66:                "keywords": list(keywords),
+src/utils/checkpoint.py:67:                "template": template,
+src/utils/checkpoint.py:68:                "variables": variables,
+src/utils/checkpoint.py:69:                "company": list(company) if company else [],
+src/utils/checkpoint.py:70:                "location": location,
+src/utils/checkpoint.py:71:                "max_pages": max_pages,
+src/utils/checkpoint.py:72:                "batch_pages": batch_pages,
+src/utils/checkpoint.py:73:                "skip_messaged": skip_messaged,
+src/utils/checkpoint.py:74:                "interactive": interactive,
+src/utils/checkpoint.py:75:                "mode": mode,
+src/utils/checkpoint.py:76:                "dry_run": dry_run,
+src/utils/checkpoint.py:77:            },
+src/utils/checkpoint.py:78:            "progress": {
+src/utils/checkpoint.py:79:                "completed_pages": completed_pages,
+src/utils/checkpoint.py:80:                "sent_ids": sent_ids,
+src/utils/checkpoint.py:81:                "seen_ids": seen_ids,
+src/utils/checkpoint.py:82:                "total_results": total_results or {},
+src/utils/checkpoint.py:83:            },
+src/utils/checkpoint.py:84:        }
+src/utils/checkpoint.py:85:
+src/utils/checkpoint.py:86:        try:
+src/utils/checkpoint.py:87:            tmp_fd, tmp_path = tempfile.mkstemp(
+src/utils/checkpoint.py:88:                dir=self.checkpoint_path.parent, suffix=".tmp"
+src/utils/checkpoint.py:89:            )
+src/utils/checkpoint.py:90:            try:
+src/utils/checkpoint.py:91:                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+src/utils/checkpoint.py:92:                    json.dump(self._data, f, ensure_ascii=False, indent=2)
+src/utils/checkpoint.py:93:                os.replace(tmp_path, self.checkpoint_path)
+src/utils/checkpoint.py:94:            except BaseException:
+src/utils/checkpoint.py:95:                try:
+src/utils/checkpoint.py:96:                    os.unlink(tmp_path)
+src/utils/checkpoint.py:97:                except OSError:
+src/utils/checkpoint.py:98:                    pass
+src/modules/message.py:190:        except Exception:
+src/modules/message.py:191:            logger.debug("'招聘类' category button not found, continuing")
+src/modules/message.py:192:
+src/modules/message.py:193:        # Find textarea and fill with message content using Playwright native fill
+src/modules/message.py:194:        try:
+src/modules/message.py:195:            textarea = await page.wait_for_selector('textarea', timeout=5000)
+src/modules/message.py:196:            if not textarea:
+src/modules/message.py:197:                logger.warning("Quick contact: textarea not found")
+src/modules/message.py:198:                return False
+src/modules/message.py:199:        except Exception:
+src/modules/message.py:200:            logger.warning("Quick contact: textarea not found (timeout)")
+src/modules/message.py:201:            return False
+src/modules/message.py:202:
+src/modules/message.py:203:        # Clear and fill using Playwright's native API (avoids Emunium issues)
+src/modules/message.py:204:        await textarea.click()
+src/modules/message.py:205:        await textarea.fill('')
+src/modules/message.py:206:        await textarea.fill(content)
+src/modules/message.py:207:        await async_random_delay('action')
+src/modules/message.py:208:        logger.debug("Filled quick contact textarea")
+src/modules/message.py:209:
+src/modules/message.py:210:        # Click "提交" (Submit) button — race all selectors in parallel via JS,
+src/modules/message.py:211:        # then click the first visible match. Retries up to 2 times.
+src/modules/message.py:212:        submit_selectors = [
+src/modules/message.py:213:            'button:has-text("提交")',
+src/modules/message.py:214:            ':has-text("提交"):not(body):not(div:has(div:has-text("提交")))',
+src/modules/message.py:215:            'text=提交',
+src/modules/message.py:216:            '[class*="submit"]',
+src/modules/message.py:217:            '[class*="btn"]:has-text("提交")',
+src/modules/message.py:218:            'a:has-text("提交")',
+src/modules/message.py:219:            'div:has-text("提交"):not(:has(div:has-text("提交")))',
+src/modules/message.py:220:        ]
+src/modules/message.py:221:
+src/modules/message.py:222:        max_submit_retries = 2
+src/modules/message.py:223:        for submit_attempt in range(1 + max_submit_retries):
+src/modules/message.py:224:            submit_btn = None
+src/modules/message.py:225:            matched_selector = None
+src/modules/message.py:226:
+src/modules/message.py:227:            # Try selectors sequentially (Playwright page is not safe for concurrent ops)
+src/modules/message.py:228:            for sel in submit_selectors:
+src/modules/message.py:229:                try:
+src/modules/message.py:230:                    elem = await page.wait_for_selector(sel, timeout=1500)
+src/modules/message.py:231:                    if elem and await elem.is_visible():
+src/modules/message.py:232:                        submit_btn = elem
+src/modules/message.py:233:                        matched_selector = sel
+src/modules/message.py:234:                        break
+src/modules/message.py:235:                except Exception:
+src/modules/message.py:236:                    continue
+src/modules/message.py:237:
+src/modules/message.py:238:            if submit_btn and matched_selector:
+src/modules/message.py:239:                logger.debug(f"Quick contact: found submit button with selector: {matched_selector}")
+src/modules/message.py:240:                break
+src/modules/message.py:241:
+src/modules/message.py:242:            if submit_attempt < max_submit_retries:
+src/modules/message.py:243:                logger.debug(f"Quick contact: submit button not found, retry {submit_attempt + 1}")
+src/modules/message.py:244:                await page.wait_for_timeout(1000)
+src/modules/message.py:245:
+src/modules/message.py:246:        if not submit_btn or not matched_selector:
+src/modules/message.py:247:            logger.warning("Quick contact: submit button not found with any selector after retries")
+src/modules/message.py:248:            return False
+src/modules/message.py:249:
+src/modules/message.py:250:        try:
+src/modules/message.py:251:            await submit_btn.click()
+src/modules/message.py:252:        except Exception:
+src/modules/message.py:253:            try:
+src/modules/message.py:254:                await human_click(page, matched_selector)
+src/modules/message.py:255:            except Exception as click_err:
+src/modules/message.py:256:                logger.warning(f"Quick contact: both click methods failed: {click_err}")
+src/modules/message.py:257:                return False
+src/modules/message.py:258:        await async_random_delay('action')
+src/modules/message.py:259:        logger.info("Quick contact: submitted message")
+src/modules/message.py:260:        return True
+src/modules/message.py:261:
+src/modules/message.py:262:    except Exception as e:
+src/modules/message.py:263:        logger.error(f"Quick contact handling failed: {e}\n{traceback.format_exc()}")
+src/modules/message.py:264:        return False
+src/modules/message.py:265:
+src/modules/message.py:266:
+src/modules/message.py:267:async def _detect_vip_paywall(page: Page) -> bool:
+src/modules/message.py:268:    """Detect if a VIP/membership paywall is blocking the current page.
+src/modules/message.py:269:
+src/modules/message.py:270:    Non-VIP accounts may be redirected to a recharge/upgrade page when
+src/modules/message.py:271:    trying to message certain candidates. This checks the page URL and
+src/modules/message.py:272:    visible text for common paywall indicators.
+src/modules/message.py:273:
+src/modules/message.py:274:    Args:
+src/modules/message.py:275:        page: Playwright page instance
+src/modules/message.py:276:
+src/modules/message.py:277:    Returns:
+src/modules/message.py:278:        True if a VIP paywall is detected
+src/modules/message.py:279:    """
+src/modules/message.py:280:    try:
+src/modules/message.py:281:        return await page.evaluate('''() => {
+src/modules/message.py:282:            const url = window.location.href;
+src/modules/message.py:283:            const urlKeywords = ['vip', 'member', 'pay', 'recharge', 'upgrade', 'subscribe'];
+src/modules/message.py:284:            if (urlKeywords.some(kw => url.toLowerCase().includes(kw))) {
+src/modules/message.py:285:                return true;
+src/modules/message.py:286:            }
+src/modules/message.py:287:
+src/modules/message.py:288:            const title = document.title || '';
+src/modules/message.py:289:            const bodyText = document.body ? document.body.innerText.substring(0, 3000) : '';
+src/modules/message.py:290:            const text = title + ' ' + bodyText;
+src/modules/message.py:291:
+src/modules/message.py:292:            const paywallPatterns = [
+src/modules/message.py:293:                '开通会员', '升级会员', '会员专享', '会员权益',
+src/modules/message.py:294:                '充值', '付费', '购买会员', '开通VIP', '升级VIP',
+src/modules/message.py:295:                '立即开通', '立即升级', '立即购买',
+src/modules/message.py:296:                '会员到期', '续费', '解锁', '次数已用完',
+src/modules/message.py:297:                '今日沟通次数', '沟通人数已达上限',
+src/modules/message.py:298:            ];
+src/modules/message.py:299:
+src/modules/message.py:300:            return paywallPatterns.some(p => text.includes(p));
+src/modules/message.py:301:        }''')
+src/modules/message.py:302:    except Exception as e:
+src/modules/message.py:303:        logger.debug(f"VIP paywall detection failed: {e}")
+src/modules/message.py:304:        return False
+src/modules/message.py:305:
+src/modules/message.py:306:
+src/modules/message.py:307:async def send_message(
+src/modules/message.py:308:    maimai_id: str,
+src/modules/message.py:309:    template_name: str,
+src/modules/message.py:310:    variables: Dict[str, str],
+src/modules/message.py:311:    browser: Optional[BrowserManager] = None,
+src/modules/message.py:312:    skip_confirmation: bool = False,
+src/modules/message.py:313:    interactive: bool = False,
+src/modules/message.py:314:    discovered_selectors: Optional['DiscoveredSelectors'] = None,
+src/modules/message.py:315:    _skip_rate_check: bool = False,
+src/modules/message.py:316:    profile_url: Optional[str] = None,
+src/modules/message.py:317:) -> bool:
+src/modules/message.py:318:    """
+src/modules/message.py:319:    Send a message to a candidate.
+src/modules/message.py:320:
+src/modules/message.py:321:    Args:
+src/modules/message.py:322:        maimai_id: Candidate's Maimai ID
+src/modules/message.py:323:        template_name: Name of message template to use
+src/modules/message.py:324:        variables: Variables to substitute in template
+src/modules/message.py:325:        browser: Browser manager instance
+src/modules/message.py:326:        skip_confirmation: Skip confirmation (only for testing)
+src/modules/message.py:327:        interactive: Enable interactive selector discovery on failure
+src/modules/message.py:328:        discovered_selectors: Shared DiscoveredSelectors instance for reuse
+src/modules/message.py:329:
+src/modules/message.py:330:    Returns:
+src/modules/message.py:331:        True if message was sent successfully
+src/modules/message.py:332:
+src/modules/message.py:333:    Raises:
+src/modules/message.py:334:        RateLimitExceededError: If rate limit exceeded
+src/modules/message.py:335:        ValidationError: If template or variables invalid
+src/modules/message.py:336:    """
+src/modules/message.py:337:    # Validate and clean inputs
+src/modules/message.py:338:    maimai_id = validate_maimai_id(maimai_id)
+src/modules/message.py:339:
+src/modules/message.py:340:    if browser is None:
+src/modules/message.py:341:        browser = get_browser_manager()
+src/modules/message.py:342:
+src/modules/message.py:343:    config = get_config()
+src/modules/message.py:344:    rate_limiter = get_rate_limiter()
+src/modules/message.py:345:    db_manager = get_db_manager()
+src/modules/message.py:346:
+src/modules/message.py:347:    # Get template
+src/modules/message.py:348:    try:
+src/modules/message.py:349:        template = config.get_template(template_name)
+src/modules/message.py:350:    except Exception as e:
+src/modules/message.py:351:        raise ValidationError(f"Template not found: {template_name}")
+src/modules/message.py:352:
+src/modules/message.py:353:    # Validate template variables
+src/modules/message.py:354:    validate_template_variables(template, variables)
+src/modules/message.py:355:
+src/modules/message.py:356:    # Render message content
+src/modules/message.py:357:    content = render_template(template['content'], variables)
+src/modules/message.py:358:
+src/modules/message.py:359:    # Get candidate info for display
+src/modules/message.py:360:    candidate_info = _get_candidate_info(db_manager, maimai_id)
+src/modules/message.py:361:
+src/modules/message.py:362:    # Preview and confirm
+src/modules/message.py:363:    if not skip_confirmation:
+src/modules/message.py:364:        action = await interactive_confirm(content, candidate_info, template_name)
+src/modules/message.py:365:
+src/modules/message.py:366:        if action == 'skip':
+src/modules/message.py:367:            console.print("[yellow]Message skipped[/yellow]")
+src/modules/message.py:368:            _log_message(db_manager, maimai_id, template_name, content, 'cancelled')
+src/modules/message.py:369:            return False
+src/modules/message.py:370:
+src/modules/message.py:371:        elif action == 'edit':
+src/modules/message.py:372:            # Allow user to edit content
+src/modules/message.py:373:            content = await edit_message(content)
+src/modules/message.py:374:            if content is None:
+src/modules/message.py:375:                console.print("[yellow]Message cancelled[/yellow]")
+src/modules/message.py:376:                return False
+src/modules/message.py:377:
+src/modules/message.py:378:            # Re-confirm after edit
+src/modules/message.py:379:            action = await interactive_confirm(content, candidate_info, template_name)
+src/modules/message.py:380:            if action != 'send':
+src/modules/message.py:381:                console.print("[yellow]Message skipped[/yellow]")
+src/modules/message.py:382:                return False
+src/modules/message.py:383:
+src/modules/message.py:384:        elif action != 'send':
+src/modules/message.py:385:            console.print("[yellow]Message cancelled[/yellow]")
+src/modules/message.py:386:            return False
+src/modules/message.py:387:
+src/modules/message.py:388:    # Check rate limit (waits through min-interval) - skip when called from batch
+src/modules/message.py:389:    if not _skip_rate_check:
+src/modules/message.py:390:        await async_check_rate_limit('send_message')
+src/modules/message.py:391:
+src/modules/message.py:392:    # Ensure logged in
+src/modules/message.py:393:    await ensure_logged_in(browser)
+src/modules/message.py:394:
+src/modules/message.py:395:    try:
+src/modules/message.py:396:        page = browser.page
+src/modules/message.py:397:
+src/modules/message.py:398:        # If we have populated discovered selectors, use them directly
+src/modules/message.py:399:        if discovered_selectors and discovered_selectors.is_populated:
+src/modules/message.py:400:            from src.modules.selector_discovery import apply_discovered_selectors
+src/modules/message.py:401:            success = await apply_discovered_selectors(
+src/modules/message.py:402:                page, maimai_id, discovered_selectors, content
+src/modules/message.py:403:            )
+src/modules/message.py:404:            if success:
+src/modules/message.py:405:                rate_limiter.log_action('send_message', {
+src/modules/message.py:406:                    'maimai_id': maimai_id,
+src/modules/message.py:407:                    'template': template_name
+src/modules/message.py:408:                })
+src/modules/message.py:409:                _log_message(db_manager, maimai_id, template_name, content, 'sent')
+src/modules/message.py:410:                console.print("[green]Message sent successfully![/green]")
+src/modules/message.py:411:                return True
+src/modules/message.py:412:            else:
+src/modules/message.py:413:                console.print("[red]Failed to send with discovered selectors[/red]")
+src/modules/message.py:414:                await browser.screenshot(f"message_error_{maimai_id}")
+src/modules/message.py:415:                _log_message(db_manager, maimai_id, template_name, content, 'failed')
+src/modules/message.py:416:                return False
+src/modules/message.py:417:
+src/modules/message.py:418:        nav_ok = await _navigate_to_chat(
+src/modules/message.py:419:            page, profile_url, config, browser, maimai_id,
+src/modules/message.py:420:            interactive, discovered_selectors,
+src/modules/message.py:421:        )
+src/modules/message.py:422:        if not nav_ok:
+src/modules/message.py:423:            _log_message(db_manager, maimai_id, template_name, content, 'failed')
+src/modules/message.py:424:            return False
+src/modules/message.py:425:
+src/modules/message.py:426:        # Check for "等待回应" (Awaiting Response) — already messaged this candidate
+src/modules/message.py:427:        try:
+src/modules/message.py:428:            awaiting = await page.evaluate('''() => {
+src/modules/message.py:429:                const text = document.body ? document.body.innerText : '';
+src/modules/message.py:430:                return text.includes('等待回应') || text.includes('等待对方回复');
+src/modules/message.py:431:            }''')
+src/modules/message.py:432:            if awaiting:
+src/modules/message.py:433:                logger.info(f"Candidate {maimai_id} already messaged (awaiting response), skipping")
+src/modules/message.py:434:                console.print(f"[yellow]Already messaged {maimai_id} (等待回应), skipping[/yellow]")
+src/modules/message.py:435:                _log_message(db_manager, maimai_id, template_name, content, 'cancelled')
+src/modules/message.py:436:                return False
+src/modules/message.py:437:        except Exception:
+src/modules/message.py:438:            pass
+src/modules/message.py:439:
+src/modules/message.py:440:        # Check for "极速联系" (Quick Contact) page
+src/modules/message.py:441:        qc_result = await _handle_quick_contact(page, content)
+src/modules/message.py:442:        if qc_result is True:
+src/modules/message.py:443:            rate_limiter.log_action('send_message', {
+src/modules/message.py:444:                'maimai_id': maimai_id,
+src/modules/message.py:445:                'template': template_name,
+src/modules/message.py:446:                'mode': 'quick_contact',
+src/modules/message.py:447:            })
+src/modules/message.py:448:            _log_message(db_manager, maimai_id, template_name, content, 'sent')
+src/modules/message.py:449:            console.print("[green]Message sent via Quick Contact![/green]")
+src/modules/message.py:450:            return True
+src/modules/message.py:451:        elif qc_result is False:
+src/modules/message.py:452:            console.print("[red]Quick Contact page detected but send failed[/red]")
+src/modules/message.py:453:            await browser.screenshot(f"message_error_qc_{maimai_id}")
+src/modules/message.py:454:            _log_message(db_manager, maimai_id, template_name, content, 'failed')
+src/modules/message.py:455:            return False
+src/modules/message.py:456:        # qc_result is None → not a quick contact page, continue normal flow
+src/modules/message.py:457:
+src/modules/message.py:458:        # If interactive discovery succeeded, apply discovered selectors
+src/modules/message.py:459:        if discovered_selectors and discovered_selectors.is_populated:
+src/modules/message.py:460:            from src.modules.selector_discovery import apply_discovered_selectors
+src/modules/message.py:461:            success = await apply_discovered_selectors(
+src/modules/message.py:462:                page, maimai_id, discovered_selectors, content
+src/modules/message.py:463:            )
+src/modules/message.py:464:            if success:
+src/modules/message.py:465:                rate_limiter.log_action('send_message', {
+src/modules/message.py:466:                    'maimai_id': maimai_id,
+src/modules/message.py:467:                    'template': template_name
+src/modules/message.py:468:                })
+src/modules/message.py:469:                _log_message(db_manager, maimai_id, template_name, content, 'sent')
+src/modules/message.py:470:                console.print("[green]Message sent successfully![/green]")
+src/modules/message.py:471:                return True
+src/modules/message.py:472:
+src/modules/message.py:473:        # Check for existing conversation to avoid duplicate greetings
+src/modules/message.py:474:        has_existing = await _check_existing_conversation(page, maimai_id)
+src/modules/message.py:475:        if has_existing:
+src/modules/message.py:476:            console.print(f"[yellow]Existing conversation detected with {maimai_id}. Skipping to avoid duplicate.[/yellow]")
+src/modules/message.py:477:            _log_message(db_manager, maimai_id, template_name, content, 'cancelled')
+src/modules/message.py:478:            return False
+src/modules/message.py:479:
+src/modules/message.py:480:        # Find message input and type message
+src/modules/message.py:481:        input_found = await _type_message(page, config, content)
+src/modules/message.py:482:        if not input_found:
+src/modules/message.py:483:            console.print("[red]Could not find message input[/red]")
+src/modules/message.py:484:            await browser.screenshot(f"message_error_{maimai_id}")
+src/modules/message.py:485:            _log_message(db_manager, maimai_id, template_name, content, 'failed')
+src/modules/message.py:486:            return False
+src/modules/message.py:487:
+src/modules/message.py:488:        await async_random_delay('action')
+src/modules/message.py:489:
+src/modules/message.py:490:        # Click send button
+src/modules/message.py:491:        sent = await _click_send_button(page, config)
+src/modules/message.py:492:        if not sent:
+src/modules/message.py:493:            console.print("[red]Could not send message[/red]")
+src/modules/message.py:494:            await browser.screenshot(f"message_error_{maimai_id}")
+src/modules/message.py:495:            _log_message(db_manager, maimai_id, template_name, content, 'failed')
+src/modules/message.py:496:            return False
+src/modules/message.py:497:
+src/modules/message.py:498:        # Check if clicking send triggered a VIP paywall popup
+src/modules/message.py:499:        await asyncio.sleep(1)
+src/modules/message.py:500:        if await _detect_vip_paywall(page):
+src/modules/message.py:501:            console.print(f"[yellow]VIP paywall popup appeared after send for {maimai_id}, skipping[/yellow]")
+src/modules/message.py:502:            _log_message(db_manager, maimai_id, template_name, content, 'cancelled')
+src/modules/message.py:503:            raise PermanentFailureError(f"VIP paywall detected for {maimai_id}")
+src/modules/message.py:504:
+src/modules/message.py:505:        # Verify message was actually sent
+src/modules/message.py:506:        verified = await _verify_message_sent(page, content)
+src/modules/message.py:507:        if not verified:
+src/modules/message.py:508:            logger.warning(f"Message to {maimai_id}: send button clicked but could not verify delivery")
+src/modules/message.py:509:            console.print("[yellow]Warning: Message send could not be verified. Marking as unverified.[/yellow]")
+src/modules/message.py:510:            await browser.screenshot(f"message_unverified_{maimai_id}")
+src/modules/message.py:511:            # Still log as sent but with unverified note in details
+src/modules/message.py:512:            rate_limiter.log_action('send_message', {
+src/modules/message.py:513:                'maimai_id': maimai_id,
+src/modules/message.py:514:                'template': template_name,
+src/modules/message.py:515:                'verified': False,
+src/modules/message.py:516:            })
+src/modules/message.py:517:            _log_message(db_manager, maimai_id, template_name, content, 'sent')
+src/modules/message.py:518:            console.print("[yellow]Message marked as sent (unverified)[/yellow]")
+src/modules/message.py:519:            return True
+src/modules/message.py:520:
+src/modules/message.py:521:        # Log action
+src/modules/message.py:522:        rate_limiter.log_action('send_message', {
+src/modules/message.py:523:            'maimai_id': maimai_id,
+src/modules/message.py:524:            'template': template_name,
+src/modules/message.py:525:            'verified': True,
+src/modules/message.py:526:        })
+src/modules/message.py:527:
+src/modules/message.py:528:        # Log message to database
+src/modules/message.py:529:        _log_message(db_manager, maimai_id, template_name, content, 'sent')
+src/modules/message.py:530:
+src/modules/message.py:531:        console.print("[green]Message sent and verified![/green]")
+src/modules/message.py:532:        return True
+src/modules/message.py:533:
+src/modules/message.py:534:    except PermanentFailureError:
+src/modules/message.py:535:        raise
+src/modules/message.py:536:    except Exception as e:
+src/modules/message.py:537:        logger.error(f"Error sending message: {e}")
+src/modules/message.py:538:        await browser.screenshot(f"message_error_{maimai_id}")
+src/modules/message.py:539:        _log_message(db_manager, maimai_id, template_name, content, 'failed')
+src/modules/message.py:540:        raise
+src/modules/message.py:541:
+src/modules/message.py:542:
+src/modules/message.py:543:async def send_message_batch(
+src/modules/message.py:544:    candidates: List[dict],
+src/modules/message.py:545:    template_name: str,
+src/modules/message.py:546:    common_variables: Dict[str, str],
+src/modules/message.py:547:    browser: BrowserManager,
+src/modules/message.py:548:    skip_messaged: bool = True,
+src/modules/message.py:549:    interactive: bool = False,
+src/modules/message.py:550:) -> Dict[str, Any]:
+src/modules/message.py:551:    """
+src/modules/message.py:552:    Batch send messages to a list of candidates.
+src/modules/message.py:553:
+src/modules/message.py:554:    Flow:
+src/modules/message.py:555:    1. Filter already-messaged candidates
+src/modules/message.py:556:    2. Auto-fill name/company/position variables per candidate
+src/modules/message.py:557:    3. Render message template
+src/modules/message.py:558:    4. Show candidate list + first message preview
+src/modules/message.py:559:    5. Single confirmation
+src/modules/message.py:560:    6. Send one by one, checking rate limit each time
+src/modules/message.py:561:    7. Skip failures and record
+src/modules/message.py:562:    8. Return result stats
+src/modules/message.py:563:
+src/modules/message.py:564:    Args:
+src/modules/message.py:565:        candidates: List of dicts with maimai_id, name, company, title
+src/modules/message.py:566:        template_name: Name of message template
+src/modules/message.py:567:        common_variables: Shared variables (recruiter_name, target_position, etc.)
+src/modules/message.py:568:        browser: Browser manager instance
+src/modules/message.py:569:        skip_messaged: Skip candidates already messaged (default True)
+src/modules/message.py:570:        interactive: Enable interactive selector discovery on first failure
+src/modules/message.py:571:
+src/modules/message.py:572:    Returns:
+src/modules/message.py:573:        Dict with total, sent, failed, skipped, rate_limited, details
+src/modules/message.py:574:    """
+src/modules/message.py:575:    config = get_config()
+src/modules/message.py:576:    rate_limiter = get_rate_limiter()
+src/modules/message.py:577:    db_manager = get_db_manager()
+src/modules/message.py:578:
+src/modules/message.py:579:    # Get template
+src/modules/message.py:580:    try:
+src/modules/message.py:581:        template = config.get_template(template_name)
+src/modules/message.py:582:    except Exception:
+src/modules/message.py:583:        raise ValidationError(f"Template not found: {template_name}")
+src/modules/message.py:584:
+src/modules/message.py:585:    # Create shared discovered selectors for interactive mode
+src/modules/message.py:586:    if interactive:
+src/modules/message.py:587:        from src.modules.selector_discovery import DiscoveredSelectors
+src/modules/message.py:588:        discovered_selectors = DiscoveredSelectors()
+src/modules/message.py:589:    else:
+src/modules/message.py:590:        discovered_selectors = None
+src/modules/message.py:591:
+src/modules/message.py:592:    results = {
+src/modules/message.py:593:        'total': len(candidates),
+src/modules/message.py:594:        'sent': 0,
+src/modules/message.py:595:        'failed': 0,
+src/modules/message.py:596:        'skipped': 0,
+src/modules/message.py:597:        'rate_limited': 0,
+src/modules/message.py:598:        'details': [],
+src/modules/message.py:599:    }
+src/modules/message.py:600:
+src/modules/message.py:601:    # Filter already-messaged candidates
+src/modules/message.py:602:    send_list = []
+src/modules/message.py:603:    if skip_messaged:
+src/modules/message.py:604:        # Batch pre-fetch all sent message IDs to avoid N+1 queries
+src/modules/message.py:605:        all_ids = [c['maimai_id'] for c in candidates]
+src/modules/message.py:606:        messaged_ids = set()
+src/modules/message.py:607:        with db_manager.session_scope() as session:
+src/modules/message.py:608:            rows = session.query(Message.candidate_maimai_id).filter(
+src/modules/message.py:609:                Message.candidate_maimai_id.in_(all_ids),
+src/modules/message.py:610:                Message.status == 'sent'
+src/modules/message.py:611:            ).distinct().all()
+src/modules/message.py:612:            messaged_ids = {row[0] for row in rows}
+src/modules/message.py:613:
+src/modules/message.py:614:        for c in candidates:
+src/modules/message.py:615:            if c['maimai_id'] in messaged_ids:
+src/modules/message.py:616:                results['skipped'] += 1
+src/modules/message.py:617:                results['details'].append({
+src/modules/message.py:618:                    'maimai_id': c['maimai_id'],
+src/modules/message.py:619:                    'name': c['name'],
+src/modules/message.py:620:                    'status': 'skipped',
+src/modules/message.py:621:                    'reason': 'already messaged',
+src/modules/message.py:622:                })
+src/modules/message.py:623:            else:
+src/modules/message.py:624:                send_list.append(c)
+src/modules/message.py:625:    else:
+src/modules/message.py:626:        send_list = list(candidates)
+src/modules/message.py:627:
+src/modules/message.py:628:    if not send_list:
+src/modules/message.py:629:        console.print("[yellow]No candidates to send messages to.[/yellow]")
+src/modules/message.py:630:        return results
+src/modules/message.py:631:
+src/modules/message.py:632:    # Build preview for first candidate
+src/modules/message.py:633:    first = send_list[0]
+src/modules/message.py:634:    first_vars = {**common_variables, 'name': first['name'], 'company': first['company'], 'position': first['title']}
+src/modules/message.py:635:    first_content = render_template(template['content'], first_vars)
+src/modules/message.py:636:
+src/modules/message.py:637:    # Display summary panel
+src/modules/message.py:638:    summary_text = Text()
+src/modules/message.py:639:    summary_text.append("Template: ", style="bold")
+src/modules/message.py:640:    summary_text.append(f"{template_name}\n")
+src/modules/message.py:641:    summary_text.append("Candidates: ", style="bold")
+src/modules/message.py:642:    summary_text.append(f"{len(candidates)} found, {results['skipped']} already messaged\n")
+src/modules/message.py:643:    summary_text.append("Will send to: ", style="bold")
+src/modules/message.py:644:    summary_text.append(f"{len(send_list)} candidates\n\n")
+src/modules/message.py:645:    summary_text.append("Message Preview ", style="bold cyan")
+src/modules/message.py:646:    summary_text.append(f"(first candidate):\n", style="dim")
+src/modules/message.py:647:    summary_text.append("To: ", style="bold cyan")
+src/modules/message.py:648:    recipient = first['name']
+src/modules/message.py:649:    if first.get('title') and first.get('company'):
+src/modules/message.py:650:        recipient += f" ({first['title']} @ {first['company']})"
+src/modules/message.py:651:    summary_text.append(f"{recipient}\n\n")
+src/modules/message.py:652:    summary_text.append(first_content)
+src/modules/message.py:653:
+src/modules/message.py:654:    console.print(Panel(
+src/modules/message.py:655:        summary_text,
+src/modules/message.py:656:        title="Pipeline Summary",
+src/modules/message.py:657:        border_style="green",
+src/modules/message.py:658:        padding=(1, 2)
+src/modules/message.py:659:    ))
+src/modules/message.py:660:
+src/modules/message.py:661:    # Single confirmation (run in executor to avoid nested event loop)
+src/modules/message.py:662:    loop = asyncio.get_running_loop()
+src/modules/message.py:663:    confirm = await loop.run_in_executor(
+src/modules/message.py:664:        None,
+src/modules/message.py:665:        lambda: questionary.confirm(
+src/modules/message.py:666:            f"Confirm batch send to {len(send_list)} candidates?"
+src/modules/message.py:667:        ).unsafe_ask()
+src/modules/message.py:668:    )
+src/modules/message.py:669:
+src/modules/message.py:670:    if not confirm:
+src/modules/message.py:671:        console.print("[yellow]Batch send cancelled.[/yellow]")
+src/modules/message.py:672:        return results
+src/modules/message.py:673:
+src/modules/message.py:674:    # Send messages one by one
+src/modules/message.py:675:    from rich.progress import Progress, BarColumn, TextColumn as ProgressTextColumn, MofNCompleteColumn
+src/modules/message.py:676:
+src/modules/message.py:677:    with Progress(
+src/modules/message.py:678:        ProgressTextColumn("[progress.description]{task.description}"),
+src/modules/message.py:679:        BarColumn(),
+src/modules/message.py:680:        MofNCompleteColumn(),
+src/modules/message.py:681:        console=console
+src/modules/message.py:682:    ) as progress:
+src/modules/message.py:683:        task = progress.add_task("Sending messages...", total=len(send_list))
+src/modules/message.py:684:
+src/modules/message.py:685:        max_retries = 2
+src/modules/message.py:686:        rate_limit_hit = False
+src/modules/message.py:687:
+src/modules/message.py:688:        for c in send_list:
+src/modules/message.py:689:            if rate_limit_hit:
+src/modules/message.py:690:                break
+src/modules/message.py:691:
+src/modules/message.py:692:            # Check rate limit (waits through min-interval)
+src/modules/message.py:693:            try:
+src/modules/message.py:694:                await async_check_rate_limit('send_message')
+src/modules/message.py:695:            except RateLimitExceededError as e:
+src/modules/message.py:696:                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+src/modules/message.py:697:                remaining = len(send_list) - (results['sent'] + results['failed'])
+src/modules/message.py:698:                results['rate_limited'] = remaining
+src/modules/message.py:699:                results['details'].append({
+src/modules/message.py:700:                    'maimai_id': c['maimai_id'],
+src/modules/message.py:701:                    'name': c['name'],
+src/modules/message.py:702:                    'status': 'rate_limited',
+src/modules/message.py:703:                    'reason': str(e),
+src/modules/message.py:704:                })
+src/modules/message.py:705:                break
+src/modules/message.py:706:
+src/modules/message.py:707:            # Build per-candidate variables
+src/modules/message.py:708:            variables = {
+src/modules/message.py:709:                **common_variables,
+src/modules/message.py:710:                'name': c['name'],
+src/modules/message.py:711:                'company': c['company'],
+src/modules/message.py:712:                'position': c['title'],
+src/modules/message.py:713:            }
+src/modules/message.py:714:            content = render_template(template['content'], variables)
+src/modules/message.py:715:
+src/modules/message.py:716:            # Retry loop for transient failures
+src/modules/message.py:717:            sent = False
+src/modules/message.py:718:            last_error = None
+src/modules/message.py:719:            per_candidate_timeout = 90  # seconds per candidate
+src/modules/message.py:720:            for attempt in range(1 + max_retries):
+src/modules/message.py:721:                try:
+src/modules/message.py:722:                    success = await asyncio.wait_for(
+src/modules/message.py:723:                        send_message(
+src/modules/message.py:724:                            maimai_id=c['maimai_id'],
+src/modules/message.py:725:                            template_name=template_name,
+src/modules/message.py:726:                            variables=variables,
+src/modules/message.py:727:                            browser=browser,
+src/modules/message.py:728:                            skip_confirmation=True,
+src/modules/message.py:729:                            interactive=interactive,
+src/modules/message.py:730:                            discovered_selectors=discovered_selectors,
+src/modules/message.py:731:                            _skip_rate_check=True,
+src/modules/message.py:732:                            profile_url=c.get('profile_url'),
+src/modules/message.py:733:                        ),
+src/modules/message.py:734:                        timeout=per_candidate_timeout,
+src/modules/message.py:735:                    )
+src/modules/message.py:736:
+src/modules/message.py:737:                    if success:
+src/modules/message.py:738:                        results['sent'] += 1
+src/modules/message.py:739:                        results['details'].append({
+src/modules/message.py:740:                            'maimai_id': c['maimai_id'],
+src/modules/message.py:741:                            'name': c['name'],
+src/modules/message.py:742:                            'status': 'sent',
+src/modules/message.py:743:                            'attempts': attempt + 1,
+src/modules/message.py:744:                        })
+src/modules/message.py:745:                        sent = True
+src/modules/message.py:746:                        break
+src/modules/message.py:747:                    else:
+src/modules/message.py:748:                        last_error = "send returned False"
+src/modules/message.py:749:
+src/modules/message.py:750:                except asyncio.TimeoutError:
+src/modules/message.py:751:                    last_error = f"Timed out after {per_candidate_timeout}s"
+src/modules/message.py:752:                    console.print(f"[yellow]Timeout for {c['name']} ({c['maimai_id']}), skipping.[/yellow]")
+src/modules/message.py:753:                    break
+src/modules/message.py:754:                except PermanentFailureError as e:
+src/modules/message.py:755:                    last_error = str(e)
+src/modules/message.py:756:                    console.print(f"[yellow]{e}. Skipping.[/yellow]")
+src/modules/message.py:757:                    break
+src/modules/message.py:758:                except RateLimitExceededError as e:
+src/modules/message.py:759:                    remaining = len(send_list) - (results['sent'] + results['failed'])
+src/modules/message.py:760:                    results['rate_limited'] = remaining
+src/modules/message.py:761:                    results['details'].append({
+src/modules/message.py:762:                        'maimai_id': c['maimai_id'],
+src/modules/message.py:763:                        'name': c['name'],
+src/modules/message.py:764:                        'status': 'rate_limited',
+src/modules/message.py:765:                        'reason': str(e),
+src/modules/message.py:766:                    })
+src/modules/message.py:767:                    console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+src/modules/message.py:768:                    rate_limit_hit = True
+src/modules/message.py:769:                    break
+src/modules/message.py:770:                except Exception as e:
+src/modules/message.py:771:                    last_error = str(e)
+src/modules/message.py:772:
+src/modules/message.py:773:                # Retry with exponential backoff if not last attempt
+src/modules/message.py:774:                if attempt < max_retries and not rate_limit_hit:
+src/modules/message.py:775:                    from src.utils.delays import get_retry_delay
+src/modules/message.py:776:                    delay = get_retry_delay(attempt, base_delay=3.0, max_delay=30.0)
+src/modules/message.py:777:                    logger.info(f"Retry {attempt + 1}/{max_retries} for {c['name']} in {delay:.1f}s")
+src/modules/message.py:778:                    await asyncio.sleep(delay)
+src/modules/message.py:779:
+src/modules/message.py:780:            if not sent and not rate_limit_hit:
+src/modules/message.py:781:                actual_attempts = attempt + 1
+src/modules/message.py:782:                results['failed'] += 1
+src/modules/message.py:783:                results['details'].append({
+src/modules/message.py:784:                    'maimai_id': c['maimai_id'],
+src/modules/message.py:785:                    'name': c['name'],
+src/modules/message.py:786:                    'status': 'failed',
+src/modules/message.py:787:                    'reason': last_error,
+src/modules/message.py:788:                    'attempts': actual_attempts,
+src/modules/message.py:789:                })
+src/modules/message.py:790:                logger.error(f"Failed to send message to {c['name']} after {actual_attempts} attempt(s): {last_error}")
+src/modules/message.py:791:
+src/modules/message.py:792:            progress.advance(task)
+src/modules/message.py:793:
+src/modules/message.py:794:            # Human-like delay between messages
+src/modules/message.py:795:            await async_random_delay('message')
+src/modules/message.py:796:
+src/modules/message.py:797:    return results
+src/modules/message.py:798:
+src/modules/message.py:799:
+src/modules/message.py:800:def render_template(template_content: str, variables: Dict[str, str]) -> str:
+src/modules/message.py:801:    """
+src/modules/message.py:802:    Render template with variables.
+src/modules/message.py:803:
+src/modules/message.py:804:    Maimai chat is plain text, so values are substituted as-is without
+src/modules/message.py:805:    HTML escaping (which would produce visible &amp; entities in chat).
+src/modules/message.py:806:
+src/modules/message.py:807:    Args:
+src/modules/message.py:808:        template_content: Template string with {variable} placeholders
+src/modules/message.py:809:        variables: Variable values to substitute
+src/modules/message.py:810:
+src/modules/message.py:811:    Returns:
+src/modules/message.py:812:        Rendered message content
+src/modules/message.py:813:    """
+src/modules/message.py:814:    content = template_content
+src/modules/message.py:815:    for key, value in variables.items():
+src/modules/message.py:816:        content = content.replace(f"{{{key}}}", str(value))
+src/modules/message.py:817:    return content
+src/modules/message.py:818:
+src/modules/message.py:819:
+src/modules/message.py:820:def preview_message(
+src/modules/message.py:821:    template_name: str,
+src/modules/message.py:822:    variables: Dict[str, str],
+src/modules/message.py:823:    candidate_info: Optional[Dict] = None
+src/modules/message.py:824:) -> str:
+src/modules/message.py:825:    """
+src/modules/message.py:826:    Preview a message without sending.
+src/modules/message.py:827:
+src/modules/message.py:828:    Args:
+src/modules/message.py:829:        template_name: Name of template
+src/modules/message.py:830:        variables: Variables for template
+src/modules/message.py:831:        candidate_info: Optional candidate info for context
+src/modules/message.py:832:
+src/modules/message.py:833:    Returns:
+src/modules/message.py:834:        Rendered message content
+src/modules/message.py:835:    """
+src/modules/message.py:836:    config = get_config()
+src/modules/message.py:837:    template = config.get_template(template_name)
+src/modules/message.py:838:    content = render_template(template['content'], variables)
+src/modules/message.py:839:
+src/modules/message.py:840:    # Display preview
+src/modules/message.py:841:    display_message_preview(content, candidate_info, template_name)
+src/modules/message.py:842:
+src/modules/message.py:843:    return content
+src/modules/message.py:844:
+src/modules/message.py:845:
+src/modules/message.py:846:def display_message_preview(
+src/modules/message.py:847:    content: str,
+src/modules/message.py:848:    candidate_info: Optional[Dict] = None,
+src/modules/message.py:849:    template_name: Optional[str] = None
+src/modules/message.py:850:) -> None:
+src/modules/message.py:851:    """
+src/modules/message.py:852:    Display formatted message preview in terminal.
+src/modules/message.py:853:
+src/modules/message.py:854:    Args:
+src/modules/message.py:855:        content: Message content
+src/modules/message.py:856:        candidate_info: Optional candidate info
+src/modules/message.py:857:        template_name: Optional template name
+src/modules/message.py:858:    """
+src/modules/message.py:859:    # Build recipient line
+src/modules/message.py:860:    if candidate_info:
+src/modules/message.py:861:        recipient = f"{candidate_info.get('name', 'Unknown')}"
+src/modules/message.py:862:        if candidate_info.get('title') and candidate_info.get('company'):
+src/modules/message.py:863:            recipient += f" ({candidate_info['title']} @ {candidate_info['company']})"
+src/modules/message.py:864:    else:
+src/modules/message.py:865:        recipient = "Unknown recipient"
+src/modules/message.py:866:
+src/modules/message.py:867:    # Create panel
+src/modules/message.py:868:    title = "Message Preview"
+src/modules/message.py:869:    if template_name:
+src/modules/message.py:870:        title += f" [{template_name}]"
+src/modules/message.py:871:
+src/modules/message.py:872:    panel_content = Text()
+src/modules/message.py:873:    panel_content.append("To: ", style="bold cyan")
+src/modules/message.py:874:    panel_content.append(recipient + "\n\n")
+src/modules/message.py:875:    panel_content.append(content)
+src/modules/message.py:876:
+src/modules/message.py:877:    console.print(Panel(
+src/modules/message.py:878:        panel_content,
+src/modules/message.py:879:        title=title,
+src/modules/message.py:880:        border_style="cyan",
+src/modules/message.py:881:        padding=(1, 2)
+src/modules/message.py:882:    ))
+src/modules/message.py:883:
+src/modules/message.py:884:
+src/modules/message.py:885:async def interactive_confirm(
+src/modules/message.py:886:    content: str,
+src/modules/message.py:887:    candidate_info: Optional[Dict] = None,
+src/modules/message.py:888:    template_name: Optional[str] = None
+src/modules/message.py:889:) -> str:
+src/modules/message.py:890:    """
+src/modules/message.py:891:    Show interactive confirmation dialog.
+src/modules/message.py:892:
+src/modules/message.py:893:    Args:
+src/modules/message.py:894:        content: Message content to confirm
+src/modules/message.py:895:        candidate_info: Optional candidate info
+src/modules/message.py:896:        template_name: Optional template name
+src/modules/message.py:897:
+src/modules/message.py:898:    Returns:
+src/modules/message.py:899:        Action string: 'send', 'edit', or 'skip'
+src/modules/message.py:900:    """
+src/modules/message.py:901:    # Display preview
+src/modules/message.py:902:    display_message_preview(content, candidate_info, template_name)
+src/modules/message.py:903:
+src/modules/message.py:904:    console.print()
+src/modules/message.py:905:
+src/modules/message.py:906:    # Interactive prompt
+src/modules/message.py:907:    choices = [
+src/modules/message.py:908:        questionary.Choice("Send message", value="send"),
+src/modules/message.py:909:        questionary.Choice("Edit content", value="edit"),
+src/modules/message.py:910:        questionary.Choice("Skip (don't send)", value="skip"),
+src/modules/message.py:911:    ]
+src/modules/message.py:912:
+src/modules/message.py:913:    loop = asyncio.get_running_loop()
+src/modules/message.py:914:    action = await loop.run_in_executor(
+src/modules/message.py:915:        None,
+src/modules/message.py:916:        lambda: questionary.select(
+src/modules/message.py:917:            "What would you like to do?",
+src/modules/message.py:918:            choices=choices,
+src/modules/message.py:919:            style=questionary.Style([
+src/modules/message.py:920:                ('selected', 'fg:green bold'),
+src/modules/message.py:921:                ('pointer', 'fg:green bold'),
+src/modules/message.py:922:                ('highlighted', 'fg:green'),
+src/modules/message.py:923:            ])
+src/modules/message.py:924:        ).unsafe_ask()
+src/modules/message.py:925:    )
+src/modules/message.py:926:
+src/modules/message.py:927:    return action or 'skip'
+src/modules/message.py:928:
+src/modules/message.py:929:
+src/modules/message.py:930:async def edit_message(content: str) -> Optional[str]:
+src/modules/message.py:931:    """
+src/modules/message.py:932:    Allow user to edit message content.
+src/modules/message.py:933:
+src/modules/message.py:934:    Args:
+src/modules/message.py:935:        content: Original content
+src/modules/message.py:936:
+src/modules/message.py:937:    Returns:
+src/modules/message.py:938:        Edited content or None if cancelled
+src/modules/message.py:939:    """
+src/modules/message.py:940:    console.print("\n[dim]Enter new message content (Ctrl+D to finish, Ctrl+C to cancel):[/dim]")
+src/modules/message.py:941:
+src/modules/message.py:942:    try:
+src/modules/message.py:943:        loop = asyncio.get_running_loop()
+src/modules/message.py:944:        edited = await loop.run_in_executor(
+src/modules/message.py:945:            None,
+src/modules/message.py:946:            lambda: questionary.text(
+src/modules/message.py:947:                "Message:",
+src/modules/message.py:948:                default=content,
+src/modules/message.py:949:                multiline=True
+src/modules/message.py:950:            ).unsafe_ask()
+src/modules/message.py:951:        )
+src/modules/message.py:952:
+src/modules/message.py:953:        return edited
+src/modules/message.py:954:    except KeyboardInterrupt:
+src/modules/message.py:955:        return None
+src/modules/message.py:956:
+src/modules/message.py:957:
+src/modules/message.py:958:async def _find_element_by_selectors(page: Page, selectors: List[str], timeout: int = 3000):
+src/modules/message.py:959:    """Try multiple selectors and return the first matching element.
+src/modules/message.py:960:
+src/modules/message.py:961:    Args:
+src/modules/message.py:962:        page: Playwright page instance
+src/modules/message.py:963:        selectors: List of CSS selectors to try in order
+src/modules/message.py:964:        timeout: Timeout per selector in ms
+src/modules/message.py:965:
+src/modules/message.py:966:    Returns:
+src/modules/message.py:967:        Tuple of (element, selector) or (None, None) if not found
+src/modules/message.py:968:    """
+src/modules/message.py:969:    for selector in selectors:
+src/modules/message.py:970:        try:
+src/modules/message.py:971:            elem = await page.wait_for_selector(selector, timeout=timeout)
+src/modules/message.py:972:            if elem:
+src/modules/message.py:973:                return elem, selector
+src/modules/message.py:974:        except Exception:
+src/modules/message.py:975:            continue
+src/modules/message.py:976:    return None, None
+src/modules/message.py:977:
+src/modules/message.py:978:
+src/modules/message.py:979:async def _click_chat_button(page: Page, config) -> bool:
+src/modules/message.py:980:    """Find and click chat/message button, then wait for navigation to chat page."""
+src/modules/message.py:981:    selectors = [
+src/modules/message.py:982:        config.get_selector('message.chat_button'),
+src/modules/message.py:983:        'button[class*="chat"]',
+src/modules/message.py:984:        '[class*="message-btn"]',
+src/modules/message.py:985:        'button:has-text("极速联系")',
+src/modules/message.py:986:        'button:has-text("立即沟通")',
+src/modules/message.py:987:        'button:has-text("发消息")',
+src/modules/message.py:988:        'button:has-text("私信")',
+src/modules/message.py:989:        'button:has-text("聊天")',
+src/modules/message.py:990:    ]
+src/modules/message.py:991:
+src/modules/message.py:992:    url_before = page.url
+src/modules/message.py:993:
+src/modules/message.py:994:    for selector in selectors:
+src/modules/message.py:995:        try:
+src/modules/message.py:996:            button = await page.wait_for_selector(selector, timeout=3000)
+src/modules/message.py:997:            if button:
+src/modules/message.py:998:                await human_click(page, selector)
+src/modules/message.py:999:                logger.debug(f"Clicked chat button: {selector}")
+src/modules/message.py:1000:
+src/modules/message.py:1001:                # Wait for navigation or page change after clicking
+src/modules/message.py:1002:                try:
+src/modules/message.py:1003:                    # Wait for URL change (chat page transition) or new content load
+src/modules/message.py:1004:                    await page.wait_for_url(
+src/modules/message.py:1005:                        lambda url: url != url_before,
+src/modules/message.py:1006:                        timeout=8000,
+src/modules/message.py:1007:                    )
+src/modules/message.py:1008:                    logger.debug(f"Page navigated to: {page.url}")
+src/modules/message.py:1009:                except Exception:
+src/modules/message.py:1010:                    # URL may not change if chat opens as overlay/modal
+src/modules/message.py:1011:                    logger.debug("URL did not change after chat button click, checking for chat panel")
+src/modules/message.py:1012:
+src/modules/message.py:1013:                # Wait for chat-related elements to appear (input or conversation area)
+src/modules/message.py:1014:                chat_ready_selectors = [
+src/modules/message.py:1015:                    'textarea', '[contenteditable="true"]',
+src/modules/message.py:1016:                    '[class*="chat-container"]', '[class*="chat-content"]',
+src/modules/message.py:1017:                    '[class*="message-list"]', '[class*="im-message"]',
+src/modules/message.py:1018:                ]
+src/modules/message.py:1019:                for chat_sel in chat_ready_selectors:
+src/modules/message.py:1020:                    try:
+src/modules/message.py:1021:                        await page.wait_for_selector(chat_sel, timeout=5000)
+src/modules/message.py:1022:                        logger.debug(f"Chat page ready, found: {chat_sel}")
+src/modules/message.py:1023:                        return True
+src/modules/message.py:1024:                    except Exception:
+src/modules/message.py:1025:                        continue
+src/modules/message.py:1026:
+src/modules/message.py:1027:                # If we got here, button was clicked but no chat UI detected
+src/modules/message.py:1028:                # Still return True since the button was found and clicked
+src/modules/message.py:1029:                logger.warning("Chat button clicked but chat UI not detected")
+src/modules/message.py:1030:                return True
+src/modules/message.py:1031:        except Exception:
+src/modules/message.py:1032:            continue
+src/modules/message.py:1033:
+src/modules/message.py:1034:    logger.warning("Chat button not found")
+src/modules/message.py:1035:    return False
+src/modules/message.py:1036:
+src/modules/message.py:1037:
+src/modules/message.py:1038:async def _type_message(page: Page, config, content: str) -> bool:
+src/modules/message.py:1039:    """Find message input and type content.
+src/modules/message.py:1040:
+src/modules/message.py:1041:    Uses progressively broader selectors. Broad selectors (bare textarea,
+src/modules/message.py:1042:    contenteditable) are only tried when the current URL looks like a chat page
+src/modules/message.py:1043:    to avoid typing into unrelated inputs (e.g. search bars on profile pages).
+src/modules/message.py:1044:    """
+src/modules/message.py:1045:    # Chat-specific selectors (always safe to try)
+src/modules/message.py:1046:    chat_selectors = [
+src/modules/message.py:1047:        config.get_selector('message.message_input'),
+src/modules/message.py:1048:        'textarea[class*="chat"]',
+src/modules/message.py:1049:        'textarea[class*="message"]',
+src/modules/message.py:1050:        'textarea[class*="im-"]',
+src/modules/message.py:1051:        '[class*="chat"] [contenteditable="true"]',
+src/modules/message.py:1052:        '[class*="im-"] [contenteditable="true"]',
+src/modules/message.py:1053:        '[class*="message"] [contenteditable="true"]',
+src/modules/message.py:1054:    ]
+src/modules/message.py:1055:
+src/modules/message.py:1056:    for selector in chat_selectors:
+src/modules/message.py:1057:        try:
+src/modules/message.py:1058:            input_elem = await page.wait_for_selector(selector, timeout=3000)
+src/modules/message.py:1059:            if input_elem:
+src/modules/message.py:1060:                await human_type(page, selector, content)
+src/modules/message.py:1061:                logger.debug(f"Typed message in: {selector}")
+src/modules/message.py:1062:                return True
+src/modules/message.py:1063:        except Exception as e:
+src/modules/message.py:1064:            logger.debug(f"Chat selector '{selector}' failed: {e}")
+src/modules/message.py:1065:            continue
+src/modules/message.py:1066:
+src/modules/message.py:1067:    # Broad selectors — only try if URL suggests we're on a chat page
+src/modules/message.py:1068:    current_url = page.url
+src/modules/message.py:1069:    is_chat_page = any(kw in current_url for kw in ('chat', 'im/', 'uh_chat', 'message'))
+src/modules/message.py:1070:
+src/modules/message.py:1071:    if is_chat_page:
+src/modules/message.py:1072:        broad_selectors = [
+src/modules/message.py:1073:            '[contenteditable="true"]',
+src/modules/message.py:1074:            'textarea',
+src/modules/message.py:1075:        ]
+src/modules/message.py:1076:        for selector in broad_selectors:
+src/modules/message.py:1077:            try:
+src/modules/message.py:1078:                input_elem = await page.wait_for_selector(selector, timeout=3000)
+src/modules/message.py:1079:                if input_elem:
+src/modules/message.py:1080:                    await human_type(page, selector, content)
+src/modules/message.py:1081:                    logger.debug(f"Typed message in (broad, chat URL): {selector}")
+src/modules/message.py:1082:                    return True
+src/modules/message.py:1083:            except Exception as e:
+src/modules/message.py:1084:                logger.debug(f"Broad selector '{selector}' failed: {e}")
+src/modules/message.py:1085:                continue
+src/modules/message.py:1086:
+src/modules/message.py:1087:    logger.warning(f"Message input not found (is_chat_page={is_chat_page}, url={current_url})")
+src/modules/message.py:1088:    return False
+src/modules/message.py:1089:
+src/modules/message.py:1090:
+src/modules/message.py:1091:async def _click_send_button(page: Page, config) -> bool:
+src/modules/message.py:1092:    """Find and click send button."""
+src/modules/message.py:1093:    selectors = [
+src/modules/message.py:1094:        config.get_selector('message.send_button'),
+src/modules/message.py:1095:        'button[class*="send"]',
+src/modules/message.py:1096:        'button:has-text("提交")',
+src/modules/message.py:1097:        'button:has-text("发送")',
+src/modules/message.py:1098:        'button:has-text("Send")',
+src/modules/message.py:1099:        '[class*="send-btn"]',
+src/modules/message.py:1100:    ]
+src/modules/message.py:1101:
+src/modules/message.py:1102:    button, selector = await _find_element_by_selectors(page, selectors)
+src/modules/message.py:1103:    if button:
+src/modules/message.py:1104:        await human_click(page, selector)
+src/modules/message.py:1105:        logger.debug(f"Clicked send button: {selector}")
+src/modules/message.py:1106:        await async_random_delay('action')
+src/modules/message.py:1107:        return True
+src/modules/message.py:1108:
+src/modules/message.py:1109:    logger.warning("Send button not found")
+src/modules/message.py:1110:    return False
+src/modules/message.py:1111:
+src/modules/message.py:1112:
+src/modules/message.py:1113:async def _verify_message_sent(page: Page, content: str, timeout: int = 5000) -> bool:
+src/modules/message.py:1114:    """
+src/modules/message.py:1115:    Verify that a message was actually sent by checking the conversation area.
+src/modules/message.py:1116:
+src/modules/message.py:1117:    Polls up to `timeout` ms with short intervals to handle async rendering.
+src/modules/message.py:1118:
+src/modules/message.py:1119:    Checks for:
+src/modules/message.py:1120:    1. The sent message content appearing in the conversation
+src/modules/message.py:1121:    2. The message input being cleared (indicating successful send)
+src/modules/message.py:1122:    3. A sent/delivered indicator element
+src/modules/message.py:1123:
+src/modules/message.py:1124:    Args:
+src/modules/message.py:1125:        page: Playwright page instance
+src/modules/message.py:1126:        content: The message content that was sent
+src/modules/message.py:1127:        timeout: Max time to wait for verification in ms
+src/modules/message.py:1128:
+src/modules/message.py:1129:    Returns:
+src/modules/message.py:1130:        True if message send was verified
+src/modules/message.py:1131:    """
+src/modules/message.py:1132:    import time
+src/modules/message.py:1133:
+src/modules/message.py:1134:    # Short snippet for matching (first 20 chars, avoid template artifacts)
+src/modules/message.py:1135:    snippet = content[:20].strip()
+src/modules/message.py:1136:
+src/modules/message.py:1137:    poll_interval_ms = 500
+src/modules/message.py:1138:    deadline = time.monotonic() + timeout / 1000.0
+src/modules/message.py:1139:
+src/modules/message.py:1140:    while True:
+src/modules/message.py:1141:        try:
+src/modules/message.py:1142:            # Strategy 1: Check if message content appears in conversation area
+src/modules/message.py:1143:            verified = await page.evaluate('''(snippet) => {
+src/modules/message.py:1144:                const chatSelectors = [
+src/modules/message.py:1145:                    '[class*="message-list"]',
+src/modules/message.py:1146:                    '[class*="chat-content"]',
+src/modules/message.py:1147:                    '[class*="conversation"]',
+src/modules/message.py:1148:                    '[class*="msg-list"]',
+src/modules/message.py:1149:                    '[class*="im-message"]',
+src/modules/message.py:1150:                    '[class*="chat-msg"]',
+src/modules/message.py:1151:                ];
+src/modules/message.py:1152:
+src/modules/message.py:1153:                for (const sel of chatSelectors) {
+src/modules/message.py:1154:                    const container = document.querySelector(sel);
+src/modules/message.py:1155:                    if (container && container.textContent.includes(snippet)) {
+src/modules/message.py:1156:                        return true;
+src/modules/message.py:1157:                    }
+src/modules/message.py:1158:                }
+src/modules/message.py:1159:
+src/modules/message.py:1160:                // Fallback: scan leaf-ish elements in the lower portion of the page
+src/modules/message.py:1161:                const viewportHeight = window.innerHeight;
+src/modules/message.py:1162:                const elements = document.querySelectorAll('div, p, span');
+src/modules/message.py:1163:                for (const el of elements) {
+src/modules/message.py:1164:                    const rect = el.getBoundingClientRect();
+src/modules/message.py:1165:                    if (rect.top > viewportHeight * 0.3 && el.textContent.includes(snippet)) {
+src/modules/message.py:1166:                        if (el.textContent.length < snippet.length + 200) {
+src/modules/message.py:1167:                            return true;
+src/modules/message.py:1168:                        }
+src/modules/message.py:1169:                    }
+src/modules/message.py:1170:                }
+src/modules/message.py:1171:
+src/modules/message.py:1172:                return false;
+src/modules/message.py:1173:            }''', snippet)
+src/modules/message.py:1174:
+src/modules/message.py:1175:            if verified:
+src/modules/message.py:1176:                logger.debug("Message send verified: content found in conversation")
+src/modules/message.py:1177:                return True
+src/modules/message.py:1178:
+src/modules/message.py:1179:            # Strategy 2: Check if input was cleared (indicates successful send)
+src/modules/message.py:1180:            input_cleared = await page.evaluate('''() => {
+src/modules/message.py:1181:                const inputs = document.querySelectorAll(
+src/modules/message.py:1182:                    'textarea, [contenteditable="true"], input[type="text"]'
+src/modules/message.py:1183:                );
+src/modules/message.py:1184:                for (const input of inputs) {
+src/modules/message.py:1185:                    const rect = input.getBoundingClientRect();
+src/modules/message.py:1186:                    if (rect.width > 0 && rect.height > 0) {
+src/modules/message.py:1187:                        const value = input.value || input.textContent || '';
+src/modules/message.py:1188:                        if (value.trim() === '') {
+src/modules/message.py:1189:                            return true;
+src/modules/message.py:1190:                        }
+src/modules/message.py:1191:                    }
+src/modules/message.py:1192:                }
+src/modules/message.py:1193:                return false;
+src/modules/message.py:1194:            }''')
+src/modules/message.py:1195:
+src/modules/message.py:1196:            if input_cleared:
+src/modules/message.py:1197:                logger.debug("Message send verified: input field was cleared")
+src/modules/message.py:1198:                return True
+src/modules/message.py:1199:
+src/modules/message.py:1200:            # Strategy 3: Check for sent/delivered indicators
+src/modules/message.py:1201:            sent_indicators = [
+src/modules/message.py:1202:                '[class*="sent"]',
+src/modules/message.py:1203:                '[class*="delivered"]',
+src/modules/message.py:1204:                '[class*="success"]',
+src/modules/message.py:1205:                '[class*="msg-status"]',
+src/modules/message.py:1206:            ]
+src/modules/message.py:1207:            for selector in sent_indicators:
+src/modules/message.py:1208:                try:
+src/modules/message.py:1209:                    indicator = await page.query_selector(selector)
+src/modules/message.py:1210:                    if indicator and await indicator.is_visible():
+src/modules/message.py:1211:                        logger.debug(f"Message send verified: indicator found ({selector})")
+src/modules/message.py:1212:                        return True
+src/modules/message.py:1213:                except Exception:
+src/modules/message.py:1214:                    continue
+src/modules/message.py:1215:
+src/modules/message.py:1216:        except Exception as e:
+src/modules/message.py:1217:            logger.warning(f"Message verification poll failed: {e}")
+src/modules/message.py:1218:
+src/modules/message.py:1219:        # Check if we've exceeded the deadline
+src/modules/message.py:1220:        if time.monotonic() >= deadline:
+src/modules/message.py:1221:            break
+src/modules/message.py:1222:
+src/modules/message.py:1223:        await asyncio.sleep(poll_interval_ms / 1000.0)
+src/modules/message.py:1224:
+src/modules/message.py:1225:    logger.warning("Could not verify message was sent after polling")
+src/modules/message.py:1226:    return False
+src/modules/message.py:1227:
+src/modules/message.py:1228:
+src/modules/message.py:1229:async def _check_existing_conversation(page: Page, maimai_id: str) -> bool:
+src/modules/message.py:1230:    """
+src/modules/message.py:1231:    Check if there's already an existing conversation with this candidate.
+src/modules/message.py:1232:
+src/modules/message.py:1233:    Checks for actual user message bubbles (not system prompts/tips) in the
+src/modules/message.py:1234:    conversation area.
+src/modules/message.py:1235:
+src/modules/message.py:1236:    Args:
+src/modules/message.py:1237:        page: Playwright page instance
+src/modules/message.py:1238:        maimai_id: Candidate's Maimai ID
+src/modules/message.py:1239:
+src/modules/message.py:1240:    Returns:
+src/modules/message.py:1241:        True if an existing conversation was detected
+src/modules/message.py:1242:    """
+src/modules/message.py:1243:    try:
+src/modules/message.py:1244:        has_conversation = await page.evaluate('''() => {
+src/modules/message.py:1245:            // Look for conversation message containers
+src/modules/message.py:1246:            const chatSelectors = [
+src/modules/message.py:1247:                '[class*="message-list"]',
+src/modules/message.py:1248:                '[class*="chat-content"]',
+src/modules/message.py:1249:                '[class*="conversation"]',
+src/modules/message.py:1250:                '[class*="msg-list"]',
+src/modules/message.py:1251:                '[class*="im-message"]',
+src/modules/message.py:1252:                '[class*="chat-msg"]',
+src/modules/message.py:1253:                '[class*="chat-record"]',
+src/modules/message.py:1254:            ];
+src/modules/message.py:1255:
+src/modules/message.py:1256:            // System/tip patterns that should NOT count as existing conversation
+src/modules/message.py:1257:            const systemPatterns = [
+src/modules/message.py:1258:                '还不是好友', '添加好友', '发送好友申请', '对方未回复',
+src/modules/message.py:1259:                '以上是打招呼内容', '暂无消息', '开始聊天', '你们已经是好友',
+src/modules/message.py:1260:                '系统消息', '温馨提示', '安全提示', '注意事项',
+src/modules/message.py:1261:                '开启招呼语', '求职意向', '目前情况', '竞业点',
+src/modules/message.py:1262:                '欢迎联系', '不感兴趣',
+src/modules/message.py:1263:            ];
+src/modules/message.py:1264:
+src/modules/message.py:1265:            const isSystemText = (text) => {
+src/modules/message.py:1266:                const t = text.trim();
+src/modules/message.py:1267:                if (t.length < 5) return true;  // Too short to be a real message
+src/modules/message.py:1268:                return systemPatterns.some(p => t.includes(p));
+src/modules/message.py:1269:            };
+src/modules/message.py:1270:
+src/modules/message.py:1271:            for (const sel of chatSelectors) {
+src/modules/message.py:1272:                const container = document.querySelector(sel);
+src/modules/message.py:1273:                if (!container) continue;
+src/modules/message.py:1274:
+src/modules/message.py:1275:                // Strategy 1: Look for message bubble elements
+src/modules/message.py:1276:                const bubbleSelectors = [
+src/modules/message.py:1277:                    '[class*="msg-item"]', '[class*="message-item"]',
+src/modules/message.py:1278:                    '[class*="bubble"]', '[class*="chat-item"]',
+src/modules/message.py:1279:                    '[class*="msg-bubble"]', '[class*="chat-bubble"]',
+src/modules/message.py:1280:                ];
+src/modules/message.py:1281:                for (const bSel of bubbleSelectors) {
+src/modules/message.py:1282:                    const bubbles = container.querySelectorAll(bSel);
+src/modules/message.py:1283:                    // Filter out system/tip bubbles
+src/modules/message.py:1284:                    let realMessageCount = 0;
+src/modules/message.py:1285:                    for (const bubble of bubbles) {
+src/modules/message.py:1286:                        const text = bubble.textContent.trim();
+src/modules/message.py:1287:                        if (text.length > 5 && !isSystemText(text)) {
+src/modules/message.py:1288:                            realMessageCount++;
+src/modules/message.py:1289:                        }
+src/modules/message.py:1290:                    }
+src/modules/message.py:1291:                    if (realMessageCount > 0) {
+src/modules/message.py:1292:                        return true;
+src/modules/message.py:1293:                    }
+src/modules/message.py:1294:                }
+src/modules/message.py:1295:
+src/modules/message.py:1296:                // Strategy 2: If no bubble selectors matched, check direct children
+src/modules/message.py:1297:                // that look like message blocks (not system tips)
+src/modules/message.py:1298:                const children = container.children;
+src/modules/message.py:1299:                let realChildCount = 0;
+src/modules/message.py:1300:                for (const child of children) {
+src/modules/message.py:1301:                    const text = child.textContent.trim();
+src/modules/message.py:1302:                    // Must have meaningful content and not be a system message
+src/modules/message.py:1303:                    if (text.length > 10 && !isSystemText(text)) {
+src/modules/message.py:1304:                        // Check it's not a timestamp-only or status-only element
+src/modules/message.py:1305:                        if (child.querySelector('img[class*="avatar"]') || text.length > 20) {
+src/modules/message.py:1306:                            realChildCount++;
+src/modules/message.py:1307:                        }
+src/modules/message.py:1308:                    }
+src/modules/message.py:1309:                }
+src/modules/message.py:1310:                if (realChildCount > 0) {
+src/modules/message.py:1311:                    return true;
+src/modules/message.py:1312:                }
+src/modules/message.py:1313:            }
+src/modules/message.py:1314:            return false;
+src/modules/message.py:1315:        }''')
+src/modules/message.py:1316:
+src/modules/message.py:1317:        if has_conversation:
+src/modules/message.py:1318:            logger.info(f"Existing conversation detected for {maimai_id}")
+src/modules/message.py:1319:        return has_conversation
+src/modules/message.py:1320:
+src/modules/message.py:1321:    except Exception as e:
+src/modules/message.py:1322:        # On error, assume conversation exists (safe side: avoid duplicate messages)
+src/modules/message.py:1323:        logger.warning(f"Conversation check failed for {maimai_id}: {e} — assuming existing conversation")
+src/modules/message.py:1324:        return True
+src/modules/message.py:1325:
+src/modules/message.py:1326:
+src/modules/message.py:1327:def _get_candidate_info(db_manager, maimai_id: str) -> Optional[Dict]:
+src/modules/message.py:1328:    """Get candidate info from database."""
+src/modules/message.py:1329:    with db_manager.session_scope() as session:
+src/modules/message.py:1330:        candidate = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+src/modules/message.py:1331:        if candidate:
+src/modules/message.py:1332:            return {
+src/modules/message.py:1333:                'name': candidate.name,
+src/modules/message.py:1334:                'title': candidate.title,
+src/modules/message.py:1335:                'company': candidate.company,
+src/modules/message.py:1336:            }
+src/modules/message.py:1337:        return None
+src/modules/message.py:1338:
+src/modules/message.py:1339:
+src/modules/message.py:1340:def _log_message(
+src/modules/message.py:1341:    db_manager,
+src/modules/message.py:1342:    maimai_id: str,
+src/modules/message.py:1343:    template_name: str,
+src/modules/message.py:1344:    content: str,
+src/modules/message.py:1345:    status: str
+src/modules/message.py:1346:) -> None:
+src/modules/message.py:1347:    """Log message to database. Creates a minimal Candidate if needed for FK."""
+src/modules/message.py:1348:    try:
+src/modules/message.py:1349:        with db_manager.session_scope() as session:
+src/modules/message.py:1350:            # Ensure candidate exists for FK constraint
+src/modules/message.py:1351:            existing = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+src/modules/message.py:1352:            if not existing:
+src/modules/message.py:1353:                session.add(Candidate(maimai_id=maimai_id))
+src/modules/message.py:1354:                session.flush()
+src/modules/message.py:1355:
+src/modules/message.py:1356:            message = Message(
+src/modules/message.py:1357:                candidate_maimai_id=maimai_id,
+src/modules/message.py:1358:                template_name=template_name,
+src/modules/message.py:1359:                content=content,
+src/modules/message.py:1360:                status=status,
+src/modules/message.py:1361:                sent_at=datetime.now(timezone.utc) if status == 'sent' else None
+src/modules/message.py:1362:            )
+src/modules/message.py:1363:            session.add(message)
+src/modules/message.py:1364:            logger.debug(f"Logged message to {maimai_id}: {status}")
+src/modules/message.py:1365:    except Exception as e:
+src/modules/message.py:1366:        logger.warning(
+src/modules/message.py:1367:            f"AUDIT FAILURE: Failed to log message to {maimai_id} (status={status}): {e}. "
+src/modules/message.py:1368:            f"This candidate may be re-messaged on next run."
+src/modules/message.py:1369:        )
+src/modules/message.py:1370:
+src/modules/message.py:1371:
+src/modules/message.py:1372:# ---------------------------------------------------------------------------
+src/modules/message.py:1373:# Enterprise inline messaging (Path B)
+src/modules/message.py:1374:# ---------------------------------------------------------------------------
+src/modules/message.py:1375:
+src/modules/message.py:1376:async def _close_enterprise_popup(page: Page) -> None:
+src/modules/message.py:1377:    """Close popup/modal that appears after sending a message in enterprise flow."""
+src/modules/message.py:1378:    config = get_config()
+src/modules/message.py:1379:
+src/modules/message.py:1380:    # Try close popup image first
+src/modules/message.py:1381:    close_img_sel = config.get_selector("enterprise.close_popup_img")
+src/modules/message.py:1382:    try:
+src/modules/message.py:1383:        close_img = await page.wait_for_selector(close_img_sel, timeout=3000)
+src/modules/message.py:1384:        if close_img:
+src/modules/message.py:1385:            await close_img.click()
+src/modules/message.py:1386:            await page.wait_for_timeout(500)
+src/modules/message.py:1387:    except Exception:
+src/modules/message.py:1388:        pass
+src/modules/message.py:1389:
+src/modules/message.py:1390:    # Try close modal button
+src/modules/message.py:1391:    close_modal_sel = config.get_selector("enterprise.close_modal")
+src/modules/message.py:1392:    try:
+src/modules/message.py:1393:        close_btn = await page.wait_for_selector(close_modal_sel, timeout=2000)
+src/modules/message.py:1394:        if close_btn:
+src/modules/message.py:1395:            await close_btn.click()
+src/modules/message.py:1396:            await page.wait_for_timeout(500)
+src/modules/message.py:1397:    except Exception:
+src/modules/message.py:1398:        pass

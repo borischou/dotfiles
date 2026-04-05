@@ -1,0 +1,102 @@
+"""Anti-detection module for browser automation.
+
+Implements human-like interaction via Emunium + Patchright:
+- Human-like scrolling behavior (chunked, variable speed)
+- Human-like clicking via Emunium (natural mouse movement)
+- Human-like typing via Emunium (variable keystroke timing)
+
+Note: Webdriver property hiding and navigator masking are handled
+by Patchright automatically in CDP mode.
+"""
+
+import random
+
+from patchright.async_api import Page
+from emunium import EmuniumPlaywright
+
+from src.exceptions.errors import SelectorNotFoundError
+
+
+async def human_scroll(page: Page, direction: str = 'down', distance: int = None) -> None:
+    """
+    Perform human-like scrolling with variable speed.
+
+    Args:
+        page: Playwright page instance
+        direction: 'up' or 'down'
+        distance: Scroll distance in pixels (random if None)
+    """
+    if direction not in ('up', 'down'):
+        raise ValueError(f"Invalid scroll direction: {direction!r}, expected 'up' or 'down'")
+
+    if distance is None:
+        distance = random.randint(200, 600)
+
+    if direction == 'up':
+        distance = -distance
+
+    # Break scroll into smaller chunks
+    chunks = random.randint(3, 8)
+    chunk_size = distance // chunks
+
+    for i in range(chunks):
+        # Add variance to each chunk
+        actual_chunk = chunk_size + random.randint(-20, 20)
+
+        await page.mouse.wheel(0, actual_chunk)
+
+        # Variable delay between scroll chunks
+        delay = random.uniform(0.05, 0.15)
+        await page.wait_for_timeout(delay * 1000)
+
+    # Small pause after scrolling (human would look at content)
+    await page.wait_for_timeout(random.uniform(0.2, 0.5) * 1000)
+
+
+async def human_click(page: Page, selector: str) -> None:
+    """
+    Click an element with human-like behavior using Emunium.
+
+    Emunium provides natural mouse movement and click simulation.
+
+    Args:
+        page: Playwright page instance
+        selector: CSS selector for element to click
+    """
+    try:
+        element = await page.wait_for_selector(selector, timeout=10000)
+    except Exception as e:
+        if "timeout" in str(type(e).__name__).lower() or "timeout" in str(e).lower():
+            raise SelectorNotFoundError(f"Element not found: {selector}")
+        raise
+
+    if element is None:
+        raise SelectorNotFoundError(f"Element resolved to None: {selector}")
+
+    emunium = EmuniumPlaywright(page)
+    await emunium.click_at(element)
+
+
+async def human_type(page: Page, selector: str, text: str) -> None:
+    """
+    Type text with human-like timing using Emunium.
+
+    Args:
+        page: Playwright page instance
+        selector: CSS selector for input element
+        text: Text to type
+    """
+    try:
+        element = await page.wait_for_selector(selector, timeout=10000)
+    except Exception as e:
+        if "timeout" in str(type(e).__name__).lower() or "timeout" in str(e).lower():
+            raise SelectorNotFoundError(f"Element not found: {selector}")
+        raise
+
+    if element is None:
+        raise SelectorNotFoundError(f"Element resolved to None: {selector}")
+
+    emunium = EmuniumPlaywright(page)
+    await emunium.type_at(element, text)
+
+

@@ -1,0 +1,44 @@
+     1→<!DOCTYPE html>
+     2→<html lang="zh-CN">
+     3→<head>
+     4→    <meta charset="UTF-8">
+     5→    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6→    <title>{% block title %}Boss Assistant{% endblock %}</title>
+     7→    <!-- Simple.css -->
+     8→    <link rel="stylesheet" href="https://cdn.simplecss.org/simple.min.css">
+     9→    <!-- HTMX -->
+    10→    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    11→    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/sse.js"></script>
+    12→    <!-- Custom styles -->
+    13→    <link rel="stylesheet" href="/static/css/style.css">
+    14→</head>
+    15→<body>
+    16→    <header>
+    17→        <nav>
+    18→            <a href="/">Dashboard</a>
+    19→            <a href="/search">搜索</a>
+    20→            <a href="/candidates">候选人</a>
+    21→            <a href="/pipeline">Pipeline</a>
+    22→            <a href="/templates">模板</a>
+    23→            <a href="/settings">设置</a>
+    24→            <a href="/status">状态</a>
+    25→        </nav>
+    26→        <h1>{% block header %}Boss Assistant{% endblock %}</h1>
+    27→    </header>
+    28→
+    29→    <main>
+    30→        <!-- Toast container -->
+    31→        <div id="toast-container"></div>
+    32→
+    33→        {% block content %}{% endblock %}
+    34→    </main>
+    35→
+    36→    <footer>
+    37→        <p>Boss Assistant — Boss直聘半自动招聘助手</p>
+    38→    </footer>
+    39→
+    40→    <script src="/static/js/app.js"></script>
+    41→    {% block scripts %}{% endblock %}
+    42→</body>
+    43→</html>
+    44→

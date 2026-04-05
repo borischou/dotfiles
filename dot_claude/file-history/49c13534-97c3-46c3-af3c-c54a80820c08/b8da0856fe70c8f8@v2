@@ -1,0 +1,180 @@
+"""Pipeline routes — control panel, start/cancel, SSE progress."""
+
+import asyncio
+import json
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import HTMLResponse
+from sse_starlette.sse import EventSourceResponse
+
+from src.web.app import task_manager, templates
+from src.core.browser import get_browser_manager
+from src.modules.auth import ensure_logged_in
+from src.services.pipeline import run_pipeline
+from src.models.database import PipelineRun, get_db_manager
+
+router = APIRouter()
+
+
+@router.get("/", response_class=HTMLResponse)
+async def pipeline_page(request: Request):
+    """Pipeline control panel."""
+    db = get_db_manager()
+
+    with db.session_scope() as session:
+        recent_runs = session.query(PipelineRun).order_by(
+            PipelineRun.started_at.desc()
+        ).limit(10).all()
+
+        runs = []
+        for r in recent_runs:
+            runs.append({
+                "task_id": r.task_id,
+                "status": r.status,
+                "keywords": r.keywords,
+                "template_name": r.template_name,
+                "started_at": r.started_at,
+                "finished_at": r.finished_at,
+                "result": r.result,
+            })
+
+    return templates.TemplateResponse("pipeline.html", {
+        "request": request,
+        "pipeline_busy": task_manager.is_busy,
+        "current_task_id": task_manager.current_task_id,
+        "recent_runs": runs,
+    })
+
+
+@router.post("/start", response_class=HTMLResponse)
+async def start_pipeline(
+    request: Request,
+    keywords: str = Form(...),
+    template_name: str = Form(...),
+    location: str = Form(""),
+    pages: int = Form(3),
+    batch_pages: int = Form(0),
+    experience: str = Form(""),
+    education: str = Form(""),
+    salary: str = Form(""),
+    skip_messaged: bool = Form(True),
+    dry_run: bool = Form(False),
+):
+    """Start a pipeline task in the background."""
+    if task_manager.is_busy:
+        return HTMLResponse(
+            '<p><mark>Pipeline 已在运行中</mark></p>',
+            status_code=409,
+        )
+
+    keyword_tuple = tuple(k.strip() for k in keywords.split(",") if k.strip())
+    if not keyword_tuple:
+        return HTMLResponse('<p><mark>请输入关键词</mark></p>', status_code=400)
+    if not template_name:
+        return HTMLResponse('<p><mark>请选择消息模板</mark></p>', status_code=400)
+
+    async def _run_pipeline(task_id, cancel_event, progress_callback, **kw):
+        db = get_db_manager()
+
+        # Record pipeline run
+        with db.session_scope() as session:
+            run = PipelineRun(
+                task_id=task_id,
+                status='running',
+                keywords=list(keyword_tuple),
+                template_name=template_name,
+                params={
+                    "location": location,
+                    "pages": pages,
+                    "batch_pages": batch_pages,
+                    "experience": experience,
+                    "education": education,
+                    "salary": salary,
+                    "skip_messaged": skip_messaged,
+                    "dry_run": dry_run,
+                },
+            )
+            session.add(run)
+
+        try:
+            browser = get_browser_manager()
+            await ensure_logged_in(browser)
+
+            result = await run_pipeline(
+                keywords=keyword_tuple,
+                template_name=template_name,
+                variables={},
+                location=location or None,
+                max_pages=pages,
+                batch_pages=batch_pages,
+                experience=experience or None,
+                education=education or None,
+                salary=salary or None,
+                interactive=False,
+                skip_messaged=skip_messaged,
+                dry_run=dry_run,
+                browser=browser,
+                progress_callback=progress_callback,
+            )
+
+            # Update pipeline run record
+            with db.session_scope() as session:
+                run_record = session.query(PipelineRun).filter_by(task_id=task_id).first()
+                if run_record:
+                    run_record.status = 'completed'
+                    run_record.result = result
+                    run_record.finished_at = datetime.now(timezone.utc)
+
+        except asyncio.CancelledError:
+            with db.session_scope() as session:
+                run_record = session.query(PipelineRun).filter_by(task_id=task_id).first()
+                if run_record:
+                    run_record.status = 'cancelled'
+                    run_record.finished_at = datetime.now(timezone.utc)
+            raise
+
+        except Exception as e:
+            with db.session_scope() as session:
+                run_record = session.query(PipelineRun).filter_by(task_id=task_id).first()
+                if run_record:
+                    run_record.status = 'failed'
+                    run_record.result = {"error": str(e)}
+                    run_record.finished_at = datetime.now(timezone.utc)
+            raise
+
+    try:
+        task_id = await task_manager.start_task(_run_pipeline)
+    except RuntimeError as e:
+        return HTMLResponse(f'<p><mark>{e}</mark></p>', status_code=409)
+
+    # Return the pipeline progress panel with SSE connection
+    return templates.TemplateResponse("partials/pipeline_progress.html", {
+        "request": request,
+        "task_id": task_id,
+    })
+
+
+@router.delete("/cancel")
+async def cancel_pipeline(request: Request):
+    """Cancel the running pipeline."""
+    cancelled = await task_manager.cancel()
+    if cancelled:
+        return {"status": "ok", "message": "Pipeline cancel requested"}
+    return {"status": "noop", "message": "No pipeline running"}
+
+
+@router.get("/progress/{task_id}")
+async def pipeline_progress_sse(request: Request, task_id: str):
+    """SSE endpoint for pipeline progress events."""
+
+    async def event_generator():
+        async for msg in task_manager.subscribe_progress(task_id):
+            if await request.is_disconnected():
+                break
+            yield {
+                "event": msg["event"],
+                "data": json.dumps(msg["data"], ensure_ascii=False),
+            }
+
+    return EventSourceResponse(event_generator())

@@ -1,0 +1,126 @@
+     1→{% extends "base.html" %}
+     2→{% block title %}Pipeline — Boss Assistant{% endblock %}
+     3→{% block header %}Pipeline 控制面板{% endblock %}
+     4→
+     5→{% block content %}
+     6→<section>
+     7→    <h2>启动 Pipeline</h2>
+     8→    <form hx-post="/pipeline/start" hx-target="#pipeline-status" hx-indicator="#start-spinner">
+     9→        <fieldset {% if pipeline_busy %}disabled{% endif %}>
+    10→            <label for="keywords">关键词（逗号分隔）
+    11→                <input type="text" id="keywords" name="keywords" placeholder="前端工程师, React" required>
+    12→            </label>
+    13→
+    14→            <label for="template_name">消息模板
+    15→                <select name="template_name" id="template_name" required>
+    16→                    <option value="">选择模板...</option>
+    17→                </select>
+    18→            </label>
+    19→
+    20→            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+    21→                <label for="location">城市
+    22→                    <input type="text" id="location" name="location" placeholder="北京">
+    23→                </label>
+    24→                <label for="pages">滚动轮数
+    25→                    <input type="number" id="pages" name="pages" value="3" min="1" max="20">
+    26→                </label>
+    27→                <label for="batch_pages">批量页数 (0=全部)
+    28→                    <input type="number" id="batch_pages" name="batch_pages" value="0" min="0">
+    29→                </label>
+    30→            </div>
+    31→
+    32→            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+    33→                <label for="experience">经验
+    34→                    <input type="text" id="experience" name="experience" placeholder="3-5年">
+    35→                </label>
+    36→                <label for="education">学历
+    37→                    <input type="text" id="education" name="education" placeholder="本科">
+    38→                </label>
+    39→                <label for="salary">薪资
+    40→                    <input type="text" id="salary" name="salary" placeholder="20-40K">
+    41→                </label>
+    42→            </div>
+    43→
+    44→            <label>
+    45→                <input type="checkbox" name="skip_messaged" value="true" checked>
+    46→                跳过已发送消息的候选人
+    47→            </label>
+    48→
+    49→            <label>
+    50→                <input type="checkbox" name="dry_run" value="true">
+    51→                Dry Run（仅模拟，不实际发送）
+    52→            </label>
+    53→
+    54→            <button type="submit">启动 Pipeline</button>
+    55→            <span id="start-spinner" class="htmx-indicator">启动中...</span>
+    56→        </fieldset>
+    57→    </form>
+    58→
+    59→    {% if pipeline_busy %}
+    60→    <p><mark>Pipeline 运行中 ({{ current_task_id }})</mark></p>
+    61→    <button hx-delete="/pipeline/cancel" hx-target="#cancel-result">取消 Pipeline</button>
+    62→    <div id="cancel-result"></div>
+    63→    {% endif %}
+    64→</section>
+    65→
+    66→<section id="pipeline-status">
+    67→    {% if pipeline_busy %}
+    68→    {% include "partials/pipeline_progress.html" %}
+    69→    {% endif %}
+    70→</section>
+    71→
+    72→{% if recent_runs %}
+    73→<section>
+    74→    <h2>历史运行</h2>
+    75→    <table>
+    76→        <thead>
+    77→            <tr>
+    78→                <th>Task ID</th>
+    79→                <th>状态</th>
+    80→                <th>关键词</th>
+    81→                <th>模板</th>
+    82→                <th>开始时间</th>
+    83→                <th>结果</th>
+    84→            </tr>
+    85→        </thead>
+    86→        <tbody>
+    87→            {% for run in recent_runs %}
+    88→            <tr>
+    89→                <td>{{ run.task_id }}</td>
+    90→                <td>{{ run.status }}</td>
+    91→                <td>{{ run.keywords|join(", ") if run.keywords else "—" }}</td>
+    92→                <td>{{ run.template_name or "—" }}</td>
+    93→                <td>{{ run.started_at.strftime('%m-%d %H:%M') if run.started_at else "—" }}</td>
+    94→                <td>
+    95→                    {% if run.result %}
+    96→                    发送 {{ run.result.get('sent', 0) }} / 失败 {{ run.result.get('failed', 0) }}
+    97→                    {% else %}
+    98→                    —
+    99→                    {% endif %}
+   100→                </td>
+   101→            </tr>
+   102→            {% endfor %}
+   103→        </tbody>
+   104→    </table>
+   105→</section>
+   106→{% endif %}
+   107→
+   108→{% block scripts %}
+   109→<script>
+   110→// Load template options
+   111→fetch("/templates?format=json")
+   112→    .then(r => r.json())
+   113→    .then(data => {
+   114→        const select = document.getElementById("template_name");
+   115→        data.forEach(t => {
+   116→            const opt = document.createElement("option");
+   117→            opt.value = t.name;
+   118→            opt.textContent = t.display_name + " — " + t.description;
+   119→            select.appendChild(opt);
+   120→        });
+   121→    })
+   122→    .catch(() => {});
+   123→</script>
+   124→{% endblock %}
+   125→{% endblock %}
+   126→

@@ -1,0 +1,98 @@
+"""Custom exceptions for Maimai Assistant."""
+
+
+class MaimaiAssistantError(Exception):
+    """Base exception for all Maimai Assistant errors."""
+    pass
+
+
+class BrowserError(MaimaiAssistantError):
+    """Raised when browser automation fails."""
+    pass
+
+
+class SessionExpiredError(MaimaiAssistantError):
+    """Raised when Maimai session has expired."""
+    pass
+
+
+class LoginRequiredError(SessionExpiredError):
+    """Raised when user needs to manually log in."""
+
+    def __init__(self, cdp_endpoint: str = "http://localhost:9222"):
+        super().__init__(
+            "检测到未登录状态，请执行以下步骤:\n"
+            f"1. 确保 Chrome 正在运行 (CDP 端口: {cdp_endpoint})\n"
+            "   /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\\n"
+            f"     --remote-debugging-port={cdp_endpoint.split(':')[-1]} \\\n"
+            "     --user-data-dir=/tmp/chrome-debug-profile\n"
+            "2. 在 Chrome 中访问 https://maimai.cn 并完成登录\n"
+            "3. 重新运行命令"
+        )
+
+
+class CaptchaBlockedError(MaimaiAssistantError):
+    """Raised when operation is blocked by captcha."""
+
+    def __init__(self):
+        super().__init__(
+            "检测到验证码阻塞!\n"
+            "请在浏览器窗口中完成验证，然后按回车继续\n\n"
+            "提示: 如果频繁出现验证码，请尝试:\n"
+            "  - 降低操作频率 (修改 config/settings.json 中的 rate_limits)\n"
+            "  - 增加延迟时间 (修改 delays.action_min/action_max)\n"
+            "  - 等待一段时间后再继续使用"
+        )
+
+
+class QuotaExhaustedError(PermanentFailureError):
+    """Raised when contact quota is exhausted."""
+
+    def __init__(self, remaining: int = 0):
+        super().__init__(
+            f"联系券已用尽 (剩余: {remaining})\n\n"
+            "解决方案:\n"
+            "  1. 等待配额恢复 (通常每日刷新)\n"
+            "  2. 升级脉脉会员以获取更多配额\n"
+            "  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送"
+        )
+
+
+class RateLimitExceededError(MaimaiAssistantError):
+    """Raised when rate limit is exceeded."""
+
+    def __init__(self, action_type: str, wait_time: int, message: str = None):
+        self.action_type = action_type
+        self.wait_time = wait_time
+        if message is None:
+            message = f"Rate limit exceeded for {action_type}. Wait {wait_time} seconds."
+        super().__init__(message)
+
+
+class SelectorNotFoundError(MaimaiAssistantError):
+    """Raised when page selector is not found."""
+    pass
+
+
+class ExtractionError(MaimaiAssistantError):
+    """Raised when data extraction fails."""
+    pass
+
+
+
+class ConfigurationError(MaimaiAssistantError):
+    """Raised when configuration is invalid."""
+    pass
+
+
+class ValidationError(MaimaiAssistantError):
+    """Raised when input validation fails."""
+    pass
+
+
+class PermanentFailureError(MaimaiAssistantError):
+    """Raised when a send failure is deterministic and should not be retried.
+
+    Examples: no profile URL, VIP paywall, candidate already messaged.
+    """
+    pass

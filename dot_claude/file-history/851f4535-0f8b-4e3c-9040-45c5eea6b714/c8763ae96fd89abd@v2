@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Search - Maimai Assistant{% endblock %}
+
+{% block content %}
+<h2>Search Candidates</h2>
+
+<form id="search-form">
+    <div class="grid">
+        <label>
+            Keywords (one per line)
+            <textarea name="keywords" rows="3" placeholder="e.g. 前端工程师&#10;后端工程师" required></textarea>
+        </label>
+        <label>
+            Company filter (one per line, optional)
+            <textarea name="company" rows="3" placeholder="e.g. 字节跳动&#10;快手"></textarea>
+        </label>
+    </div>
+    <div class="grid">
+        <label>
+            Location (optional)
+            <input type="text" name="location" placeholder="e.g. 北京">
+        </label>
+        <label>
+            Pages
+            <input type="number" name="pages" value="1" min="1" max="50">
+        </label>
+    </div>
+    <button type="submit">Search</button>
+</form>
+
+<div id="search-progress" hidden>
+    <article aria-busy="true">
+        <p id="search-progress-text">Searching...</p>
+        <progress id="search-progress-bar"></progress>
+    </article>
+</div>
+
+<div id="search-results" hidden>
+    <h3>Results (<span id="result-count">0</span> candidates)</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Title</th>
+                <th>Company</th>
+                <th>Location</th>
+            </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+    </table>
+    <button id="export-btn" class="outline" onclick="exportResults()">Export to Excel</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('search-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const keywords = form.keywords.value.split('\n').map(s => s.trim()).filter(Boolean);
+    const company = form.company.value.split('\n').map(s => s.trim()).filter(Boolean);
+    const location = form.location.value.trim() || null;
+    const pages = parseInt(form.pages.value) || 1;
+
+    if (!keywords.length) return alert('Please enter at least one keyword');
+
+    // Show progress
+    document.getElementById('search-progress').hidden = false;
+    document.getElementById('search-results').hidden = true;
+    form.querySelector('button').disabled = true;
+
+    try {
+        const res = await fetch('/api/search', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({keywords, company, location, pages}),
+        });
+        const data = await res.json();
+
+        // Connect WebSocket for progress
+        const ws = connectTaskWS(data.task_id, {
+            onEvent(msg) {
+                document.getElementById('search-progress-text').textContent =
+                    `${msg.event}: ${msg.keyword || ''} ${msg.found ? '(' + msg.found + ' found)' : ''}`;
+            },
+            onComplete(msg) {
+                const candidates = msg.result || [];
+                showSearchResults(candidates);
+                document.getElementById('search-progress').hidden = true;
+                form.querySelector('button').disabled = false;
+            },
+            onError(msg) {
+                alert('Search failed: ' + (msg.error || 'Unknown error'));
+                document.getElementById('search-progress').hidden = true;
+                form.querySelector('button').disabled = false;
+            },
+        });
+    } catch (e) {
+        alert('Request failed: ' + e.message);
+        document.getElementById('search-progress').hidden = true;
+        form.querySelector('button').disabled = false;
+    }
+});
+
+function showSearchResults(candidates) {
+    document.getElementById('search-results').hidden = false;
+    document.getElementById('result-count').textContent = candidates.length;
+    const tbody = document.getElementById('results-body');
+    tbody.innerHTML = candidates.map((c, i) => `
+        <tr>
+            <td>${i + 1}</td>
+            <td>${escapeHtml(c.name)}</td>
+            <td>${escapeHtml(c.title)}</td>
+            <td>${escapeHtml(c.company)}</td>
+            <td>${escapeHtml(c.location || '')}</td>
+        </tr>
+    `).join('');
+}
+
+async function exportResults() {
+    const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({format: 'xlsx'}),
+    });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'candidates.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,50 @@
+     1→{
+     2→  "version": "1.4.0",
+     3→  "last_updated": "2026-03-03",
+     4→  "note": "CSS selectors for Maimai pages. Only actively-used selectors are kept; search extraction uses JS-based page.evaluate() instead of CSS selectors.",
+     5→  "selectors": {
+     6→    "talent_bank": {
+     7→      "entry_button": "text='招人'",
+     8→      "search_tab": "text='搜索'",
+     9→      "search_input": "input.ant-input",
+    10→      "chat_now_button": "text='立即沟通'",
+    11→      "send_continue_button": "text='发送后继续沟通'",
+    12→      "message_textarea": "textarea[placeholder*='请写一份'], textarea[class*='chat'], textarea",
+    13→      "close_modal": "button.ant-modal-close",
+    14→      "im_exchange_phone": "div.tool.normal:has(.tool-text:text-is('交换手机'))",
+    15→      "im_exchange_wechat": "div.tool.normal:has(.tool-text:text-is('交换微信'))"
+    16→    },
+    17→    "enterprise": {
+    18→      "recruitment_tab": "text='招聘'",
+    19→      "add_keyword_button": "text='添加关键词'",
+    20→      "keyword_input": "input[placeholder='输入关键词']",
+    21→      "keyword_submit": "text='提 交'",
+    22→      "add_company_button": "text='添加公司'",
+    23→      "company_input": "input[placeholder='输入公司（可多选）']",
+    24→      "chat_now_button": "text='立即沟通'",
+    25→      "message_textarea": "textarea[placeholder*='请写一份属于ta的邀约信息']",
+    26→      "send_stay_button": "text='发送后留在此页'",
+    27→      "close_popup_img": "div > section > section.equity-main-wrap > div.closableImg",
+    28→      "close_modal": "button.ant-modal-close"
+    29→    },
+    30→    "profile": {
+    31→      "name": "h1.name, h1[class*='name'], .profile-name, h1",
+    32→      "title": ".current-title, [class*='current-title'], [class*='position'], .job-title",
+    33→      "company": ".current-company, [class*='current-company'], [class*='company-name'], .company",
+    34→      "location": ".location, [class*='location'], [class*='city']",
+    35→      "experience_years": ".experience-years, [class*='experience'], [class*='years']",
+    36→      "education_section": ".education-section, [class*='education'], #education",
+    37→      "education_item": ".education-item, [class*='edu-item'], [class*='education-item'], .timeline-item",
+    38→      "work_experience_section": ".work-exp-section, [class*='work-exp'], [class*='experience'], [class*='career'], #experience",
+    39→      "work_experience_item": ".work-exp-item, [class*='exp-item'], [class*='work-item'], .timeline-item",
+    40→      "skills_section": ".skills-section, [class*='skills'], #skills",
+    41→      "skill_tag": ".skill-tag, [class*='skill-tag'], [class*='skill-item'], .tag"
+    42→    },
+    43→    "message": {
+    44→      "chat_button": "button.chat-btn, [class*='chat-btn'], button:has-text('极速联系'), button:has-text('立即沟通'), button:has-text('发消息'), button:has-text('私信'), button:has-text('聊天')",
+    45→      "message_input": "textarea.chat-input, textarea[class*='chat'], textarea[class*='message'], [contenteditable='true'], textarea",
+    46→      "send_button": "button.send-btn, [class*='send-btn'], button:has-text('提交'), button:has-text('发送后留在此页'), button:has-text('发送'), button:has-text('Send')"
+    47→    }
+    48→  }
+    49→}
+    50→

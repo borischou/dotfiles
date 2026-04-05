@@ -1,0 +1,70 @@
+"""Auth routes — login status, check, logout."""
+
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse
+
+from src.web.app import chrome_manager, templates
+from src.core.browser import get_browser_manager
+from src.modules.auth import check_login_status
+
+router = APIRouter()
+
+
+@router.get("/status", response_class=HTMLResponse)
+async def auth_status(request: Request):
+    """Return login status as an HTML fragment (for HTMX)."""
+    try:
+        browser = get_browser_manager()
+        if not browser.is_running:
+            await browser.start()
+        page = browser.page
+        if page:
+            logged_in = await check_login_status(page)
+        else:
+            logged_in = False
+    except Exception:
+        logged_in = False
+
+    if logged_in:
+        return '<p><span class="status-dot online"></span>Boss直聘: 已登录</p>'
+    else:
+        return (
+            '<p><span class="status-dot offline"></span>Boss直聘: 未登录</p>'
+            '<p><small>请在 Chrome 浏览器中手动登录 Boss直聘</small></p>'
+            '<button hx-post="/auth/check" hx-swap="outerHTML">重新检测</button>'
+        )
+
+
+@router.post("/check", response_class=HTMLResponse)
+async def auth_check(request: Request):
+    """Trigger a login status re-check."""
+    try:
+        browser = get_browser_manager()
+        if not browser.is_running:
+            await browser.start()
+        page = browser.page
+        if page:
+            logged_in = await check_login_status(page)
+        else:
+            logged_in = False
+    except Exception:
+        logged_in = False
+
+    if logged_in:
+        return '<p><span class="status-dot online"></span>Boss直聘: 已登录</p>'
+    else:
+        return (
+            '<p><span class="status-dot offline"></span>Boss直聘: 未登录</p>'
+            '<p><small>请在 Chrome 窗口中登录 Boss直聘后重试</small></p>'
+            '<button hx-post="/auth/check" hx-swap="outerHTML">重新检测</button>'
+        )
+
+
+@router.post("/logout")
+async def auth_logout(request: Request):
+    """Clear saved session."""
+    from src.core.session import get_session_manager
+    session_mgr = get_session_manager()
+    if session_mgr.has_saved_session():
+        await session_mgr.clear()
+    return {"status": "ok", "message": "Session cleared"}

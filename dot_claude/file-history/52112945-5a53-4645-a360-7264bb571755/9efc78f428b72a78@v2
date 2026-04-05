@@ -1,0 +1,75 @@
+"""Search endpoint — queues a browser search task."""
+
+from fastapi import APIRouter, Depends
+
+from src.web.deps import get_queue, get_broadcaster
+from src.web.schemas import SearchRequest, TaskResponse
+from src.web.task_queue import BrowserTask, TaskPriority, TaskQueue
+from src.web.progress import Broadcaster, set_progress_callback, reset_progress_callback
+
+router = APIRouter()
+
+
+@router.post("/search", response_model=TaskResponse)
+async def search_candidates(
+    req: SearchRequest,
+    queue: TaskQueue = Depends(get_queue),
+    broadcaster: Broadcaster = Depends(get_broadcaster),
+):
+    """Submit a search task. Returns task_id for WebSocket progress tracking."""
+
+    async def _run():
+        from src.core.browser import get_browser_manager
+        from src.services.pipeline import search_all_keywords
+
+        browser = get_browser_manager()
+        page = await browser.start()
+
+        from src.modules.auth import ensure_logged_in
+        await ensure_logged_in(browser)
+
+        candidates, seen_ids = await search_all_keywords(
+            browser=browser,
+            keywords=tuple(req.keywords),
+            company=tuple(req.company),
+            location=req.location,
+            max_pages=req.pages,
+        )
+
+        return [
+            {
+                "maimai_id": c.maimai_id,
+                "name": c.name,
+                "title": c.title,
+                "company": c.company,
+                "location": c.location or "",
+                "profile_url": c.profile_url or "",
+            }
+            for c in candidates
+        ]
+
+    task = BrowserTask(
+        name=f"search:{','.join(req.keywords)}",
+        coroutine_factory=_run,
+        priority=TaskPriority.NORMAL,
+    )
+
+    # Set progress callback for this task context
+    cb = broadcaster.make_progress_callback(task.task_id)
+    original_factory = task.coroutine_factory
+
+    async def _wrapped():
+        token = set_progress_callback(cb)
+        try:
+            return await original_factory()
+        finally:
+            reset_progress_callback(token)
+
+    task.coroutine_factory = _wrapped
+    await queue.submit(task)
+
+    return TaskResponse(
+        task_id=task.task_id,
+        status="queued",
+        position=queue.queue_size,
+    )

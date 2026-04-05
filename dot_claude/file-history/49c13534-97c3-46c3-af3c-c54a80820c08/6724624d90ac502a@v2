@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}候选人 — Boss Assistant{% endblock %}
+{% block header %}候选人列表 ({{ total }}){% endblock %}
+
+{% block content %}
+<section>
+    <form method="get" action="/candidates">
+        <div style="display: flex; gap: 1rem; align-items: end;">
+            <label for="q" style="flex: 1;">搜索
+                <input type="text" id="q" name="q" value="{{ q }}" placeholder="姓名、职位、公司">
+            </label>
+            <button type="submit">筛选</button>
+        </div>
+    </form>
+</section>
+
+<section>
+    {% if candidates %}
+    <table>
+        <thead>
+            <tr>
+                <th>姓名</th>
+                <th>职位</th>
+                <th>公司</th>
+                <th>城市</th>
+                <th>经验</th>
+                <th>学历</th>
+                <th>来源</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in candidates %}
+            <tr>
+                <td><a href="/candidates/{{ c.boss_id }}">{{ c.name }}</a></td>
+                <td>{{ (c.title or "")[:30] }}</td>
+                <td>{{ (c.company or "")[:20] }}</td>
+                <td>{{ c.location or "" }}</td>
+                <td>{{ c.work_years or "" }}</td>
+                <td>{{ c.education_level or "" }}</td>
+                <td>{{ (c.source_search or "")[:20] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    <p>
+        {% if page > 1 %}
+        <a href="/candidates?page={{ page - 1 }}&q={{ q }}">&laquo; 上一页</a>
+        {% endif %}
+        第 {{ page }} / {{ total_pages }} 页
+        {% if page < total_pages %}
+        <a href="/candidates?page={{ page + 1 }}&q={{ q }}">下一页 &raquo;</a>
+        {% endif %}
+    </p>
+    {% else %}
+    <p>暂无候选人数据</p>
+    {% endif %}
+</section>
+{% endblock %}

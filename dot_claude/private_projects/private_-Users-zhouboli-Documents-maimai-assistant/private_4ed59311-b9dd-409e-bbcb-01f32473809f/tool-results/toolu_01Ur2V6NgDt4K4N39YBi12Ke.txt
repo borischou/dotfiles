@@ -1,0 +1,85 @@
+     1→"""Input validation utilities."""
+     2→
+     3→import re
+     4→from typing import Dict, Any
+     5→
+     6→from src.exceptions.errors import ValidationError
+     7→
+     8→
+     9→def validate_maimai_id(maimai_id: str) -> str:
+    10→    """
+    11→    Validate Maimai user ID format.
+    12→
+    13→    Args:
+    14→        maimai_id: Maimai user ID to validate
+    15→
+    16→    Returns:
+    17→        Validated and cleaned ID
+    18→
+    19→    Raises:
+    20→        ValidationError: If ID format is invalid
+    21→    """
+    22→    if not maimai_id:
+    23→        raise ValidationError("Maimai ID cannot be empty")
+    24→
+    25→    # Remove whitespace
+    26→    maimai_id = str(maimai_id).strip()
+    27→
+    28→    # Check if it's alphanumeric
+    29→    if not re.match(r'^[a-zA-Z0-9_-]+$', maimai_id):
+    30→        raise ValidationError(f"Invalid Maimai ID format: {maimai_id}")
+    31→
+    32→    return maimai_id
+    33→
+    34→
+    35→def validate_keywords(keywords: str) -> str:
+    36→    """
+    37→    Validate search keywords.
+    38→
+    39→    Args:
+    40→        keywords: Search keywords
+    41→
+    42→    Returns:
+    43→        Validated keywords
+    44→
+    45→    Raises:
+    46→        ValidationError: If keywords are invalid
+    47→    """
+    48→    if not keywords or not keywords.strip():
+    49→        raise ValidationError("Search keywords cannot be empty")
+    50→
+    51→    keywords = keywords.strip()
+    52→
+    53→    # Check length
+    54→    if len(keywords) < 2:
+    55→        raise ValidationError("Search keywords must be at least 2 characters")
+    56→
+    57→    if len(keywords) > 200:
+    58→        raise ValidationError("Search keywords cannot exceed 200 characters")
+    59→
+    60→    return keywords
+    61→
+    62→
+    63→def validate_template_variables(template: Dict[str, Any], variables: Dict[str, str]) -> None:
+    64→    """
+    65→    Validate that all required template variables are provided.
+    66→
+    67→    Args:
+    68→        template: Template dictionary with 'variables' key
+    69→        variables: Provided variables dictionary
+    70→
+    71→    Raises:
+    72→        ValidationError: If required variables are missing
+    73→    """
+    74→    required_vars = template.get('variables', [])
+    75→    provided_vars = set(variables.keys())
+    76→    required_set = set(required_vars)
+    77→
+    78→    missing_vars = required_set - provided_vars
+    79→
+    80→    if missing_vars:
+    81→        raise ValidationError(
+    82→            f"Missing required template variables: {', '.join(missing_vars)}"
+    83→        )
+    84→
+    85→

@@ -1,0 +1,443 @@
+     1→"""Pipeline service for Boss直聘 recruitment automation.
+     2→
+     3→Orchestrates the full recruitment pipeline:
+     4→Search candidates → Score → Confirm → Batch send messages
+     5→
+     6→Supports checkpoint-based resume for interrupted pipelines.
+     7→"""
+     8→
+     9→from typing import Any, Dict, List, Optional, Set
+    10→
+    11→from loguru import logger
+    12→from rich.console import Console
+    13→from rich.panel import Panel
+    14→from rich.table import Table
+    15→
+    16→from src.core.browser import BrowserManager, get_browser_manager
+    17→from src.modules.search import search_candidates, CandidateBasic
+    18→from src.modules.message import send_message_batch
+    19→from src.utils.config import get_config
+    20→from src.utils.scoring import sort_candidates_by_score, reset_scoring_cache
+    21→from src.utils.checkpoint import CheckpointManager
+    22→from src.utils.delays import reset_session
+    23→from src.utils.progress import emit_progress
+    24→
+    25→console = Console()
+    26→
+    27→
+    28→async def search_all_keywords(
+    29→    keywords: tuple,
+    30→    location: Optional[str] = None,
+    31→    max_pages: int = 3,
+    32→    experience: Optional[str] = None,
+    33→    education: Optional[str] = None,
+    34→    salary: Optional[str] = None,
+    35→    browser: Optional[BrowserManager] = None,
+    36→    start_page: int = 1,
+    37→    seen_ids: Optional[Set[str]] = None,
+    38→) -> List[CandidateBasic]:
+    39→    """Search across multiple keywords with deduplication."""
+    40→    if browser is None:
+    41→        browser = get_browser_manager()
+    42→
+    43→    keyword_list = list(keywords)
+    44→
+    45→    emit_progress("search_start", keywords=keyword_list, max_pages=max_pages)
+    46→
+    47→    all_candidates = await search_candidates(
+    48→        keywords=keyword_list,
+    49→        location=location,
+    50→        max_pages=max_pages,
+    51→        experience=experience,
+    52→        education=education,
+    53→        salary=salary,
+    54→        browser=browser,
+    55→        start_page=start_page,
+    56→    )
+    57→
+    58→    # Filter out already-seen candidates
+    59→    if seen_ids:
+    60→        all_candidates = [c for c in all_candidates if c.boss_id not in seen_ids]
+    61→
+    62→    emit_progress("search_complete", total_candidates=len(all_candidates))
+    63→
+    64→    return all_candidates
+    65→
+    66→
+    67→def _build_candidate_info_for_llm(candidate) -> Dict[str, Any]:
+    68→    """Build candidate info dict for LLM scoring."""
+    69→    if isinstance(candidate, dict):
+    70→        return {
+    71→            "name": candidate.get("name", ""),
+    72→            "title": candidate.get("title", ""),
+    73→            "company": candidate.get("company", ""),
+    74→            "education_level": candidate.get("education_level", ""),
+    75→            "work_years": candidate.get("work_years", ""),
+    76→            "skills": candidate.get("skills", []),
+    77→            "work_experience": candidate.get("work_experience", []),
+    78→        }
+    79→    return {
+    80→        "name": getattr(candidate, "name", ""),
+    81→        "title": getattr(candidate, "title", ""),
+    82→        "company": getattr(candidate, "company", ""),
+    83→        "education_level": getattr(candidate, "education_level", ""),
+    84→        "work_years": getattr(candidate, "work_years", ""),
+    85→        "skills": getattr(candidate, "skills", []) or [],
+    86→        "work_experience": getattr(candidate, "work_experience", []) or [],
+    87→    }
+    88→
+    89→
+    90→def _get_boss_id(candidate) -> str:
+    91→    """Extract boss_id from candidate (dict or object)."""
+    92→    if isinstance(candidate, dict):
+    93→        return candidate.get("boss_id", "")
+    94→    return getattr(candidate, "boss_id", "")
+    95→
+    96→
+    97→async def send_batch(
+    98→    candidates: List[CandidateBasic],
+    99→    template_name: str,
+   100→    variables: Dict[str, str],
+   101→    keywords: tuple,
+   102→    interactive: bool = True,
+   103→    skip_messaged: bool = True,
+   104→    dry_run: bool = False,
+   105→    browser: Optional[BrowserManager] = None,
+   106→) -> Dict[str, int]:
+   107→    """Score candidates and send batch messages."""
+   108→    if not candidates:
+   109→        console.print("[yellow]No candidates to message.[/yellow]")
+   110→        return {'sent': 0, 'failed': 0, 'skipped': 0, 'cancelled': 0}
+   111→
+   112→    emit_progress("scoring_start", count=len(candidates))
+   113→
+   114→    # Sort by score (highest priority first)
+   115→    sorted_candidates = sort_candidates_by_score(
+   116→        candidates,
+   117→        search_keywords=list(keywords),
+   118→    )
+   119→
+   120→    # --- Optional LLM scoring ---
+   121→    llm_results: Dict[str, Dict] = {}
+   122→    llm_enabled = False
+   123→    try:
+   124→        config = get_config()
+   125→        llm_enabled = config.get("scoring.llm.enabled", False)
+   126→    except Exception:
+   127→        pass
+   128→
+   129→    if llm_enabled:
+   130→        try:
+   131→            from src.utils.llm_scorer import (
+   132→                check_ollama_available,
+   133→                llm_score_candidates_batch,
+   134→            )
+   135→
+   136→            endpoint = config.get("scoring.llm.endpoint", "http://127.0.0.1:11434")
+   137→            model = config.get("scoring.llm.model", "qwen2.5:7b")
+   138→            timeout = config.get("scoring.llm.timeout_seconds", 60)
+   139→            jd_config = config.get("scoring.jd") or {}
+   140→
+   141→            if await check_ollama_available(endpoint):
+   142→                console.print("[cyan]LLM scoring enabled, evaluating candidates...[/cyan]")
+   143→
+   144→                # Build candidate info list
+   145→                candidates_info = [
+   146→                    _build_candidate_info_for_llm(c) for c in sorted_candidates
+   147→                ]
+   148→
+   149→                results = await llm_score_candidates_batch(
+   150→                    candidates_info, jd_config, endpoint, model, timeout,
+   151→                )
+   152→
+   153→                # Merge LLM scores
+   154→                llm_weight = config.get("scoring.weights.llm_score", 5)
+   155→                total_weights = sum(
+   156→                    v for k, v in (config.get("scoring.weights") or {}).items()
+   157→                )
+   158→                if total_weights <= 0:
+   159→                    total_weights = 100
+   160→
+   161→                for c, r in zip(sorted_candidates, results):
+   162→                    bid = _get_boss_id(c)
+   163→                    if r and r.get("score") is not None:
+   164→                        llm_results[bid] = r
+   165→                        # Blend LLM score into existing score
+   166→                        current = getattr(c, '_score', 0) if not isinstance(c, dict) else c.get("_score", 0)
+   167→                        llm_contribution = int(round(r["score"] / 100.0 * llm_weight / total_weights * 100))
+   168→                        new_score = min(current + llm_contribution, 100)
+   169→                        if isinstance(c, dict):
+   170→                            c["_score"] = new_score
+   171→                        else:
+   172→                            c._score = new_score
+   173→
+   174→                # Re-sort after LLM score merge
+   175→                sorted_candidates.sort(
+   176→                    key=lambda x: (x.get("_score", 0) if isinstance(x, dict) else getattr(x, "_score", 0)),
+   177→                    reverse=True,
+   178→                )
+   179→
+   180→                console.print(f"[green]LLM scoring complete: {len(llm_results)}/{len(sorted_candidates)} evaluated[/green]")
+   181→            else:
+   182→                console.print("[yellow]Ollama not available, skipping LLM scoring[/yellow]")
+   183→        except Exception as e:
+   184→            logger.warning(f"LLM scoring integration error: {e}")
+   185→            console.print(f"[yellow]LLM scoring skipped: {e}[/yellow]")
+   186→
+   187→    emit_progress(
+   188→        "scoring_complete",
+   189→        top_score=getattr(sorted_candidates[0], '_score', 0) if sorted_candidates else 0,
+   190→    )
+   191→
+   192→    # Display scored candidates
+   193→    has_llm = bool(llm_results)
+   194→    table = Table(title=f"Candidates Ranked by Score ({len(sorted_candidates)} total)")
+   195→    table.add_column("Score", style="bold", width=6)
+   196→    table.add_column("Name")
+   197→    table.add_column("Title")
+   198→    table.add_column("Company")
+   199→    if has_llm:
+   200→        table.add_column("LLM", width=40)
+   201→    table.add_column("Boss ID", style="dim")
+   202→
+   203→    for c in sorted_candidates[:20]:
+   204→        score = getattr(c, '_score', 0)
+   205→        bid = _get_boss_id(c)
+   206→        row = [
+   207→            str(score),
+   208→            c.name,
+   209→            c.title[:30] if c.title else "",
+   210→            c.company[:20] if c.company else "",
+   211→        ]
+   212→        if has_llm:
+   213→            llm_info = llm_results.get(bid)
+   214→            if llm_info:
+   215→                row.append(f"[{llm_info['score']}] {llm_info.get('explanation', '')[:30]}")
+   216→            else:
+   217→                row.append("-")
+   218→        row.append(bid[:20])
+   219→        table.add_row(*row)
+   220→
+   221→    console.print(table)
+   222→    if len(sorted_candidates) > 20:
+   223→        console.print(f"[dim]...and {len(sorted_candidates) - 20} more[/dim]")
+   224→
+   225→    emit_progress("send_start", total=len(sorted_candidates))
+   226→
+   227→    # Send messages
+   228→    stats = await send_message_batch(
+   229→        candidates=sorted_candidates,
+   230→        template_name=template_name,
+   231→        variables=variables,
+   232→        interactive=interactive,
+   233→        skip_messaged=skip_messaged,
+   234→        dry_run=dry_run,
+   235→        browser=browser,
+   236→    )
+   237→
+   238→    emit_progress("send_complete", **stats)
+   239→
+   240→    return stats
+   241→
+   242→
+   243→async def run_pipeline(
+   244→    keywords: tuple,
+   245→    template_name: str,
+   246→    variables: Dict[str, str],
+   247→    location: Optional[str] = None,
+   248→    max_pages: int = 3,
+   249→    batch_pages: int = 0,
+   250→    experience: Optional[str] = None,
+   251→    education: Optional[str] = None,
+   252→    salary: Optional[str] = None,
+   253→    interactive: bool = True,
+   254→    skip_messaged: bool = True,
+   255→    dry_run: bool = False,
+   256→    resume: bool = False,
+   257→    browser: Optional[BrowserManager] = None,
+   258→) -> Dict[str, Any]:
+   259→    """Run the full pipeline: search → score → batch send."""
+   260→    if browser is None:
+   261→        browser = get_browser_manager()
+   262→
+   263→    reset_session()
+   264→    reset_scoring_cache()
+   265→
+   266→    # Handle resume
+   267→    checkpoint = None
+   268→    start_page = 1
+   269→    sent_ids: List[str] = []
+   270→    seen_ids: Set[str] = set()
+   271→
+   272→    if resume:
+   273→        checkpoint = CheckpointManager.load_latest()
+   274→        if checkpoint:
+   275→            # Validate that checkpoint parameters match current run
+   276→            cp_params = checkpoint.params
+   277→            cp_keywords = tuple(cp_params.get('keywords', []))
+   278→            cp_template = cp_params.get('template', '')
+   279→            if cp_keywords != keywords or cp_template != template_name:
+   280→                console.print(Panel(
+   281→                    f"[yellow]Checkpoint mismatch:[/yellow]\n"
+   282→                    f"  Checkpoint: keywords={cp_keywords}, template={cp_template}\n"
+   283→                    f"  Current:    keywords={keywords}, template={template_name}\n"
+   284→                    f"[bold]Starting fresh instead of resuming.[/bold]",
+   285→                    title="Checkpoint Mismatch",
+   286→                    border_style="red"
+   287→                ))
+   288→                checkpoint = None
+   289→            else:
+   290→                console.print(Panel(
+   291→                    checkpoint.summary,
+   292→                    title="Resuming Pipeline",
+   293→                    border_style="yellow"
+   294→                ))
+   295→                start_page = checkpoint.completed_pages + 1
+   296→                sent_ids = checkpoint.sent_ids
+   297→                seen_ids = checkpoint.seen_ids
+   298→        else:
+   299→            console.print("[yellow]No checkpoint found, starting fresh.[/yellow]")
+   300→
+   301→    if checkpoint is None:
+   302→        checkpoint = CheckpointManager()
+   303→
+   304→    # Pipeline header
+   305→    console.print(Panel(
+   306→        f"[bold]Keywords:[/bold] {', '.join(keywords)}\n"
+   307→        f"[bold]Template:[/bold] {template_name}\n"
+   308→        f"[bold]Pages:[/bold] {max_pages}\n"
+   309→        f"[bold]Location:[/bold] {location or 'Any'}\n"
+   310→        f"[bold]Experience:[/bold] {experience or 'Any'}\n"
+   311→        f"[bold]Education:[/bold] {education or 'Any'}\n"
+   312→        f"[bold]Salary:[/bold] {salary or 'Any'}\n"
+   313→        f"[bold]Dry Run:[/bold] {'Yes' if dry_run else 'No'}",
+   314→        title="Boss直聘 Pipeline",
+   315→        border_style="cyan"
+   316→    ))
+   317→
+   318→    total_stats = {'sent': 0, 'failed': 0, 'skipped': 0, 'cancelled': 0}
+   319→    all_candidates: List[CandidateBasic] = []
+   320→
+   321→    if batch_pages > 0:
+   322→        # Batch mode: search N pages, then send, repeat
+   323→        for page_start in range(start_page, max_pages + 1, batch_pages):
+   324→            page_end = min(page_start + batch_pages - 1, max_pages)
+   325→            pages_this_batch = page_end - page_start + 1
+   326→
+   327→            console.print(f"\n[cyan]--- Batch: pages {page_start}-{page_end} ---[/cyan]")
+   328→
+   329→            # Search
+   330→            batch_candidates = await search_all_keywords(
+   331→                keywords=keywords,
+   332→                location=location,
+   333→                max_pages=pages_this_batch,
+   334→                experience=experience,
+   335→                education=education,
+   336→                salary=salary,
+   337→                browser=browser,
+   338→                start_page=page_start,
+   339→                seen_ids=seen_ids,
+   340→            )
+   341→
+   342→            if not batch_candidates:
+   343→                console.print("[yellow]No new candidates in this batch.[/yellow]")
+   344→                continue
+   345→
+   346→            # Track seen IDs
+   347→            for c in batch_candidates:
+   348→                seen_ids.add(c.boss_id)
+   349→
+   350→            all_candidates.extend(batch_candidates)
+   351→
+   352→            # Send batch
+   353→            batch_stats = await send_batch(
+   354→                candidates=batch_candidates,
+   355→                template_name=template_name,
+   356→                variables=variables,
+   357→                keywords=keywords,
+   358→                interactive=interactive,
+   359→                skip_messaged=skip_messaged,
+   360→                dry_run=dry_run,
+   361→                browser=browser,
+   362→            )
+   363→
+   364→            # Update totals
+   365→            for key in total_stats:
+   366→                total_stats[key] += batch_stats.get(key, 0)
+   367→
+   368→            # Track processed candidate IDs for checkpoint
+   369→            sent_id_set = set(sent_ids)
+   370→            for c in batch_candidates:
+   371→                if c.boss_id not in sent_id_set:
+   372→                    sent_ids.append(c.boss_id)
+   373→                    sent_id_set.add(c.boss_id)
+   374→
+   375→            # Save checkpoint
+   376→            checkpoint.save(
+   377→                keywords=keywords,
+   378→                template=template_name,
+   379→                variables=variables,
+   380→                company=(),
+   381→                location=location,
+   382→                max_pages=max_pages,
+   383→                batch_pages=batch_pages,
+   384→                skip_messaged=skip_messaged,
+   385→                interactive=interactive,
+   386→                completed_pages=page_end,
+   387→                sent_ids=sent_ids,
+   388→                seen_ids=list(seen_ids),
+   389→                dry_run=dry_run,
+   390→            )
+   391→    else:
+   392→        # Non-batch mode: search all pages, then send all
+   393→        all_candidates = await search_all_keywords(
+   394→            keywords=keywords,
+   395→            location=location,
+   396→            max_pages=max_pages,
+   397→            experience=experience,
+   398→            education=education,
+   399→            salary=salary,
+   400→            browser=browser,
+   401→            start_page=start_page,
+   402→            seen_ids=seen_ids,
+   403→        )
+   404→
+   405→        if all_candidates:
+   406→            for c in all_candidates:
+   407→                seen_ids.add(c.boss_id)
+   408→
+   409→            total_stats = await send_batch(
+   410→                candidates=all_candidates,
+   411→                template_name=template_name,
+   412→                variables=variables,
+   413→                keywords=keywords,
+   414→                interactive=interactive,
+   415→                skip_messaged=skip_messaged,
+   416→                dry_run=dry_run,
+   417→                browser=browser,
+   418→            )
+   419→
+   420→    # Final report
+   421→    console.print(Panel(
+   422→        f"[bold]Candidates found:[/bold] {len(all_candidates)}\n"
+   423→        f"[green]Messages sent:[/green] {total_stats['sent']}\n"
+   424→        f"[red]Failed:[/red] {total_stats['failed']}\n"
+   425→        f"[yellow]Skipped:[/yellow] {total_stats['skipped']}\n"
+   426→        f"[dim]Cancelled:[/dim] {total_stats['cancelled']}",
+   427→        title="Pipeline Complete",
+   428→        border_style="green"
+   429→    ))
+   430→
+   431→    # Clean up checkpoint on successful completion
+   432→    if checkpoint:
+   433→        checkpoint.delete()
+   434→
+   435→    result = {
+   436→        'candidates_found': len(all_candidates),
+   437→        **total_stats,
+   438→    }
+   439→
+   440→    emit_progress("pipeline_complete", **result)
+   441→
+   442→    return result
+   443→

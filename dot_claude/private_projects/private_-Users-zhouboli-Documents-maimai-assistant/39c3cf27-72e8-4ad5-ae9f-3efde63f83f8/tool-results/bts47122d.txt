@@ -1,0 +1,230 @@
+2026-03-13 17:36:22.952 | INFO     | src.utils.config:_load_all:42 - Loading configuration files...
+2026-03-13 17:36:22.953 | INFO     | src.utils.config:_load_all:46 - Configuration loaded successfully
+[32m2026-03-13 17:36:22[0m | [1mINFO    [0m | [36msrc.utils.logger[0m:[36msetup_logger[0m:[36m46[0m - [1mLogger initialized with level: INFO[0m
+[32m2026-03-13 17:36:23[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mstart[0m:[36m115[0m - [1mConnecting to Chrome via CDP: http://127.0.0.1:9222[0m
+[32m2026-03-13 17:36:24[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mstart[0m:[36m140[0m - [1mReusing existing tab: https://maimai.cn/ent/v41/recruit/talents?query=%E6%95%B0%E6%8D%AEBP&tab=1[0m
+[32m2026-03-13 17:36:24[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mstart[0m:[36m150[0m - [1mConnected to Chrome via CDP successfully[0m
+[32m2026-03-13 17:36:26[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+
+[1/6] Talent bank: 数据BP
+[32m2026-03-13 17:36:26[0m | [1mINFO    [0m | [36msrc.models.database[0m:[36minit_db[0m:[36m159[0m - [1mDatabase tables created successfully[0m
+[32m2026-03-13 17:36:26[0m | [1mINFO    [0m | [36msrc.models.database[0m:[36m__init__[0m:[36m154[0m - [1mDatabase initialized at: data/maimai.db[0m
+[32m2026-03-13 17:36:28[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-03-13 17:36:39[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1329[0m - [1mSet work years filter: 5-10年[0m
+[32m2026-03-13 17:36:56[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 13 candidates[0m
+[32m2026-03-13 17:36:56[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 13 candidates from page[0m
+[32m2026-03-13 17:36:56[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1367[0m - [1mFiltered out 9 non-R&D candidates[0m
+[32m2026-03-13 17:37:11[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 13 candidates[0m
+[32m2026-03-13 17:37:11[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 13 candidates from page[0m
+[32m2026-03-13 17:37:11[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1359[0m - [1mNo talent bank results on page 2[0m
+⠦ Extracting page 2/10...
+Talent bank search complete. Found 1 candidates.
+  Found 1 new candidates (deduplicated)
+                       Keyword: 数据BP (1 candidates)                        
+┏━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ # ┃ Name ┃ Title                      ┃ Company  ┃ Location ┃ ID          ┃
+┡━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ 1 │ ryan │ 数据BP- 企业服务（金融组） │ 字节跳动 │ 广东深圳 │ mm_78059137 │
+└───┴──────┴────────────────────────────┴──────────┴──────────┴─────────────┘
+[32m2026-03-13 17:37:11[0m | [1mINFO    [0m | [36msrc.utils.scoring[0m:[36msort_candidates_by_score[0m:[36m182[0m - [1mCandidates scored: top=40, bottom=40, count=1[0m
+╭──────────────────────── Talent Bank Pipeline Summary ────────────────────────╮
+│                                                                              │
+│  Template: ganlin                                                            │
+│  Mode: Talent Bank Inline                                                    │
+│  Candidates: 1 found, 0 already messaged                                     │
+│  Will send to: 1 candidates                                                  │
+│                                                                              │
+│  Message Preview (first candidate):                                          │
+│  To: ryan (数据BP- 企业服务（金融组） @ 字节跳动)                            │
+│                                                                              │
+│  您好呀~京东在找高阶（P9及以上）优秀人才，汇报给CTO-1，带团队，薪资open可谈  │
+│  ，base北京总部（北京最好，上海，深圳等城市也有分公司），也很期待和您行业交  │
+│  流互相认识下，您open聊聊看吗？我可以引荐您和部门负责人认识沟通～可以交换下  │
+│  电话哇！                                                                    │
+│  京东零售是京东集团的核心业务，晋升空间大，稳定性高。                        │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Auto-confirmed: sending to 1 candidates
+[32m2026-03-13 17:37:19[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:37:22[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:37:26[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+Sending messages (talent bank)... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1
+
+[2/6] Talent bank: 数据BP负责人
+[32m2026-03-13 17:37:29[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-03-13 17:37:55[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 15 candidates[0m
+[32m2026-03-13 17:37:55[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 15 candidates from page[0m
+[32m2026-03-13 17:37:55[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1367[0m - [1mFiltered out 12 non-R&D candidates[0m
+[32m2026-03-13 17:38:10[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 15 candidates[0m
+[32m2026-03-13 17:38:10[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 15 candidates from page[0m
+[32m2026-03-13 17:38:10[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1359[0m - [1mNo talent bank results on page 2[0m
+⠼ Extracting page 2/10...
+Talent bank search complete. Found 0 candidates.
+  Found 0 new candidates (deduplicated)
+
+[3/6] Talent bank: 数据开发负责人
+[32m2026-03-13 17:38:12[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-03-13 17:38:53[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 21 candidates[0m
+[32m2026-03-13 17:38:53[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 21 candidates from page[0m
+[32m2026-03-13 17:39:08[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 21 candidates[0m
+[32m2026-03-13 17:39:08[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 21 candidates from page[0m
+[32m2026-03-13 17:39:08[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1359[0m - [1mNo talent bank results on page 2[0m
+⠹ Extracting page 2/10...
+Talent bank search complete. Found 9 candidates.
+  Found 9 new candidates (deduplicated)
+                   Keyword: 数据开发负责人 (9 candidates)                    
+┏━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ # ┃ Name     ┃ Title              ┃ Company  ┃ Location     ┃ ID          ┃
+┡━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ 1 │ 周凡     │ 资深大数据开发     │ 字节跳动 │ 上海浦东新区 │ mm_57fbab10 │
+│ 2 │ 聪鑫     │ 大数据开发工程师   │ 字节跳动 │ 北京海淀区   │ mm_0435fe13 │
+│ 3 │ 张扬     │ 大数据开发工程师   │ 字节跳动 │ 北京海淀区   │ mm_7920d8b8 │
+│ 4 │ 张利萍   │ 数据开发工程师     │ 美团     │ 北京         │ mm_04d9d7bd │
+│ 5 │ 张雪鹏   │ 数据开发工程师     │ 快手     │ 北京朝阳区   │ mm_0e5e9952 │
+│ 6 │ 会飞的你 │ 大数据开发工程师   │ 字节跳动 │ 上海         │ mm_03699c34 │
+│ 7 │ leo      │ 实时数据开发工程师 │ 字节跳动 │ 北京海淀区   │ mm_4d361d45 │
+│ 8 │ 李长伟   │ 大数据开发工程师   │ 字节跳动 │ 上海浦东新区 │ mm_70be84c6 │
+│ 9 │ 谭立高   │ 大数据开发工程师   │ 字节跳动 │ 广东深圳     │ mm_7cf5d0ba │
+└───┴──────────┴────────────────────┴──────────┴──────────────┴─────────────┘
+[32m2026-03-13 17:39:08[0m | [1mINFO    [0m | [36msrc.utils.scoring[0m:[36msort_candidates_by_score[0m:[36m182[0m - [1mCandidates scored: top=60, bottom=35, count=9[0m
+╭──────────────────────── Talent Bank Pipeline Summary ────────────────────────╮
+│                                                                              │
+│  Template: ganlin                                                            │
+│  Mode: Talent Bank Inline                                                    │
+│  Candidates: 9 found, 0 already messaged                                     │
+│  Will send to: 9 candidates                                                  │
+│                                                                              │
+│  Message Preview (first candidate):                                          │
+│  To: 周凡 (资深大数据开发 @ 字节跳动)                                        │
+│                                                                              │
+│  您好呀~京东在找高阶（P9及以上）优秀人才，汇报给CTO-1，带团队，薪资open可谈  │
+│  ，base北京总部（北京最好，上海，深圳等城市也有分公司），也很期待和您行业交  │
+│  流互相认识下，您open聊聊看吗？我可以引荐您和部门负责人认识沟通～可以交换下  │
+│  电话哇！                                                                    │
+│  京东零售是京东集团的核心业务，晋升空间大，稳定性高。                        │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Auto-confirmed: sending to 9 candidates
+[32m2026-03-13 17:39:16[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:39:19[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:39:23[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+[32m2026-03-13 17:39:24[0m | [1mINFO    [0m | [36msrc.utils.rate_limiter[0m:[36masync_check_rate_limit[0m:[36m348[0m - [1mRate limit hit: Minimum interval not met for send_message. Wait 9 seconds.. Waiting 10s before retrying (attempt 1/60, elapsed 0s)...[0m
+[32m2026-03-13 17:39:42[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:39:45[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:39:49[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+[32m2026-03-13 17:39:50[0m | [1mINFO    [0m | [36msrc.utils.rate_limiter[0m:[36masync_check_rate_limit[0m:[36m348[0m - [1mRate limit hit: Minimum interval not met for send_message. Wait 8 seconds.. Waiting 9s before retrying (attempt 1/60, elapsed 0s)...[0m
+[32m2026-03-13 17:40:08[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:40:11[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:40:15[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+[32m2026-03-13 17:40:15[0m | [1mINFO    [0m | [36msrc.utils.rate_limiter[0m:[36masync_check_rate_limit[0m:[36m348[0m - [1mRate limit hit: Minimum interval not met for send_message. Wait 9 seconds.. Waiting 10s before retrying (attempt 1/60, elapsed 0s)...[0m
+[32m2026-03-13 17:40:33[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:40:36[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:40:40[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+[32m2026-03-13 17:40:41[0m | [1mINFO    [0m | [36msrc.utils.rate_limiter[0m:[36masync_check_rate_limit[0m:[36m348[0m - [1mRate limit hit: Minimum interval not met for send_message. Wait 9 seconds.. Waiting 10s before retrying (attempt 1/60, elapsed 0s)...[0m
+[32m2026-03-13 17:40:59[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:41:02[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:41:06[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+[32m2026-03-13 17:41:07[0m | [1mINFO    [0m | [36msrc.utils.rate_limiter[0m:[36masync_check_rate_limit[0m:[36m348[0m - [1mRate limit hit: Minimum interval not met for send_message. Wait 9 seconds.. Waiting 10s before retrying (attempt 1/60, elapsed 0s)...[0m
+[32m2026-03-13 17:41:54[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:41:57[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:42:01[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+[32m2026-03-13 17:42:01[0m | [1mINFO    [0m | [36msrc.utils.rate_limiter[0m:[36masync_check_rate_limit[0m:[36m348[0m - [1mRate limit hit: Minimum interval not met for send_message. Wait 9 seconds.. Waiting 10s before retrying (attempt 1/60, elapsed 0s)...[0m
+[32m2026-03-13 17:42:20[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:42:23[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:42:27[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+[32m2026-03-13 17:42:28[0m | [1mINFO    [0m | [36msrc.utils.rate_limiter[0m:[36masync_check_rate_limit[0m:[36m348[0m - [1mRate limit hit: Minimum interval not met for send_message. Wait 9 seconds.. Waiting 10s before retrying (attempt 1/60, elapsed 0s)...[0m
+[32m2026-03-13 17:42:46[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:42:49[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:42:53[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+[32m2026-03-13 17:42:54[0m | [1mINFO    [0m | [36msrc.utils.rate_limiter[0m:[36masync_check_rate_limit[0m:[36m348[0m - [1mRate limit hit: Minimum interval not met for send_message. Wait 9 seconds.. Waiting 10s before retrying (attempt 1/60, elapsed 0s)...[0m
+[32m2026-03-13 17:43:14[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:43:17[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:43:21[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+Sending messages (talent bank)... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9/9
+
+[4/6] Talent bank: 数据平台负责人
+[32m2026-03-13 17:43:24[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-03-13 17:43:51[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 23 candidates[0m
+[32m2026-03-13 17:43:51[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 23 candidates from page[0m
+[32m2026-03-13 17:43:51[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1367[0m - [1mFiltered out 1 non-R&D candidates[0m
+[32m2026-03-13 17:44:05[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 23 candidates[0m
+[32m2026-03-13 17:44:05[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 23 candidates from page[0m
+[32m2026-03-13 17:44:05[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1359[0m - [1mNo talent bank results on page 2[0m
+⠋ Extracting page 2/10...
+Talent bank search complete. Found 6 candidates.
+[32m2026-03-13 17:44:05[0m | [1mINFO    [0m | [36msrc.utils.filters[0m:[36mfilter_by_titles[0m:[36m119[0m - [1mTitle filter: 6 → 1 candidates (keywords: ['数据BP', '数据开发', '数据平台', '数据产品', 'BI'])[0m
+  Title filter: 5 excluded, 1 kept
+  Found 1 new candidates (deduplicated)
+              Keyword: 数据平台负责人 (1 candidates)               
+┏━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ # ┃ Name   ┃ Title          ┃ Company  ┃ Location ┃ ID          ┃
+┡━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ 1 │ Jerome │ 数据平台负责人 │ 字节跳动 │ 广东深圳 │ mm_028aaf8b │
+└───┴────────┴────────────────┴──────────┴──────────┴─────────────┘
+[32m2026-03-13 17:44:05[0m | [1mINFO    [0m | [36msrc.utils.scoring[0m:[36msort_candidates_by_score[0m:[36m182[0m - [1mCandidates scored: top=70, bottom=70, count=1[0m
+╭──────────────────────── Talent Bank Pipeline Summary ────────────────────────╮
+│                                                                              │
+│  Template: ganlin                                                            │
+│  Mode: Talent Bank Inline                                                    │
+│  Candidates: 1 found, 0 already messaged                                     │
+│  Will send to: 1 candidates                                                  │
+│                                                                              │
+│  Message Preview (first candidate):                                          │
+│  To: Jerome (数据平台负责人 @ 字节跳动)                                      │
+│                                                                              │
+│  您好呀~京东在找高阶（P9及以上）优秀人才，汇报给CTO-1，带团队，薪资open可谈  │
+│  ，base北京总部（北京最好，上海，深圳等城市也有分公司），也很期待和您行业交  │
+│  流互相认识下，您open聊聊看吗？我可以引荐您和部门负责人认识沟通～可以交换下  │
+│  电话哇！                                                                    │
+│  京东零售是京东集团的核心业务，晋升空间大，稳定性高。                        │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Auto-confirmed: sending to 1 candidates
+[32m2026-03-13 17:44:13[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2118[0m - [1mTalent bank: clicked 交换手机[0m
+[32m2026-03-13 17:44:16[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_exchange_in_im_tab[0m:[36m2139[0m - [1mTalent bank: clicked 交换微信 + confirmed[0m
+[32m2026-03-13 17:44:20[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_talent_bank_inline[0m:[36m2269[0m - [1mTalent bank: message sent inline[0m
+Sending messages (talent bank)... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1/1
+
+[5/6] Talent bank: 数据产品总监
+[32m2026-03-13 17:44:23[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-03-13 17:44:48[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 25 candidates[0m
+[32m2026-03-13 17:44:48[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 25 candidates from page[0m
+[32m2026-03-13 17:44:48[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1367[0m - [1mFiltered out 21 non-R&D candidates[0m
+[32m2026-03-13 17:45:03[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 25 candidates[0m
+[32m2026-03-13 17:45:03[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 25 candidates from page[0m
+[32m2026-03-13 17:45:03[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1359[0m - [1mNo talent bank results on page 2[0m
+⠸ Extracting page 2/10...
+Talent bank search complete. Found 0 candidates.
+  Found 0 new candidates (deduplicated)
+
+[6/6] Talent bank: BI负责人
+[32m2026-03-13 17:45:05[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-03-13 17:45:29[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 22 candidates[0m
+[32m2026-03-13 17:45:29[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 22 candidates from page[0m
+[32m2026-03-13 17:45:29[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1367[0m - [1mFiltered out 5 non-R&D candidates[0m
+[32m2026-03-13 17:45:45[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1562[0m - [1mTalent bank extraction found 22 candidates[0m
+[32m2026-03-13 17:45:45[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_talent_bank_results[0m:[36m1576[0m - [1mTalent bank: extracted 22 candidates from page[0m
+[32m2026-03-13 17:45:45[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates_talent_bank[0m:[36m1359[0m - [1mNo talent bank results on page 2[0m
+⠋ Extracting page 2/10...
+Talent bank search complete. Found 11 candidates.
+[32m2026-03-13 17:45:45[0m | [1mINFO    [0m | [36msrc.utils.filters[0m:[36mfilter_by_titles[0m:[36m119[0m - [1mTitle filter: 10 → 0 candidates (keywords: ['数据BP', '数据开发', '数据平台', '数据产品', 'BI'])[0m
+  Title filter: 10 excluded, 0 kept
+  Found 0 new candidates (deduplicated)
+
+             Send Results             
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ Metric                     ┃ Count ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ Total candidates           │    11 │
+│ Sent                       │    11 │
+│ Failed                     │     0 │
+│ Skipped (already messaged) │     0 │
+│ Rate limited               │     0 │
+└────────────────────────────┴───────┘
+[32m2026-03-13 17:45:47[0m | [1mINFO    [0m | [36msrc.services.pipeline[0m:[36mgenerate_pipeline_report[0m:[36m484[0m - [1mPipeline report saved to: data/reports/pipeline_20260313_174547.xlsx[0m
+Pipeline report saved to: data/reports/pipeline_20260313_174547.xlsx
+[32m2026-03-13 17:45:47[0m | [1mINFO    [0m | [36msrc.services.pipeline[0m:[36msave_run_history[0m:[36m565[0m - [1mRun history updated: /Users/zhouboli/Documents/maimai-assistant/data/run_history.json[0m
+运行历史已更新: /Users/zhouboli/Documents/maimai-assistant/data/run_history.md
+Checkpoint cleared (pipeline complete)
+数据库已自动备份: maimai_20260313_174547.db
+[32m2026-03-13 17:45:47[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36m_close_internal[0m:[36m214[0m - [1mDisconnected from Chrome (browser stays open)[0m

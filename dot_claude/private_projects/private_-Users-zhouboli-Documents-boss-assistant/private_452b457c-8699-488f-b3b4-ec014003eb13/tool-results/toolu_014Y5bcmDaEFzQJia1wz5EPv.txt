@@ -1,0 +1,4 @@
+src/modules/export.py:49:        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+scripts/recorder.py:162:        self.output_file = output_file or f"recorded_{datetime.now().strftime('%Y%m%d_%H%M%S')}.py"
+src/core/browser.py:294:            name = datetime.now().strftime('%Y%m%d_%H%M%S')
+src/utils/delays.py:51:    hour = datetime.datetime.now().hour

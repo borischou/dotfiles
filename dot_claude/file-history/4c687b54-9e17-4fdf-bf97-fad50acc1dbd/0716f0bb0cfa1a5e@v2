@@ -1,0 +1,61 @@
+"""Input validation utilities."""
+
+import re
+from typing import Dict, Any
+
+from src.exceptions.errors import ValidationError
+
+
+def validate_boss_id(boss_id: str) -> str:
+    """Validate Boss直聘 candidate ID format.
+
+    Boss直聘 candidate IDs stored as zp_{data-expect-id}.
+
+    Args:
+        boss_id: Boss直聘 candidate ID to validate
+
+    Returns:
+        Validated and cleaned ID
+
+    Raises:
+        ValidationError: If ID format is invalid
+    """
+    if not boss_id:
+        raise ValidationError("Boss ID cannot be empty")
+
+    boss_id = str(boss_id).strip()
+
+    if not re.match(r'^[a-zA-Z0-9_-]+$', boss_id):
+        raise ValidationError(f"Invalid Boss ID format: {boss_id}")
+
+    return boss_id
+
+
+def validate_keywords(keywords: str) -> str:
+    """Validate search keywords."""
+    if not keywords or not keywords.strip():
+        raise ValidationError("Search keywords cannot be empty")
+
+    keywords = keywords.strip()
+
+    if len(keywords) < 2:
+        raise ValidationError("Search keywords must be at least 2 characters")
+
+    if len(keywords) > 200:
+        raise ValidationError("Search keywords cannot exceed 200 characters")
+
+    return keywords
+
+
+def validate_template_variables(template: Dict[str, Any], variables: Dict[str, str]) -> None:
+    """Validate that all required template variables are provided."""
+    required_vars = template.get('variables', [])
+    provided_vars = set(variables.keys())
+    required_set = set(required_vars)
+
+    missing_vars = required_set - provided_vars
+
+    if missing_vars:
+        raise ValidationError(
+            f"Missing required template variables: {', '.join(missing_vars)}"
+        )

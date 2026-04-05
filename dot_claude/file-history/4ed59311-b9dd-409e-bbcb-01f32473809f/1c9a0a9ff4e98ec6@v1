@@ -1,0 +1,184 @@
+"""Candidate scoring for priority-based messaging.
+
+Scores candidates based on title seniority, company tier, and keyword
+relevance so that the best-fit candidates get contacted first.
+"""
+
+import re
+from typing import Dict, List, Optional
+
+from loguru import logger
+
+
+# Seniority keywords and their score weights
+SENIORITY_SCORES: Dict[str, int] = {
+    # C-level
+    "CTO": 50, "CEO": 40, "COO": 35, "VP": 40,
+    "首席": 45, "总裁": 40, "副总裁": 40,
+    # Director
+    "总监": 35, "技术总监": 40,
+    # Senior management
+    "技术负责人": 35, "负责人": 30, "Tech Lead": 35,
+    # Senior individual contributors
+    "架构师": 35, "专家": 30, "staff": 30, "Staff": 30,
+    "principal": 35, "Principal": 35,
+    "资深": 25, "高级": 20, "Senior": 20, "senior": 20,
+    # Mid-level
+    "经理": 15, "主管": 15, "lead": 15, "Lead": 15,
+    "中级": 10,
+    # Junior
+    "初级": 5, "Junior": 5, "junior": 5,
+    "助理": 3, "实习": 1,
+}
+
+# Well-known tech companies (tier 1)
+TIER1_COMPANIES = {
+    "字节跳动", "ByteDance", "腾讯", "Tencent", "阿里巴巴", "阿里", "Alibaba",
+    "百度", "Baidu", "美团", "Meituan", "京东", "JD", "拼多多", "PDD",
+    "华为", "Huawei", "小米", "Xiaomi", "网易", "NetEase", "快手", "Kwai",
+    "蚂蚁集团", "蚂蚁金服", "滴滴", "DiDi",
+    "Google", "谷歌", "Microsoft", "微软", "Apple", "苹果",
+    "Amazon", "亚马逊", "Meta", "Facebook",
+    "Netflix", "Uber", "OpenAI", "Anthropic",
+}
+
+# Good tech companies (tier 2)
+TIER2_COMPANIES = {
+    "携程", "Trip.com", "B站", "bilibili", "哔哩哔哩",
+    "知乎", "Zhihu", "小红书", "得物", "SHEIN",
+    "商汤", "旷视", "依图", "寒武纪", "地平线",
+    "理想汽车", "蔚来", "小鹏", "大疆", "DJI",
+    "米哈游", "miHoYo", "莉莉丝", "叠纸",
+    "360", "新浪", "微博", "搜狐", "爱奇艺",
+    "OPPO", "vivo", "一加", "联想", "Lenovo",
+    "SAP", "Oracle", "IBM", "Adobe", "Salesforce",
+    "Stripe", "Airbnb", "Spotify", "Twitter", "X",
+}
+
+
+def score_candidate(
+    name: str,
+    title: str,
+    company: str,
+    search_keywords: Optional[List[str]] = None,
+) -> int:
+    """
+    Score a candidate based on title, company, and keyword relevance.
+
+    Higher score = higher priority for messaging.
+
+    Scoring breakdown:
+    - Title seniority: 0-50 points
+    - Company tier: 0-30 points
+    - Keyword match: 0-20 points
+
+    Args:
+        name: Candidate name
+        title: Job title
+        company: Company name
+        search_keywords: Original search keywords for relevance scoring
+
+    Returns:
+        Integer score (higher = better fit)
+    """
+    score = 0
+
+    # 1. Title seniority scoring
+    title_lower = title.lower() if title else ""
+    best_seniority = 0
+    for keyword, points in SENIORITY_SCORES.items():
+        if keyword.lower() in title_lower or keyword in title:
+            best_seniority = max(best_seniority, points)
+    score += best_seniority
+
+    # 2. Company tier scoring
+    # Require minimum 2 characters on both sides to avoid false positives
+    # from short names like "X", "JD" matching substrings of unrelated companies
+    if company:
+        company_lower = company.lower()
+        company_matched = False
+        for t1 in TIER1_COMPANIES:
+            t1_lower = t1.lower()
+            if len(t1_lower) >= 2 and len(company_lower) >= 2:
+                if t1_lower == company_lower or (len(t1_lower) >= 3 and t1_lower in company_lower) or (len(company_lower) >= 3 and company_lower in t1_lower):
+                    score += 30
+                    company_matched = True
+                    break
+        if not company_matched:
+            for t2 in TIER2_COMPANIES:
+                t2_lower = t2.lower()
+                if len(t2_lower) >= 2 and len(company_lower) >= 2:
+                    if t2_lower == company_lower or (len(t2_lower) >= 3 and t2_lower in company_lower) or (len(company_lower) >= 3 and company_lower in t2_lower):
+                        score += 20
+                        break
+
+    # 3. Keyword relevance (if search keywords provided), capped at 20 points
+    if search_keywords and title:
+        keyword_score = 0
+        for kw in search_keywords:
+            kw_lower = kw.lower()
+            if kw_lower in title_lower:
+                keyword_score += 10
+            elif kw_lower in (company or "").lower():
+                keyword_score += 5
+        score += min(keyword_score, 20)
+
+    # 4. Bonus: R&D-specific titles
+    rd_bonus_patterns = [
+        r"工程师", r"开发", r"架构", r"算法", r"研发",
+        r"engineer", r"developer", r"architect",
+    ]
+    for pattern in rd_bonus_patterns:
+        if re.search(pattern, title, re.IGNORECASE):
+            score += 5
+            break
+
+    return score
+
+
+def sort_candidates_by_score(
+    candidates: list,
+    search_keywords: Optional[List[str]] = None,
+) -> list:
+    """
+    Sort a list of candidate dicts or objects by score (descending).
+
+    Works with both CandidateBasic dataclass instances and dicts.
+
+    Args:
+        candidates: List of candidates (dicts or objects with name/title/company)
+        search_keywords: Original search keywords for relevance scoring
+
+    Returns:
+        Sorted list (highest score first), each item gets a '_score' attribute/key
+    """
+    scored = []
+    for c in candidates:
+        if isinstance(c, dict):
+            name = c.get("name", "")
+            title = c.get("title", "")
+            company = c.get("company", "")
+        else:
+            name = getattr(c, "name", "")
+            title = getattr(c, "title", "")
+            company = getattr(c, "company", "")
+
+        s = score_candidate(name, title, company, search_keywords)
+
+        if isinstance(c, dict):
+            c["_score"] = s
+        else:
+            c._score = s
+
+        scored.append((s, c))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    result = [item[1] for item in scored]
+
+    if result:
+        top = scored[0][0]
+        bottom = scored[-1][0]
+        logger.info(f"Candidates scored: top={top}, bottom={bottom}, count={len(result)}")
+
+    return result

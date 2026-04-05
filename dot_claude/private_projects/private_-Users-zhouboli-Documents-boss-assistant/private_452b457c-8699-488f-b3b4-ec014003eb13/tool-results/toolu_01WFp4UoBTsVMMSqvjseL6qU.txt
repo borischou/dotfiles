@@ -1,0 +1,70 @@
+     1→{
+     2→  "greeting": {
+     3→    "name": "初次问候",
+     4→    "description": "首次联系候选人的标准问候模板",
+     5→    "content": "您好 {name}，我是{recruiter_name}，{recruiter_company}的猎头顾问。看到您在{company}的{position}经历非常优秀，目前我手上有一个{target_position}的机会，年薪范围{salary_range}，想和您聊聊是否有兴趣了解？",
+     6→    "variables": [
+     7→      "name",
+     8→      "recruiter_name",
+     9→      "recruiter_company",
+    10→      "company",
+    11→      "position",
+    12→      "target_position",
+    13→      "salary_range"
+    14→    ]
+    15→  },
+    16→  "follow_up": {
+    17→    "name": "跟进消息",
+    18→    "description": "向已联系但未回复的候选人发送跟进消息",
+    19→    "content": "{name}您好，上次和您分享的{target_position}职位不知道您考虑得如何？如果您感兴趣，我可以安排时间详细介绍。期待您的回复！",
+    20→    "variables": [
+    21→      "name",
+    22→      "target_position"
+    23→    ]
+    24→  },
+    25→  "job_details": {
+    26→    "name": "职位详情",
+    27→    "description": "详细介绍具体职位信息",
+    28→    "content": "{name}您好，关于{target_position}这个职位，具体情况如下：\n\n公司：{target_company}\n职位：{target_position}\n薪资：{salary_range}\n地点：{location}\n职责：{responsibilities}\n要求：{requirements}\n\n如果您感兴趣，欢迎和我联系详聊！",
+    29→    "variables": [
+    30→      "name",
+    31→      "target_position",
+    32→      "target_company",
+    33→      "salary_range",
+    34→      "location",
+    35→      "responsibilities",
+    36→      "requirements"
+    37→    ]
+    38→  },
+    39→  "referral_request": {
+    40→    "name": "推荐请求",
+    41→    "description": "请求候选人推荐合适的人选",
+    42→    "content": "{name}您好，我是{recruiter_name}。虽然您可能暂时没有换工作的打算，但不知道您身边是否有对{target_position}职位感兴趣的朋友？如果有的话，欢迎推荐给我，我会提供推荐奖励。谢谢！",
+    43→    "variables": [
+    44→      "name",
+    45→      "recruiter_name",
+    46→      "target_position"
+    47→    ]
+    48→  },
+    49→  "thank_you": {
+    50→    "name": "感谢回复",
+    51→    "description": "感谢候选人的回复",
+    52→    "content": "{name}，非常感谢您的回复！我会尽快整理详细的职位信息发给您。如果您有任何问题，随时可以联系我。",
+    53→    "variables": [
+    54→      "name"
+    55→    ]
+    56→  },
+    57→  "simple_hello": {
+    58→    "name": "简单问候",
+    59→    "description": "简单的你好消息（无变量）",
+    60→    "content": "你好，看了您的简历，觉得很匹配我们目前的岗位需求，方便聊聊吗？",
+    61→    "variables": []
+    62→  },
+    63→  "hello": {
+    64→    "name": "最简问候",
+    65→    "description": "最简单的你好消息",
+    66→    "content": "你好",
+    67→    "variables": []
+    68→  }
+    69→}
+    70→

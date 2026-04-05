@@ -1,0 +1,148 @@
+<div id="pipeline-progress"
+     hx-ext="sse"
+     sse-connect="/pipeline/progress/{{ task_id }}"
+     sse-close="done">
+
+    <h3>Pipeline 运行中: {{ task_id }}</h3>
+
+    <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
+    </div>
+
+    <p id="progress-status">初始化...</p>
+
+    <div class="pipeline-log" id="pipeline-log">
+    </div>
+
+    <button hx-delete="/pipeline/cancel" hx-swap="none"
+            onclick="this.disabled=true; this.textContent='取消中...';">
+        取消 Pipeline
+    </button>
+</div>
+
+<div sse-swap="search_start" hx-swap="none" style="display:none;"></div>
+<div sse-swap="search_complete" hx-swap="none" style="display:none;"></div>
+<div sse-swap="scoring_start" hx-swap="none" style="display:none;"></div>
+<div sse-swap="scoring_complete" hx-swap="none" style="display:none;"></div>
+<div sse-swap="send_start" hx-swap="none" style="display:none;"></div>
+<div sse-swap="send_complete" hx-swap="none" style="display:none;"></div>
+<div sse-swap="pipeline_complete" hx-swap="none" style="display:none;"></div>
+<div sse-swap="captcha_detected" hx-swap="none" style="display:none;"></div>
+<div sse-swap="error" hx-swap="none" style="display:none;"></div>
+<div sse-swap="pipeline_cancelled" hx-swap="none" style="display:none;"></div>
+<div sse-swap="done" hx-swap="none" style="display:none;"></div>
+
+<script>
+(function() {
+    const log = document.getElementById("pipeline-log");
+    const status = document.getElementById("progress-status");
+    const fill = document.getElementById("progress-fill");
+
+    function addLog(text) {
+        const entry = document.createElement("div");
+        entry.className = "log-entry";
+        entry.textContent = new Date().toLocaleTimeString() + " — " + text;
+        log.appendChild(entry);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function setProgress(pct) {
+        fill.style.width = pct + "%";
+    }
+
+    const source = document.getElementById("pipeline-progress")
+        .__sse_eventSource || null;
+
+    // Listen to SSE events via custom event listeners
+    const container = document.getElementById("pipeline-progress");
+    if (!container) return;
+
+    const sseEl = container;
+    const events = [
+        "search_start", "search_complete", "scoring_start", "scoring_complete",
+        "send_start", "send_complete", "pipeline_complete", "captcha_detected",
+        "error", "pipeline_cancelled", "done"
+    ];
+
+    // Use EventSource directly for richer control
+    const taskId = "{{ task_id }}";
+    const es = new EventSource("/pipeline/progress/" + taskId);
+
+    es.addEventListener("search_start", function(e) {
+        const d = JSON.parse(e.data);
+        status.textContent = "搜索中: " + (d.keywords || []).join(", ");
+        setProgress(10);
+        addLog("开始搜索: " + (d.keywords || []).join(", "));
+    });
+
+    es.addEventListener("search_complete", function(e) {
+        const d = JSON.parse(e.data);
+        status.textContent = "搜索完成，找到 " + d.total_candidates + " 个候选人";
+        setProgress(30);
+        addLog("搜索完成: " + d.total_candidates + " 个候选人");
+    });
+
+    es.addEventListener("scoring_start", function(e) {
+        const d = JSON.parse(e.data);
+        status.textContent = "评分中 (" + d.count + " 个候选人)...";
+        setProgress(40);
+        addLog("开始评分: " + d.count + " 个候选人");
+    });
+
+    es.addEventListener("scoring_complete", function(e) {
+        const d = JSON.parse(e.data);
+        status.textContent = "评分完成，最高分: " + d.top_score;
+        setProgress(50);
+        addLog("评分完成, 最高分: " + d.top_score);
+    });
+
+    es.addEventListener("send_start", function(e) {
+        const d = JSON.parse(e.data);
+        status.textContent = "发送消息中 (0/" + d.total + ")...";
+        setProgress(55);
+        addLog("开始发送消息: " + d.total + " 个候选人");
+    });
+
+    es.addEventListener("send_complete", function(e) {
+        const d = JSON.parse(e.data);
+        status.textContent = "发送完成: 成功 " + (d.sent||0) + ", 失败 " + (d.failed||0);
+        setProgress(90);
+        addLog("发送完成: 成功=" + (d.sent||0) + " 失败=" + (d.failed||0) + " 跳过=" + (d.skipped||0));
+    });
+
+    es.addEventListener("pipeline_complete", function(e) {
+        const d = JSON.parse(e.data);
+        status.textContent = "Pipeline 完成!";
+        setProgress(100);
+        addLog("Pipeline 完成: 候选人=" + (d.candidates_found||0) + " 发送=" + (d.sent||0));
+    });
+
+    es.addEventListener("captcha_detected", function(e) {
+        status.textContent = "验证码检测到! 请在 Chrome 窗口中处理";
+        addLog("⚠️ 验证码检测到，请在 Chrome 中手动处理");
+        showToast("验证码检测到！请在 Chrome 窗口中处理", "warning");
+    });
+
+    es.addEventListener("error", function(e) {
+        try {
+            const d = JSON.parse(e.data);
+            addLog("❌ 错误: " + d.message);
+            showToast("Pipeline 错误: " + d.message, "error");
+        } catch(ex) {}
+    });
+
+    es.addEventListener("pipeline_cancelled", function(e) {
+        status.textContent = "Pipeline 已取消";
+        addLog("Pipeline 已取消");
+    });
+
+    es.addEventListener("done", function(e) {
+        es.close();
+        addLog("— 结束 —");
+    });
+
+    es.onerror = function() {
+        es.close();
+    };
+})();
+</script>

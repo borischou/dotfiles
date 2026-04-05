@@ -1,0 +1,1889 @@
+     1→"""Message module for sending messages to candidates.
+     2→
+     3→Handles message template rendering, interactive confirmation,
+     4→and message sending with full audit trail.
+     5→"""
+     6→
+     7→import asyncio
+     8→import json
+     9→import sys
+    10→import traceback
+    11→from datetime import datetime, timezone
+    12→from typing import Any, Dict, List, Optional
+    13→
+    14→import questionary
+    15→from patchright.async_api import Page
+    16→from loguru import logger
+    17→from rich.console import Console
+    18→from rich.panel import Panel
+    19→from rich.text import Text
+    20→
+    21→from src.core.browser import BrowserManager, get_browser_manager
+    22→from src.core.anti_detection import human_type, human_click
+    23→from src.modules.auth import ensure_logged_in
+    24→from src.utils.config import get_config
+    25→from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+    26→from src.utils.delays import async_random_delay
+    27→from src.utils.retry import retry_navigation
+    28→from src.utils.validators import validate_maimai_id, validate_template_variables, validate_template_rendering
+    29→from src.models.database import Candidate, Message, get_db_manager
+    30→from src.exceptions.errors import (
+    31→    PermanentFailureError,
+    32→    RateLimitExceededError,
+    33→    ValidationError,
+    34→    QuotaExhaustedError,
+    35→    LoginRequiredError,
+    36→)
+    37→from src.web.progress import emit_progress
+    38→
+    39→console = Console()
+    40→
+    41→# Maimai chat URL - navigate directly to chat page
+    42→MAIMAI_CHAT_URL = "https://maimai.cn/bizmember/uh_chat_pc?u2={user_id}&from=pc_web_search&fr=profile"
+    43→
+    44→
+    45→def _extract_user_id(profile_url: str) -> Optional[str]:
+    46→    """Extract dstu/user_id from a Maimai profile URL for direct chat navigation.
+    47→
+    48→    Only returns IDs that are known to work with the chat URL (u2= parameter).
+    49→    Query-param IDs (dstu, u2, egid) are reliable for chat navigation.
+    50→    Path-based IDs (/contact/detail/xxx) are NOT the same as chat user IDs
+    51→    and should not be used for direct chat URL construction.
+    52→    """
+    53→    from urllib.parse import urlparse, parse_qs
+    54→    parsed = urlparse(profile_url)
+    55→    params = parse_qs(parsed.query)
+    56→    # Only use query parameter IDs — these are confirmed to work with uh_chat_pc
+    57→    for key in ('dstu', 'u2', 'egid'):
+    58→        if key in params:
+    59→            return params[key][0]
+    60→    return None
+    61→
+    62→
+    63→async def _navigate_to_chat(
+    64→    page: Page,
+    65→    profile_url: Optional[str],
+    66→    config,
+    67→    browser: BrowserManager,
+    68→    maimai_id: str,
+    69→    interactive: bool = False,
+    70→    discovered_selectors=None,
+    71→) -> bool:
+    72→    """Navigate to the chat page for a candidate.
+    73→
+    74→    Tries in order:
+    75→    1. Extract user_id from profile_url query params → direct chat URL
+    76→    2. Navigate to profile_url, extract user_id from redirected URL → direct chat URL
+    77→    3. Click chat button on profile page as fallback
+    78→
+    79→    If no profile_url is provided, looks up the candidate's profile_url from DB.
+    80→
+    81→    Args:
+    82→        page: Playwright page instance
+    83→        profile_url: Candidate's profile URL (may be None)
+    84→        config: Config instance
+    85→        browser: Browser manager instance
+    86→        maimai_id: Candidate's Maimai ID
+    87→        interactive: Enable interactive selector discovery
+    88→        discovered_selectors: Shared DiscoveredSelectors instance
+    89→
+    90→    Returns:
+    91→        True if successfully navigated to chat page
+    92→    """
+    93→    db_manager = get_db_manager()
+    94→
+    95→    # Resolve profile URL from DB if not provided
+    96→    if not profile_url:
+    97→        with db_manager.session_scope() as session:
+    98→            db_candidate = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+    99→            profile_url = db_candidate.profile_url if db_candidate else None
+   100→
+   101→        if not profile_url:
+   102→            raise PermanentFailureError(f"No profile URL for {maimai_id}")
+   103→
+   104→    # Try extracting user_id directly from profile URL
+   105→    user_id = _extract_user_id(profile_url)
+   106→    logger.debug(f"_navigate_to_chat: profile_url={profile_url!r}, extracted user_id={user_id}")
+   107→
+   108→    if user_id:
+   109→        chat_url = MAIMAI_CHAT_URL.format(user_id=user_id)
+   110→        await retry_navigation(page, chat_url, wait_until='domcontentloaded')
+   111→        await async_random_delay('page_load')
+   112→        return True
+   113→
+   114→    # Navigate to profile page, then try to extract user_id from resulting URL
+   115→    logger.debug(f"_navigate_to_chat: navigating to profile {profile_url}")
+   116→    await retry_navigation(page, profile_url, wait_until='domcontentloaded')
+   117→    await async_random_delay('page_load')
+   118→
+   119→    current_url = page.url
+   120→    logger.debug(f"_navigate_to_chat: landed on {current_url}")
+   121→    redirected_user_id = _extract_user_id(current_url)
+   122→    if redirected_user_id:
+   123→        logger.info(f"Extracted user_id={redirected_user_id} from page URL, redirecting to chat")
+   124→        chat_url = MAIMAI_CHAT_URL.format(user_id=redirected_user_id)
+   125→        await retry_navigation(page, chat_url, wait_until='domcontentloaded')
+   126→        await async_random_delay('page_load')
+   127→        return True
+   128→
+   129→    # Fallback: click chat button on profile page
+   130→    chat_button_found = await _click_chat_button(page, config)
+   131→    if chat_button_found:
+   132→        await async_random_delay('action')
+   133→        return True
+   134→
+   135→    # If interactive mode, trigger selector discovery
+   136→    if interactive and discovered_selectors is not None and not discovered_selectors.is_populated:
+   137→        from src.modules.selector_discovery import discover_chat_page
+   138→        console.print("[yellow]Chat button not found. Entering interactive discovery mode...[/yellow]")
+   139→        result = await discover_chat_page(page, maimai_id, browser)
+   140→        if result.is_populated:
+   141→            discovered_selectors.chat_button = result.chat_button
+   142→            discovered_selectors.message_input = result.message_input
+   143→            discovered_selectors.send_button = result.send_button
+   144→            discovered_selectors.chat_url_pattern = result.chat_url_pattern
+   145→            discovered_selectors.skip_chat_button = result.skip_chat_button
+   146→            discovered_selectors.is_populated = True
+   147→            return True
+   148→
+   149→    console.print("[red]Could not find chat button[/red]")
+   150→    await browser.screenshot(f"message_error_{maimai_id}")
+   151→    return False
+   152→
+   153→
+   154→async def extract_contact_quota(page: Page) -> Optional[dict]:
+   155→    """Extract contact quota from Quick Contact page's embedded share_data.
+   156→
+   157→    The Quick Contact page server-renders ``window.share_data`` which includes
+   158→    ``mem_status.mem_info`` with remaining quotas for various member actions.
+   159→
+   160→    Args:
+   161→        page: Playwright page on a Quick Contact (极速联系) page
+   162→
+   163→    Returns:
+   164→        Dict with quota info, or None if data is unavailable::
+   165→
+   166→            {
+   167→                'uh_left': int,        # 极速联系 remaining
+   168→                'addfr_left': int,     # 加好友 remaining
+   169→                'dc_left': int,        # 直聊 remaining
+   170→                'expire_time': str,    # membership expiry
+   171→                'cost': int,           # vouchers consumed per contact
+   172→            }
+   173→    """
+   174→    try:
+   175→        quota = await page.evaluate('''() => {
+   176→            if (window.share_data && window.share_data.mem_status &&
+   177→                window.share_data.mem_status.mem_info) {
+   178→                const info = window.share_data.mem_status.mem_info;
+   179→                return {
+   180→                    uh_left: info.uh_left,
+   181→                    addfr_left: info.addfr_left,
+   182→                    dc_left: info.dc_left,
+   183→                    expire_time: info.expire_time || null,
+   184→                    cost: (window.share_data.fast_contact_pay_num || {}).final_num || 1,
+   185→                };
+   186→            }
+   187→            return null;
+   188→        }''')
+   189→        return quota
+   190→    except Exception as e:
+   191→        logger.debug(f"Failed to extract contact quota: {e}")
+   192→        return None
+   193→
+   194→
+   195→async def fetch_contact_quota(browser: Optional['BrowserManager'] = None) -> Optional[dict]:
+   196→    """Fetch current contact quota by navigating to a Quick Contact page.
+   197→
+   198→    Uses a well-known user ID to load the Quick Contact page and extract
+   199→    ``window.share_data.mem_status.mem_info``. Useful for the ``status``
+   200→    command or any context where quota needs to be checked independently.
+   201→
+   202→    Args:
+   203→        browser: BrowserManager instance (uses global singleton if None)
+   204→
+   205→    Returns:
+   206→        Quota dict (see extract_contact_quota), or None on failure
+   207→    """
+   208→    if browser is None:
+   209→        browser = get_browser_manager()
+   210→
+   211→    page = browser.page
+   212→    # Use own user ID (u1 == u2 loads the page without actually creating a chat)
+   213→    probe_url = MAIMAI_CHAT_URL.format(user_id="1")
+   214→    try:
+   215→        await retry_navigation(page, probe_url, wait_until='domcontentloaded')
+   216→        await asyncio.sleep(2)
+   217→        return await extract_contact_quota(page)
+   218→    except Exception as e:
+   219→        logger.debug(f"Failed to fetch contact quota: {e}")
+   220→        return None
+   221→
+   222→
+   223→def _display_quota(quota: dict, just_sent: bool = True) -> None:
+   224→    """Display contact quota info to the console.
+   225→
+   226→    Args:
+   227→        quota: Quota dict from extract_contact_quota()
+   228→        just_sent: If True, subtract cost from uh_left for post-send display
+   229→    """
+   230→    uh_left = quota.get('uh_left', 0)
+   231→    cost = quota.get('cost', 1)
+   232→    if just_sent:
+   233→        uh_left = max(0, uh_left - cost)
+   234→    console.print(f"[dim]联系券剩余: {uh_left}[/dim]")
+   235→
+   236→
+   237→async def _handle_quick_contact(page: Page, content: str) -> Optional[bool]:
+   238→    """Handle Maimai's "极速联系" (Quick Contact) page.
+   239→
+   240→    This page appears instead of regular chat for some candidates. It has a
+   241→    category selector, a textarea, and a "提交" (Submit) button.
+   242→
+   243→    Submission works by manipulating the React component directly: setting
+   244→    the message via setState and calling the debounced send method (with
+   245→    flush) to trigger the POST to /bizmember/uh-chat/api/send_v2.
+   246→
+   247→    DOM-level textarea.fill() does NOT update React's controlled state, and
+   248→    DOM click on the submit button does NOT reliably trigger the send API.
+   249→
+   250→    Args:
+   251→        page: Playwright page instance
+   252→        content: Message content to send
+   253→
+   254→    Returns:
+   255→        True if message was sent via quick contact form,
+   256→        False if quick contact page was detected but sending failed,
+   257→        None if this is not a quick contact page (caller should continue normal flow)
+   258→    """
+   259→    try:
+   260→        # Detect quick contact page via page title or page content
+   261→        is_quick_contact = await page.evaluate('''() => {
+   262→            const title = document.title || '';
+   263→            const bodyText = document.body ? document.body.innerText : '';
+   264→            return title.includes('极速联系') || bodyText.includes('极速联系');
+   265→        }''')
+   266→
+   267→        if not is_quick_contact:
+   268→            return None
+   269→
+   270→        logger.info("Detected '极速联系' (Quick Contact) page")
+   271→
+   272→        # Validate message length (Quick Contact enforces 10-300 chars)
+   273→        if len(content) < 10:
+   274→            logger.error(
+   275→                f"Quick contact: message too short ({len(content)} chars, "
+   276→                "minimum 10). Quick Contact requires 10-300 characters."
+   277→            )
+   278→            return False
+   279→        if len(content) > 300:
+   280→            logger.error(
+   281→                f"Quick contact: message too long ({len(content)} chars, "
+   282→                "maximum 300). Quick Contact requires 10-300 characters."
+   283→            )
+   284→            return False
+   285→
+   286→        # Extract quota info before submitting (share_data is available on page load)
+   287→        quota = await extract_contact_quota(page)
+   288→
+   289→        # Check if quota is exhausted
+   290→        if quota and quota.get('uh_left', 0) <= 0:
+   291→            raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+   292→
+   293→        # Install XHR interceptor to capture the send_v2 response
+   294→        await page.evaluate('''() => {
+   295→            window.__sendV2Result = null;
+   296→            const origOpen = XMLHttpRequest.prototype.open;
+   297→            const origSend = XMLHttpRequest.prototype.send;
+   298→            XMLHttpRequest.prototype.open = function(m, u) {
+   299→                this.__url = u; this.__method = m;
+   300→                return origOpen.apply(this, arguments);
+   301→            };
+   302→            XMLHttpRequest.prototype.send = function(b) {
+   303→                if (this.__url && this.__url.includes('send_v2')) {
+   304→                    const xhr = this;
+   305→                    xhr.addEventListener('load', function() {
+   306→                        try {
+   307→                            window.__sendV2Result = {
+   308→                                status: xhr.status,
+   309→                                response: xhr.responseText,
+   310→                            };
+   311→                        } catch(e) {
+   312→                            window.__sendV2Result = {status: xhr.status, error: e.message};
+   313→                        }
+   314→                    });
+   315→                    xhr.addEventListener('error', function() {
+   316→                        window.__sendV2Result = {status: 0, error: 'network_error'};
+   317→                    });
+   318→                }
+   319→                return origSend.apply(this, arguments);
+   320→            };
+   321→        }''')
+   322→
+   323→        # Submit via React component internals:
+   324→        # 1. Find the class component that owns the form state
+   325→        # 2. Set message + unlock push_type via setState
+   326→        # 3. Call the debounced send() method and flush() to execute immediately
+   327→        send_triggered = await page.evaluate('''(msg) => {
+   328→            const textarea = document.querySelector('textarea');
+   329→            if (!textarea) return {success: false, error: 'no textarea'};
+   330→            const keys = Object.keys(textarea);
+   331→            const fiberKey = keys.find(
+   332→                k => k.startsWith('__reactInternalInstance') || k.startsWith('__reactFiber')
+   333→            );
+   334→            if (!fiberKey) return {success: false, error: 'no React fiber'};
+   335→
+   336→            let fiber = textarea[fiberKey];
+   337→            while (fiber) {
+   338→                if (fiber.stateNode && fiber.stateNode.state
+   339→                    && 'message' in fiber.stateNode.state
+   340→                    && typeof fiber.stateNode.send === 'function') {
+   341→                    const component = fiber.stateNode;
+   342→                    // Set message and ensure push_type is not locked (true = sending lock)
+   343→                    component.setState({message: msg, push_type: false}, () => {
+   344→                        component.send();
+   345→                        if (typeof component.send.flush === 'function') {
+   346→                            component.send.flush();
+   347→                        }
+   348→                    });
+   349→                    return {success: true};
+   350→                }
+   351→                fiber = fiber.return;
+   352→            }
+   353→            return {success: false, error: 'React component not found'};
+   354→        }''', content)
+   355→
+   356→        if not send_triggered.get('success'):
+   357→            logger.warning(
+   358→                f"Quick contact: failed to trigger send via React: "
+   359→                f"{send_triggered.get('error', 'unknown')}"
+   360→            )
+   361→            return False
+   362→
+   363→        # Wait for the API response (send_v2 XHR)
+   364→        send_result = None
+   365→        for _ in range(10):
+   366→            await asyncio.sleep(0.5)
+   367→            send_result = await page.evaluate('() => window.__sendV2Result')
+   368→            if send_result is not None:
+   369→                break
+   370→
+   371→        if send_result is None:
+   372→            logger.warning("Quick contact: send_v2 API call was not captured (timeout)")
+   373→            return False
+   374→
+   375→        # Parse the API response
+   376→        response_text = send_result.get('response', '')
+   377→        try:
+   378→            resp_data = json.loads(response_text) if response_text else {}
+   379→        except (json.JSONDecodeError, TypeError):
+   380→            resp_data = {}
+   381→
+   382→        ret = resp_data.get('ret')
+   383→        error_msg = resp_data.get('error', '')
+   384→
+   385→        if ret == -1:
+   386→            logger.warning(f"Quick contact: send failed — {error_msg}")
+   387→            if error_msg:
+   388→                console.print(f"  [red]Quick Contact 失败: {error_msg}[/red]")
+   389→            return False
+   390→
+   391→        logger.info("Quick contact: message sent successfully")
+   392→        await async_random_delay('action')
+   393→
+   394→        # Display remaining quota
+   395→        if quota:
+   396→            _display_quota(quota, just_sent=True)
+   397→
+   398→        return True
+   399→
+   400→    except PermanentFailureError:
+   401→        raise  # Let quota exhaustion etc. propagate to abort the batch
+   402→    except Exception as e:
+   403→        logger.error(f"Quick contact handling failed: {e}\n{traceback.format_exc()}")
+   404→        return False
+   405→
+   406→
+   407→async def _detect_vip_paywall(page: Page) -> bool:
+   408→    """Detect if a VIP/membership paywall is blocking the current page.
+   409→
+   410→    Non-VIP accounts may be redirected to a recharge/upgrade page when
+   411→    trying to message certain candidates. This checks the page URL and
+   412→    visible text for common paywall indicators.
+   413→
+   414→    Args:
+   415→        page: Playwright page instance
+   416→
+   417→    Returns:
+   418→        True if a VIP paywall is detected
+   419→    """
+   420→    try:
+   421→        return await page.evaluate('''() => {
+   422→            const url = window.location.href;
+   423→            const urlKeywords = ['vip', 'member', 'pay', 'recharge', 'upgrade', 'subscribe'];
+   424→            if (urlKeywords.some(kw => url.toLowerCase().includes(kw))) {
+   425→                return true;
+   426→            }
+   427→
+   428→            const title = document.title || '';
+   429→            const bodyText = document.body ? document.body.innerText.substring(0, 3000) : '';
+   430→            const text = title + ' ' + bodyText;
+   431→
+   432→            const paywallPatterns = [
+   433→                '开通会员', '升级会员', '会员专享', '会员权益',
+   434→                '充值', '付费', '购买会员', '开通VIP', '升级VIP',
+   435→                '立即开通', '立即升级', '立即购买',
+   436→                '会员到期', '续费', '解锁', '次数已用完',
+   437→                '今日沟通次数', '沟通人数已达上限',
+   438→            ];
+   439→
+   440→            return paywallPatterns.some(p => text.includes(p));
+   441→        }''')
+   442→    except Exception as e:
+   443→        logger.debug(f"VIP paywall detection failed: {e}")
+   444→        return False
+   445→
+   446→
+   447→async def send_message(
+   448→    maimai_id: str,
+   449→    template_name: str,
+   450→    variables: Dict[str, str],
+   451→    browser: Optional[BrowserManager] = None,
+   452→    skip_confirmation: bool = False,
+   453→    interactive: bool = False,
+   454→    discovered_selectors: Optional['DiscoveredSelectors'] = None,
+   455→    _skip_rate_check: bool = False,
+   456→    profile_url: Optional[str] = None,
+   457→) -> bool:
+   458→    """
+   459→    Send a message to a candidate.
+   460→
+   461→    Args:
+   462→        maimai_id: Candidate's Maimai ID
+   463→        template_name: Name of message template to use
+   464→        variables: Variables to substitute in template
+   465→        browser: Browser manager instance
+   466→        skip_confirmation: Skip confirmation (only for testing)
+   467→        interactive: Enable interactive selector discovery on failure
+   468→        discovered_selectors: Shared DiscoveredSelectors instance for reuse
+   469→
+   470→    Returns:
+   471→        True if message was sent successfully
+   472→
+   473→    Raises:
+   474→        RateLimitExceededError: If rate limit exceeded
+   475→        ValidationError: If template or variables invalid
+   476→    """
+   477→    # Validate and clean inputs
+   478→    maimai_id = validate_maimai_id(maimai_id)
+   479→
+   480→    if browser is None:
+   481→        browser = get_browser_manager()
+   482→
+   483→    config = get_config()
+   484→    rate_limiter = get_rate_limiter()
+   485→    db_manager = get_db_manager()
+   486→
+   487→    # Get template
+   488→    try:
+   489→        template = config.get_template(template_name)
+   490→    except Exception as e:
+   491→        raise ValidationError(f"Template not found: {template_name}")
+   492→
+   493→    # Validate template variables
+   494→    validate_template_variables(template, variables)
+   495→
+   496→    # Render message content
+   497→    content = render_template(template['content'], variables)
+   498→
+   499→    # Get candidate info for display
+   500→    candidate_info = _get_candidate_info(db_manager, maimai_id)
+   501→
+   502→    # Preview and confirm
+   503→    if not skip_confirmation:
+   504→        action = await interactive_confirm(content, candidate_info, template_name)
+   505→
+   506→        if action == 'skip':
+   507→            console.print("[yellow]Message skipped[/yellow]")
+   508→            _log_message(db_manager, maimai_id, template_name, content, 'cancelled')
+   509→            return False
+   510→
+   511→        elif action == 'edit':
+   512→            # Allow user to edit content
+   513→            content = await edit_message(content)
+   514→            if content is None:
+   515→                console.print("[yellow]Message cancelled[/yellow]")
+   516→                return False
+   517→
+   518→            # Re-confirm after edit
+   519→            action = await interactive_confirm(content, candidate_info, template_name)
+   520→            if action != 'send':
+   521→                console.print("[yellow]Message skipped[/yellow]")
+   522→                return False
+   523→
+   524→        elif action != 'send':
+   525→            console.print("[yellow]Message cancelled[/yellow]")
+   526→            return False
+   527→
+   528→    # Check rate limit (waits through min-interval) - skip when called from batch
+   529→    if not _skip_rate_check:
+   530→        await async_check_rate_limit('send_message')
+   531→
+   532→    # Ensure logged in
+   533→    await ensure_logged_in(browser)
+   534→
+   535→    try:
+   536→        page = browser.page
+   537→
+   538→        # If we have populated discovered selectors, use them directly
+   539→        if discovered_selectors and discovered_selectors.is_populated:
+   540→            from src.modules.selector_discovery import apply_discovered_selectors
+   541→            success = await apply_discovered_selectors(
+   542→                page, maimai_id, discovered_selectors, content
+   543→            )
+   544→            if success:
+   545→                rate_limiter.log_action('send_message', {
+   546→                    'maimai_id': maimai_id,
+   547→                    'template': template_name
+   548→                })
+   549→                _log_message(db_manager, maimai_id, template_name, content, 'sent')
+   550→                console.print("[green]Message sent successfully![/green]")
+   551→                return True
+   552→            else:
+   553→                console.print("[red]Failed to send with discovered selectors[/red]")
+   554→                await browser.screenshot(f"message_error_{maimai_id}")
+   555→                _log_message(db_manager, maimai_id, template_name, content, 'failed')
+   556→                return False
+   557→
+   558→        nav_ok = await _navigate_to_chat(
+   559→            page, profile_url, config, browser, maimai_id,
+   560→            interactive, discovered_selectors,
+   561→        )
+   562→        if not nav_ok:
+   563→            _log_message(db_manager, maimai_id, template_name, content, 'failed')
+   564→            return False
+   565→
+   566→        # Check for "等待回应" (Awaiting Response) — already messaged this candidate
+   567→        try:
+   568→            awaiting = await page.evaluate('''() => {
+   569→                const text = document.body ? document.body.innerText : '';
+   570→                return text.includes('等待回应') || text.includes('等待对方回复');
+   571→            }''')
+   572→            if awaiting:
+   573→                logger.info(f"Candidate {maimai_id} already messaged (awaiting response), skipping")
+   574→                console.print(f"[yellow]Already messaged {maimai_id} (等待回应), skipping[/yellow]")
+   575→                _log_message(db_manager, maimai_id, template_name, content, 'cancelled')
+   576→                return False
+   577→        except Exception as e:
+   578→            logger.debug(f"Awaiting-response check failed for {maimai_id}: {e}")
+   579→
+   580→        # Check for "极速联系" (Quick Contact) page
+   581→        qc_result = await _handle_quick_contact(page, content)
+   582→        if qc_result is True:
+   583→            rate_limiter.log_action('send_message', {
+   584→                'maimai_id': maimai_id,
+   585→                'template': template_name,
+   586→                'mode': 'quick_contact',
+   587→            })
+   588→            _log_message(db_manager, maimai_id, template_name, content, 'sent')
+   589→            console.print("[green]Message sent via Quick Contact![/green]")
+   590→            return True
+   591→        elif qc_result is False:
+   592→            console.print("[red]Quick Contact page detected but send failed[/red]")
+   593→            await browser.screenshot(f"message_error_qc_{maimai_id}")
+   594→            _log_message(db_manager, maimai_id, template_name, content, 'failed')
+   595→            return False
+   596→        # qc_result is None → not a quick contact page, continue normal flow
+   597→
+   598→        # If interactive discovery succeeded, apply discovered selectors
+   599→        if discovered_selectors and discovered_selectors.is_populated:
+   600→            from src.modules.selector_discovery import apply_discovered_selectors
+   601→            success = await apply_discovered_selectors(
+   602→                page, maimai_id, discovered_selectors, content
+   603→            )
+   604→            if success:
+   605→                rate_limiter.log_action('send_message', {
+   606→                    'maimai_id': maimai_id,
+   607→                    'template': template_name
+   608→                })
+   609→                _log_message(db_manager, maimai_id, template_name, content, 'sent')
+   610→                console.print("[green]Message sent successfully![/green]")
+   611→                return True
+   612→
+   613→        # Check for existing conversation to avoid duplicate greetings
+   614→        has_existing = await _check_existing_conversation(page, maimai_id)
+   615→        if has_existing:
+   616→            console.print(f"[yellow]Existing conversation detected with {maimai_id}. Skipping to avoid duplicate.[/yellow]")
+   617→            _log_message(db_manager, maimai_id, template_name, content, 'cancelled')
+   618→            return False
+   619→
+   620→        # Find message input and type message
+   621→        input_found = await _type_message(page, config, content)
+   622→        if not input_found:
+   623→            console.print("[red]Could not find message input[/red]")
+   624→            await browser.screenshot(f"message_error_{maimai_id}")
+   625→            _log_message(db_manager, maimai_id, template_name, content, 'failed')
+   626→            return False
+   627→
+   628→        await async_random_delay('action')
+   629→
+   630→        # Click send button
+   631→        sent = await _click_send_button(page, config)
+   632→        if not sent:
+   633→            console.print("[red]Could not send message[/red]")
+   634→            await browser.screenshot(f"message_error_{maimai_id}")
+   635→            _log_message(db_manager, maimai_id, template_name, content, 'failed')
+   636→            return False
+   637→
+   638→        # Check if clicking send triggered a VIP paywall popup
+   639→        await asyncio.sleep(1)
+   640→        if await _detect_vip_paywall(page):
+   641→            console.print(f"[yellow]VIP paywall popup appeared after send for {maimai_id}, skipping[/yellow]")
+   642→            _log_message(db_manager, maimai_id, template_name, content, 'cancelled')
+   643→            raise PermanentFailureError(f"VIP paywall detected for {maimai_id}")
+   644→
+   645→        # Verify message was actually sent
+   646→        verified = await _verify_message_sent(page, content)
+   647→        if not verified:
+   648→            logger.warning(f"Message to {maimai_id}: send button clicked but could not verify delivery")
+   649→            console.print("[yellow]Warning: Message send could not be verified. Marking as unverified.[/yellow]")
+   650→            await browser.screenshot(f"message_unverified_{maimai_id}")
+   651→            # Still log as sent but with unverified note in details
+   652→            rate_limiter.log_action('send_message', {
+   653→                'maimai_id': maimai_id,
+   654→                'template': template_name,
+   655→                'verified': False,
+   656→            })
+   657→            _log_message(db_manager, maimai_id, template_name, content, 'sent')
+   658→            console.print("[yellow]Message marked as sent (unverified)[/yellow]")
+   659→            return True
+   660→
+   661→        # Log action
+   662→        rate_limiter.log_action('send_message', {
+   663→            'maimai_id': maimai_id,
+   664→            'template': template_name,
+   665→            'verified': True,
+   666→        })
+   667→
+   668→        # Log message to database
+   669→        _log_message(db_manager, maimai_id, template_name, content, 'sent')
+   670→
+   671→        console.print("[green]Message sent and verified![/green]")
+   672→        return True
+   673→
+   674→    except PermanentFailureError:
+   675→        raise
+   676→    except Exception as e:
+   677→        logger.error(f"Error sending message: {e}")
+   678→        await browser.screenshot(f"message_error_{maimai_id}")
+   679→        _log_message(db_manager, maimai_id, template_name, content, 'failed')
+   680→        raise
+   681→
+   682→
+   683→async def send_message_batch(
+   684→    candidates: List[dict],
+   685→    template_name: str,
+   686→    common_variables: Dict[str, str],
+   687→    browser: BrowserManager,
+   688→    skip_messaged: bool = True,
+   689→    interactive: bool = False,
+   690→    skip_confirmation: bool = False,
+   691→) -> Dict[str, Any]:
+   692→    """
+   693→    Batch send messages to a list of candidates.
+   694→
+   695→    Flow:
+   696→    1. Filter already-messaged candidates
+   697→    2. Auto-fill name/company/position variables per candidate
+   698→    3. Render message template
+   699→    4. Show candidate list + first message preview
+   700→    5. Single confirmation
+   701→    6. Send one by one, checking rate limit each time
+   702→    7. Skip failures and record
+   703→    8. Return result stats
+   704→
+   705→    Args:
+   706→        candidates: List of dicts with maimai_id, name, company, title
+   707→        template_name: Name of message template
+   708→        common_variables: Shared variables (recruiter_name, target_position, etc.)
+   709→        browser: Browser manager instance
+   710→        skip_messaged: Skip candidates already messaged (default True)
+   711→        interactive: Enable interactive selector discovery on first failure
+   712→
+   713→    Returns:
+   714→        Dict with total, sent, failed, skipped, rate_limited, details
+   715→    """
+   716→    config = get_config()
+   717→    rate_limiter = get_rate_limiter()
+   718→    db_manager = get_db_manager()
+   719→
+   720→    # Get template
+   721→    try:
+   722→        template = config.get_template(template_name)
+   723→    except Exception:
+   724→        raise ValidationError(f"Template not found: {template_name}")
+   725→
+   726→    # Create shared discovered selectors for interactive mode
+   727→    if interactive:
+   728→        from src.modules.selector_discovery import DiscoveredSelectors
+   729→        discovered_selectors = DiscoveredSelectors()
+   730→    else:
+   731→        discovered_selectors = None
+   732→
+   733→    results = {
+   734→        'total': len(candidates),
+   735→        'sent': 0,
+   736→        'failed': 0,
+   737→        'skipped': 0,
+   738→        'rate_limited': 0,
+   739→        'details': [],
+   740→    }
+   741→
+   742→    # Filter already-messaged candidates
+   743→    send_list = []
+   744→    if skip_messaged:
+   745→        # Batch pre-fetch all sent message IDs to avoid N+1 queries
+   746→        all_ids = [c['maimai_id'] for c in candidates]
+   747→        messaged_ids = set()
+   748→        with db_manager.session_scope() as session:
+   749→            rows = session.query(Message.candidate_maimai_id).filter(
+   750→                Message.candidate_maimai_id.in_(all_ids),
+   751→                Message.status == 'sent'
+   752→            ).distinct().all()
+   753→            messaged_ids = {row[0] for row in rows}
+   754→
+   755→        for c in candidates:
+   756→            if c['maimai_id'] in messaged_ids:
+   757→                results['skipped'] += 1
+   758→                results['details'].append({
+   759→                    'maimai_id': c['maimai_id'],
+   760→                    'name': c['name'],
+   761→                    'status': 'skipped',
+   762→                    'reason': 'already messaged',
+   763→                })
+   764→            else:
+   765→                send_list.append(c)
+   766→    else:
+   767→        send_list = list(candidates)
+   768→
+   769→    if not send_list:
+   770→        console.print("[yellow]No candidates to send messages to.[/yellow]")
+   771→        return results
+   772→
+   773→    # Pre-validate all candidates can render template (防止发送到一半才发现变量缺失)
+   774→    console.print("[dim]Validating template for all candidates...[/dim]")
+   775→    for c in send_list:
+   776→        test_vars = {
+   777→            **common_variables,
+   778→            'name': c.get('name', ''),
+   779→            'company': c.get('company', ''),
+   780→            'position': c.get('title', ''),
+   781→        }
+   782→        is_valid, missing = validate_template_rendering(template['content'], test_vars, c)
+   783→        if not is_valid:
+   784→            raise ValidationError(
+   785→                f"候选人 {c.get('name', 'Unknown')} 的模板变量缺失或为空:\n"
+   786→                f"  缺失: {', '.join(missing)}\n"
+   787→                f"  候选人信息: {c}\n"
+   788→                f"  请检查模板或补充变量"
+   789→            )
+   790→
+   791→    # Build preview for first candidate
+   792→    first = send_list[0]
+   793→    first_vars = {**common_variables, 'name': first['name'], 'company': first['company'], 'position': first['title']}
+   794→    first_content = render_template(template['content'], first_vars, validate=False)  # Already validated above
+   795→
+   796→    # Display summary panel
+   797→    summary_text = Text()
+   798→    summary_text.append("Template: ", style="bold")
+   799→    summary_text.append(f"{template_name}\n")
+   800→    summary_text.append("Candidates: ", style="bold")
+   801→    summary_text.append(f"{len(candidates)} found, {results['skipped']} already messaged\n")
+   802→    summary_text.append("Will send to: ", style="bold")
+   803→    summary_text.append(f"{len(send_list)} candidates\n\n")
+   804→    summary_text.append("Message Preview ", style="bold cyan")
+   805→    summary_text.append(f"(first candidate):\n", style="dim")
+   806→    summary_text.append("To: ", style="bold cyan")
+   807→    recipient = first['name']
+   808→    if first.get('title') and first.get('company'):
+   809→        recipient += f" ({first['title']} @ {first['company']})"
+   810→    summary_text.append(f"{recipient}\n\n")
+   811→    summary_text.append(first_content)
+   812→
+   813→    console.print(Panel(
+   814→        summary_text,
+   815→        title="Pipeline Summary",
+   816→        border_style="green",
+   817→        padding=(1, 2)
+   818→    ))
+   819→
+   820→    # Single confirmation (skip if --yes flag or non-interactive environment)
+   821→    if skip_confirmation:
+   822→        console.print(f"[green]Auto-confirmed: sending to {len(send_list)} candidates[/green]")
+   823→    else:
+   824→        loop = asyncio.get_running_loop()
+   825→        confirm = await loop.run_in_executor(
+   826→            None,
+   827→            lambda: questionary.confirm(
+   828→                f"Confirm batch send to {len(send_list)} candidates?"
+   829→            ).unsafe_ask()
+   830→        )
+   831→
+   832→        if not confirm:
+   833→            console.print("[yellow]Batch send cancelled.[/yellow]")
+   834→            return results
+   835→
+   836→    # Send messages one by one
+   837→    from rich.progress import Progress, BarColumn, TextColumn as ProgressTextColumn, MofNCompleteColumn
+   838→
+   839→    with Progress(
+   840→        ProgressTextColumn("[progress.description]{task.description}"),
+   841→        BarColumn(),
+   842→        MofNCompleteColumn(),
+   843→        console=console
+   844→    ) as progress:
+   845→        task = progress.add_task("Sending messages...", total=len(send_list))
+   846→
+   847→        max_retries = 2
+   848→        rate_limit_hit = False
+   849→
+   850→        for c in send_list:
+   851→            if rate_limit_hit:
+   852→                break
+   853→
+   854→            # Check rate limit (waits through min-interval)
+   855→            try:
+   856→                await async_check_rate_limit('send_message')
+   857→            except RateLimitExceededError as e:
+   858→                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+   859→                remaining = len(send_list) - (results['sent'] + results['failed'])
+   860→                results['rate_limited'] = remaining
+   861→                results['details'].append({
+   862→                    'maimai_id': c['maimai_id'],
+   863→                    'name': c['name'],
+   864→                    'status': 'rate_limited',
+   865→                    'reason': str(e),
+   866→                })
+   867→                break
+   868→
+   869→            # Build per-candidate variables
+   870→            variables = {
+   871→                **common_variables,
+   872→                'name': c['name'],
+   873→                'company': c['company'],
+   874→                'position': c['title'],
+   875→            }
+   876→            try:
+   877→                content = render_template(template['content'], variables, validate=False)  # Already validated in batch
+   878→            except ValidationError as e:
+   879→                # Should not happen if pre-validation passed, but handle gracefully
+   880→                logger.error(f"Template rendering failed for {c['name']}: {e}")
+   881→                results['failed'] += 1
+   882→                results['details'].append({
+   883→                    'maimai_id': c['maimai_id'],
+   884→                    'name': c['name'],
+   885→                    'status': 'failed',
+   886→                    'reason': f"模板渲染失败: {e}",
+   887→                })
+   888→                continue
+   889→
+   890→            # Retry loop for transient failures
+   891→            sent = False
+   892→            last_error = None
+   893→            per_candidate_timeout = 90  # seconds per candidate
+   894→            for attempt in range(1 + max_retries):
+   895→                try:
+   896→                    success = await asyncio.wait_for(
+   897→                        send_message(
+   898→                            maimai_id=c['maimai_id'],
+   899→                            template_name=template_name,
+   900→                            variables=variables,
+   901→                            browser=browser,
+   902→                            skip_confirmation=True,
+   903→                            interactive=interactive,
+   904→                            discovered_selectors=discovered_selectors,
+   905→                            _skip_rate_check=True,
+   906→                            profile_url=c.get('profile_url'),
+   907→                        ),
+   908→                        timeout=per_candidate_timeout,
+   909→                    )
+   910→
+   911→                    if success:
+   912→                        results['sent'] += 1
+   913→                        results['details'].append({
+   914→                            'maimai_id': c['maimai_id'],
+   915→                            'name': c['name'],
+   916→                            'status': 'sent',
+   917→                            'attempts': attempt + 1,
+   918→                        })
+   919→                        sent = True
+   920→                        break
+   921→                    else:
+   922→                        last_error = "send returned False"
+   923→
+   924→                except asyncio.TimeoutError:
+   925→                    last_error = f"Timed out after {per_candidate_timeout}s"
+   926→                    console.print(f"[yellow]Timeout for {c['name']} ({c['maimai_id']}), skipping.[/yellow]")
+   927→                    break
+   928→                except QuotaExhaustedError as e:
+   929→                    # Quota is a global resource — abort the entire batch
+   930→                    remaining = len(send_list) - (results['sent'] + results['failed'])
+   931→                    results['failed'] += 1
+   932→                    results['details'].append({
+   933→                        'maimai_id': c['maimai_id'],
+   934→                        'name': c['name'],
+   935→                        'status': 'quota_exhausted',
+   936→                        'reason': str(e),
+   937→                    })
+   938→                    console.print(f"\n[red]联系券已用尽，终止批量发送 (剩余 {remaining - 1} 人未发送)[/red]")
+   939→                    rate_limit_hit = True  # reuse flag to skip remaining candidates
+   940→                    break
+   941→                except PermanentFailureError as e:
+   942→                    last_error = str(e)
+   943→                    console.print(f"[yellow]{e}. Skipping.[/yellow]")
+   944→                    break
+   945→                except RateLimitExceededError as e:
+   946→                    remaining = len(send_list) - (results['sent'] + results['failed'])
+   947→                    results['rate_limited'] = remaining
+   948→                    results['details'].append({
+   949→                        'maimai_id': c['maimai_id'],
+   950→                        'name': c['name'],
+   951→                        'status': 'rate_limited',
+   952→                        'reason': str(e),
+   953→                    })
+   954→                    console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+   955→                    rate_limit_hit = True
+   956→                    break
+   957→                except Exception as e:
+   958→                    last_error = str(e)
+   959→
+   960→                # Retry with exponential backoff if not last attempt
+   961→                if attempt < max_retries and not rate_limit_hit:
+   962→                    from src.utils.delays import get_retry_delay
+   963→                    delay = get_retry_delay(attempt, base_delay=3.0, max_delay=30.0)
+   964→                    logger.info(f"Retry {attempt + 1}/{max_retries} for {c['name']} in {delay:.1f}s")
+   965→                    await asyncio.sleep(delay)
+   966→
+   967→            if not sent and not rate_limit_hit:
+   968→                actual_attempts = attempt + 1
+   969→                results['failed'] += 1
+   970→                results['details'].append({
+   971→                    'maimai_id': c['maimai_id'],
+   972→                    'name': c['name'],
+   973→                    'status': 'failed',
+   974→                    'reason': last_error,
+   975→                    'attempts': actual_attempts,
+   976→                })
+   977→                logger.error(f"Failed to send message to {c['name']} after {actual_attempts} attempt(s): {last_error}")
+   978→
+   979→            progress.advance(task)
+   980→
+   981→            # Emit progress for web service
+   982→            emit_progress("send_progress",
+   983→                          sent=results['sent'], failed=results['failed'],
+   984→                          total=len(send_list), current=c['name'])
+   985→
+   986→            # Human-like delay between messages
+   987→            await async_random_delay('message')
+   988→
+   989→    return results
+   990→
+   991→
+   992→def render_template(template_content: str, variables: Dict[str, str], validate: bool = True) -> str:
+   993→    """
+   994→    Render template with variables.
+   995→
+   996→    Maimai chat is plain text, so values are substituted as-is without
+   997→    HTML escaping (which would produce visible &amp; entities in chat).
+   998→
+   999→    Args:
+  1000→        template_content: Template string with {variable} placeholders
+  1001→        variables: Variable values to substitute
+  1002→        validate: Whether to validate template before rendering (default True)
+  1003→
+  1004→    Returns:
+  1005→        Rendered message content
+  1006→
+  1007→    Raises:
+  1008→        ValidationError: If template validation fails and validate=True
+  1009→    """
+  1010→    if validate:
+  1011→        # Validate template can be fully rendered
+  1012→        is_valid, missing = validate_template_rendering(template_content, variables, {})
+  1013→        if not is_valid:
+  1014→            raise ValidationError(
+  1015→                f"模板变量缺失或为空: {', '.join(missing)}\n"
+  1016→                f"请检查模板或提供完整变量"
+  1017→            )
+  1018→
+  1019→    content = template_content
+  1020→    for key, value in variables.items():
+  1021→        content = content.replace(f"{{{key}}}", str(value))
+  1022→    return content
+  1023→
+  1024→
+  1025→def preview_message(
+  1026→    template_name: str,
+  1027→    variables: Dict[str, str],
+  1028→    candidate_info: Optional[Dict] = None
+  1029→) -> str:
+  1030→    """
+  1031→    Preview a message without sending.
+  1032→
+  1033→    Args:
+  1034→        template_name: Name of template
+  1035→        variables: Variables for template
+  1036→        candidate_info: Optional candidate info for context
+  1037→
+  1038→    Returns:
+  1039→        Rendered message content
+  1040→    """
+  1041→    config = get_config()
+  1042→    template = config.get_template(template_name)
+  1043→    content = render_template(template['content'], variables)
+  1044→
+  1045→    # Display preview
+  1046→    display_message_preview(content, candidate_info, template_name)
+  1047→
+  1048→    return content
+  1049→
+  1050→
+  1051→def display_message_preview(
+  1052→    content: str,
+  1053→    candidate_info: Optional[Dict] = None,
+  1054→    template_name: Optional[str] = None
+  1055→) -> None:
+  1056→    """
+  1057→    Display formatted message preview in terminal.
+  1058→
+  1059→    Args:
+  1060→        content: Message content
+  1061→        candidate_info: Optional candidate info
+  1062→        template_name: Optional template name
+  1063→    """
+  1064→    # Build recipient line
+  1065→    if candidate_info:
+  1066→        recipient = f"{candidate_info.get('name', 'Unknown')}"
+  1067→        if candidate_info.get('title') and candidate_info.get('company'):
+  1068→            recipient += f" ({candidate_info['title']} @ {candidate_info['company']})"
+  1069→    else:
+  1070→        recipient = "Unknown recipient"
+  1071→
+  1072→    # Create panel
+  1073→    title = "Message Preview"
+  1074→    if template_name:
+  1075→        title += f" [{template_name}]"
+  1076→
+  1077→    panel_content = Text()
+  1078→    panel_content.append("To: ", style="bold cyan")
+  1079→    panel_content.append(recipient + "\n\n")
+  1080→    panel_content.append(content)
+  1081→
+  1082→    console.print(Panel(
+  1083→        panel_content,
+  1084→        title=title,
+  1085→        border_style="cyan",
+  1086→        padding=(1, 2)
+  1087→    ))
+  1088→
+  1089→
+  1090→async def interactive_confirm(
+  1091→    content: str,
+  1092→    candidate_info: Optional[Dict] = None,
+  1093→    template_name: Optional[str] = None
+  1094→) -> str:
+  1095→    """
+  1096→    Show interactive confirmation dialog.
+  1097→
+  1098→    Args:
+  1099→        content: Message content to confirm
+  1100→        candidate_info: Optional candidate info
+  1101→        template_name: Optional template name
+  1102→
+  1103→    Returns:
+  1104→        Action string: 'send', 'edit', or 'skip'
+  1105→    """
+  1106→    # Display preview
+  1107→    display_message_preview(content, candidate_info, template_name)
+  1108→
+  1109→    console.print()
+  1110→
+  1111→    # Interactive prompt
+  1112→    choices = [
+  1113→        questionary.Choice("Send message", value="send"),
+  1114→        questionary.Choice("Edit content", value="edit"),
+  1115→        questionary.Choice("Skip (don't send)", value="skip"),
+  1116→    ]
+  1117→
+  1118→    loop = asyncio.get_running_loop()
+  1119→    action = await loop.run_in_executor(
+  1120→        None,
+  1121→        lambda: questionary.select(
+  1122→            "What would you like to do?",
+  1123→            choices=choices,
+  1124→            style=questionary.Style([
+  1125→                ('selected', 'fg:green bold'),
+  1126→                ('pointer', 'fg:green bold'),
+  1127→                ('highlighted', 'fg:green'),
+  1128→            ])
+  1129→        ).unsafe_ask()
+  1130→    )
+  1131→
+  1132→    return action or 'skip'
+  1133→
+  1134→
+  1135→async def edit_message(content: str) -> Optional[str]:
+  1136→    """
+  1137→    Allow user to edit message content.
+  1138→
+  1139→    Args:
+  1140→        content: Original content
+  1141→
+  1142→    Returns:
+  1143→        Edited content or None if cancelled
+  1144→    """
+  1145→    console.print("\n[dim]Enter new message content (Ctrl+D to finish, Ctrl+C to cancel):[/dim]")
+  1146→
+  1147→    try:
+  1148→        loop = asyncio.get_running_loop()
+  1149→        edited = await loop.run_in_executor(
+  1150→            None,
+  1151→            lambda: questionary.text(
+  1152→                "Message:",
+  1153→                default=content,
+  1154→                multiline=True
+  1155→            ).unsafe_ask()
+  1156→        )
+  1157→
+  1158→        return edited
+  1159→    except KeyboardInterrupt:
+  1160→        return None
+  1161→
+  1162→
+  1163→async def _find_element_by_selectors(page: Page, selectors: List[str], timeout: int = 3000):
+  1164→    """Try multiple selectors and return the first matching element.
+  1165→
+  1166→    Args:
+  1167→        page: Playwright page instance
+  1168→        selectors: List of CSS selectors to try in order
+  1169→        timeout: Timeout per selector in ms
+  1170→
+  1171→    Returns:
+  1172→        Tuple of (element, selector) or (None, None) if not found
+  1173→    """
+  1174→    for selector in selectors:
+  1175→        try:
+  1176→            elem = await page.wait_for_selector(selector, timeout=timeout)
+  1177→            if elem:
+  1178→                return elem, selector
+  1179→        except Exception:
+  1180→            continue
+  1181→    return None, None
+  1182→
+  1183→
+  1184→async def _click_chat_button(page: Page, config) -> bool:
+  1185→    """Find and click chat/message button, then wait for navigation to chat page."""
+  1186→    selectors = [
+  1187→        config.get_selector('message.chat_button'),
+  1188→        'button[class*="chat"]',
+  1189→        '[class*="message-btn"]',
+  1190→        'button:has-text("极速联系")',
+  1191→        'button:has-text("立即沟通")',
+  1192→        'button:has-text("发消息")',
+  1193→        'button:has-text("私信")',
+  1194→        'button:has-text("聊天")',
+  1195→    ]
+  1196→
+  1197→    url_before = page.url
+  1198→
+  1199→    for selector in selectors:
+  1200→        try:
+  1201→            button = await page.wait_for_selector(selector, timeout=3000)
+  1202→            if button:
+  1203→                await human_click(page, selector)
+  1204→                logger.debug(f"Clicked chat button: {selector}")
+  1205→
+  1206→                # Wait for navigation or page change after clicking
+  1207→                try:
+  1208→                    # Wait for URL change (chat page transition) or new content load
+  1209→                    await page.wait_for_url(
+  1210→                        lambda url: url != url_before,
+  1211→                        timeout=8000,
+  1212→                    )
+  1213→                    logger.debug(f"Page navigated to: {page.url}")
+  1214→                except Exception:
+  1215→                    # URL may not change if chat opens as overlay/modal
+  1216→                    logger.debug("URL did not change after chat button click, checking for chat panel")
+  1217→
+  1218→                # Wait for chat-related elements to appear (input or conversation area)
+  1219→                chat_ready_selectors = [
+  1220→                    'textarea', '[contenteditable="true"]',
+  1221→                    '[class*="chat-container"]', '[class*="chat-content"]',
+  1222→                    '[class*="message-list"]', '[class*="im-message"]',
+  1223→                ]
+  1224→                for chat_sel in chat_ready_selectors:
+  1225→                    try:
+  1226→                        await page.wait_for_selector(chat_sel, timeout=5000)
+  1227→                        logger.debug(f"Chat page ready, found: {chat_sel}")
+  1228→                        return True
+  1229→                    except Exception:
+  1230→                        continue
+  1231→
+  1232→                # If we got here, button was clicked but no chat UI detected
+  1233→                # Still return True since the button was found and clicked
+  1234→                logger.warning("Chat button clicked but chat UI not detected")
+  1235→                return True
+  1236→        except Exception:
+  1237→            continue
+  1238→
+  1239→    logger.warning("Chat button not found")
+  1240→    return False
+  1241→
+  1242→
+  1243→async def _type_message(page: Page, config, content: str) -> bool:
+  1244→    """Find message input and type content.
+  1245→
+  1246→    Uses progressively broader selectors. Broad selectors (bare textarea,
+  1247→    contenteditable) are only tried when the current URL looks like a chat page
+  1248→    to avoid typing into unrelated inputs (e.g. search bars on profile pages).
+  1249→    """
+  1250→    # Chat-specific selectors (always safe to try)
+  1251→    chat_selectors = [
+  1252→        config.get_selector('message.message_input'),
+  1253→        'textarea[class*="chat"]',
+  1254→        'textarea[class*="message"]',
+  1255→        'textarea[class*="im-"]',
+  1256→        '[class*="chat"] [contenteditable="true"]',
+  1257→        '[class*="im-"] [contenteditable="true"]',
+  1258→        '[class*="message"] [contenteditable="true"]',
+  1259→    ]
+  1260→
+  1261→    for selector in chat_selectors:
+  1262→        try:
+  1263→            input_elem = await page.wait_for_selector(selector, timeout=3000)
+  1264→            if input_elem:
+  1265→                await human_type(page, selector, content)
+  1266→                logger.debug(f"Typed message in: {selector}")
+  1267→                return True
+  1268→        except Exception as e:
+  1269→            logger.debug(f"Chat selector '{selector}' failed: {e}")
+  1270→            continue
+  1271→
+  1272→    # Broad selectors — only try if URL suggests we're on a chat page
+  1273→    current_url = page.url
+  1274→    is_chat_page = any(kw in current_url for kw in ('chat', 'im/', 'uh_chat', 'message'))
+  1275→
+  1276→    if is_chat_page:
+  1277→        broad_selectors = [
+  1278→            '[contenteditable="true"]',
+  1279→            'textarea',
+  1280→        ]
+  1281→        for selector in broad_selectors:
+  1282→            try:
+  1283→                input_elem = await page.wait_for_selector(selector, timeout=3000)
+  1284→                if input_elem:
+  1285→                    await human_type(page, selector, content)
+  1286→                    logger.debug(f"Typed message in (broad, chat URL): {selector}")
+  1287→                    return True
+  1288→            except Exception as e:
+  1289→                logger.debug(f"Broad selector '{selector}' failed: {e}")
+  1290→                continue
+  1291→
+  1292→    logger.warning(f"Message input not found (is_chat_page={is_chat_page}, url={current_url})")
+  1293→    return False
+  1294→
+  1295→
+  1296→async def _click_send_button(page: Page, config) -> bool:
+  1297→    """Find and click send button."""
+  1298→    selectors = [
+  1299→        config.get_selector('message.send_button'),
+  1300→        'button[class*="send"]',
+  1301→        'button:has-text("提交")',
+  1302→        'button:has-text("发送")',
+  1303→        'button:has-text("Send")',
+  1304→        '[class*="send-btn"]',
+  1305→    ]
+  1306→
+  1307→    button, selector = await _find_element_by_selectors(page, selectors)
+  1308→    if button:
+  1309→        await human_click(page, selector)
+  1310→        logger.debug(f"Clicked send button: {selector}")
+  1311→        await async_random_delay('action')
+  1312→        return True
+  1313→
+  1314→    logger.warning("Send button not found")
+  1315→    return False
+  1316→
+  1317→
+  1318→async def _verify_message_sent(page: Page, content: str, timeout: int = 5000) -> bool:
+  1319→    """
+  1320→    Verify that a message was actually sent by checking the conversation area.
+  1321→
+  1322→    Polls up to `timeout` ms with short intervals to handle async rendering.
+  1323→
+  1324→    Checks for:
+  1325→    1. The sent message content appearing in the conversation
+  1326→    2. The message input being cleared (indicating successful send)
+  1327→    3. A sent/delivered indicator element
+  1328→
+  1329→    Args:
+  1330→        page: Playwright page instance
+  1331→        content: The message content that was sent
+  1332→        timeout: Max time to wait for verification in ms
+  1333→
+  1334→    Returns:
+  1335→        True if message send was verified
+  1336→    """
+  1337→    import time
+  1338→
+  1339→    # Short snippet for matching (first 20 chars, avoid template artifacts)
+  1340→    snippet = content[:20].strip()
+  1341→
+  1342→    poll_interval_ms = 500
+  1343→    deadline = time.monotonic() + timeout / 1000.0
+  1344→
+  1345→    while True:
+  1346→        try:
+  1347→            # Strategy 1: Check if message content appears in conversation area
+  1348→            verified = await page.evaluate('''(snippet) => {
+  1349→                const chatSelectors = [
+  1350→                    '[class*="message-list"]',
+  1351→                    '[class*="chat-content"]',
+  1352→                    '[class*="conversation"]',
+  1353→                    '[class*="msg-list"]',
+  1354→                    '[class*="im-message"]',
+  1355→                    '[class*="chat-msg"]',
+  1356→                ];
+  1357→
+  1358→                for (const sel of chatSelectors) {
+  1359→                    const container = document.querySelector(sel);
+  1360→                    if (container && container.textContent.includes(snippet)) {
+  1361→                        return true;
+  1362→                    }
+  1363→                }
+  1364→
+  1365→                // Fallback: scan leaf-ish elements in the lower portion of the page
+  1366→                const viewportHeight = window.innerHeight;
+  1367→                const elements = document.querySelectorAll('div, p, span');
+  1368→                for (const el of elements) {
+  1369→                    const rect = el.getBoundingClientRect();
+  1370→                    if (rect.top > viewportHeight * 0.3 && el.textContent.includes(snippet)) {
+  1371→                        if (el.textContent.length < snippet.length + 200) {
+  1372→                            return true;
+  1373→                        }
+  1374→                    }
+  1375→                }
+  1376→
+  1377→                return false;
+  1378→            }''', snippet)
+  1379→
+  1380→            if verified:
+  1381→                logger.debug("Message send verified: content found in conversation")
+  1382→                return True
+  1383→
+  1384→            # Strategy 2: Check if input was cleared (indicates successful send)
+  1385→            input_cleared = await page.evaluate('''() => {
+  1386→                const inputs = document.querySelectorAll(
+  1387→                    'textarea, [contenteditable="true"], input[type="text"]'
+  1388→                );
+  1389→                for (const input of inputs) {
+  1390→                    const rect = input.getBoundingClientRect();
+  1391→                    if (rect.width > 0 && rect.height > 0) {
+  1392→                        const value = input.value || input.textContent || '';
+  1393→                        if (value.trim() === '') {
+  1394→                            return true;
+  1395→                        }
+  1396→                    }
+  1397→                }
+  1398→                return false;
+  1399→            }''')
+  1400→
+  1401→            if input_cleared:
+  1402→                logger.debug("Message send verified: input field was cleared")
+  1403→                return True
+  1404→
+  1405→            # Strategy 3: Check for sent/delivered indicators
+  1406→            sent_indicators = [
+  1407→                '[class*="sent"]',
+  1408→                '[class*="delivered"]',
+  1409→                '[class*="success"]',
+  1410→                '[class*="msg-status"]',
+  1411→            ]
+  1412→            for selector in sent_indicators:
+  1413→                try:
+  1414→                    indicator = await page.query_selector(selector)
+  1415→                    if indicator and await indicator.is_visible():
+  1416→                        logger.debug(f"Message send verified: indicator found ({selector})")
+  1417→                        return True
+  1418→                except Exception:
+  1419→                    continue
+  1420→
+  1421→        except Exception as e:
+  1422→            logger.warning(f"Message verification poll failed: {e}")
+  1423→
+  1424→        # Check if we've exceeded the deadline
+  1425→        if time.monotonic() >= deadline:
+  1426→            break
+  1427→
+  1428→        await asyncio.sleep(poll_interval_ms / 1000.0)
+  1429→
+  1430→    logger.warning("Could not verify message was sent after polling")
+  1431→    return False
+  1432→
+  1433→
+  1434→async def _check_existing_conversation(page: Page, maimai_id: str) -> bool:
+  1435→    """
+  1436→    Check if there's already an existing conversation with this candidate.
+  1437→
+  1438→    Checks for actual user message bubbles (not system prompts/tips) in the
+  1439→    conversation area.
+  1440→
+  1441→    Args:
+  1442→        page: Playwright page instance
+  1443→        maimai_id: Candidate's Maimai ID
+  1444→
+  1445→    Returns:
+  1446→        True if an existing conversation was detected
+  1447→    """
+  1448→    try:
+  1449→        has_conversation = await page.evaluate('''() => {
+  1450→            // Look for conversation message containers
+  1451→            const chatSelectors = [
+  1452→                '[class*="message-list"]',
+  1453→                '[class*="chat-content"]',
+  1454→                '[class*="conversation"]',
+  1455→                '[class*="msg-list"]',
+  1456→                '[class*="im-message"]',
+  1457→                '[class*="chat-msg"]',
+  1458→                '[class*="chat-record"]',
+  1459→            ];
+  1460→
+  1461→            // System/tip patterns that should NOT count as existing conversation
+  1462→            const systemPatterns = [
+  1463→                '还不是好友', '添加好友', '发送好友申请', '对方未回复',
+  1464→                '以上是打招呼内容', '暂无消息', '开始聊天', '你们已经是好友',
+  1465→                '系统消息', '温馨提示', '安全提示', '注意事项',
+  1466→                '开启招呼语', '求职意向', '目前情况', '竞业点',
+  1467→                '欢迎联系', '不感兴趣',
+  1468→            ];
+  1469→
+  1470→            const isSystemText = (text) => {
+  1471→                const t = text.trim();
+  1472→                if (t.length < 5) return true;  // Too short to be a real message
+  1473→                return systemPatterns.some(p => t.includes(p));
+  1474→            };
+  1475→
+  1476→            for (const sel of chatSelectors) {
+  1477→                const container = document.querySelector(sel);
+  1478→                if (!container) continue;
+  1479→
+  1480→                // Strategy 1: Look for message bubble elements
+  1481→                const bubbleSelectors = [
+  1482→                    '[class*="msg-item"]', '[class*="message-item"]',
+  1483→                    '[class*="bubble"]', '[class*="chat-item"]',
+  1484→                    '[class*="msg-bubble"]', '[class*="chat-bubble"]',
+  1485→                ];
+  1486→                for (const bSel of bubbleSelectors) {
+  1487→                    const bubbles = container.querySelectorAll(bSel);
+  1488→                    // Filter out system/tip bubbles
+  1489→                    let realMessageCount = 0;
+  1490→                    for (const bubble of bubbles) {
+  1491→                        const text = bubble.textContent.trim();
+  1492→                        if (text.length > 5 && !isSystemText(text)) {
+  1493→                            realMessageCount++;
+  1494→                        }
+  1495→                    }
+  1496→                    if (realMessageCount > 0) {
+  1497→                        return true;
+  1498→                    }
+  1499→                }
+  1500→
+  1501→                // Strategy 2: If no bubble selectors matched, check direct children
+  1502→                // that look like message blocks (not system tips)
+  1503→                const children = container.children;
+  1504→                let realChildCount = 0;
+  1505→                for (const child of children) {
+  1506→                    const text = child.textContent.trim();
+  1507→                    // Must have meaningful content and not be a system message
+  1508→                    if (text.length > 10 && !isSystemText(text)) {
+  1509→                        // Check it's not a timestamp-only or status-only element
+  1510→                        if (child.querySelector('img[class*="avatar"]') || text.length > 20) {
+  1511→                            realChildCount++;
+  1512→                        }
+  1513→                    }
+  1514→                }
+  1515→                if (realChildCount > 0) {
+  1516→                    return true;
+  1517→                }
+  1518→            }
+  1519→            return false;
+  1520→        }''')
+  1521→
+  1522→        if has_conversation:
+  1523→            logger.info(f"Existing conversation detected for {maimai_id}")
+  1524→        return has_conversation
+  1525→
+  1526→    except Exception as e:
+  1527→        # On error, assume conversation exists (safe side: avoid duplicate messages)
+  1528→        logger.warning(f"Conversation check failed for {maimai_id}: {e} — assuming existing conversation")
+  1529→        return True
+  1530→
+  1531→
+  1532→def _get_candidate_info(db_manager, maimai_id: str) -> Optional[Dict]:
+  1533→    """Get candidate info from database."""
+  1534→    with db_manager.session_scope() as session:
+  1535→        candidate = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+  1536→        if candidate:
+  1537→            return {
+  1538→                'name': candidate.name,
+  1539→                'title': candidate.title,
+  1540→                'company': candidate.company,
+  1541→            }
+  1542→        return None
+  1543→
+  1544→
+  1545→def _log_message(
+  1546→    db_manager,
+  1547→    maimai_id: str,
+  1548→    template_name: str,
+  1549→    content: str,
+  1550→    status: str
+  1551→) -> None:
+  1552→    """Log message to database. Creates a minimal Candidate if needed for FK."""
+  1553→    try:
+  1554→        with db_manager.session_scope() as session:
+  1555→            # Ensure candidate exists for FK constraint
+  1556→            existing = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+  1557→            if not existing:
+  1558→                session.add(Candidate(maimai_id=maimai_id))
+  1559→                session.flush()
+  1560→
+  1561→            message = Message(
+  1562→                candidate_maimai_id=maimai_id,
+  1563→                template_name=template_name,
+  1564→                content=content,
+  1565→                status=status,
+  1566→                sent_at=datetime.now(timezone.utc) if status == 'sent' else None
+  1567→            )
+  1568→            session.add(message)
+  1569→            logger.debug(f"Logged message to {maimai_id}: {status}")
+  1570→    except Exception as e:
+  1571→        logger.warning(
+  1572→            f"AUDIT FAILURE: Failed to log message to {maimai_id} (status={status}): {e}. "
+  1573→            f"This candidate may be re-messaged on next run."
+  1574→        )
+  1575→        # For sent messages, audit failure is critical — re-raise to prevent
+  1576→        # silent duplicate messaging on the next pipeline run.
+  1577→        if status == 'sent':
+  1578→            raise
+  1579→
+  1580→
+  1581→# ---------------------------------------------------------------------------
+  1582→# Enterprise inline messaging (Path B)
+  1583→# ---------------------------------------------------------------------------
+  1584→
+  1585→async def _close_enterprise_popup(page: Page) -> None:
+  1586→    """Close popup/modal that appears after sending a message in enterprise flow."""
+  1587→    config = get_config()
+  1588→
+  1589→    # Try close popup image first
+  1590→    close_img_sel = config.get_selector("enterprise.close_popup_img")
+  1591→    try:
+  1592→        close_img = await page.wait_for_selector(close_img_sel, timeout=3000)
+  1593→        if close_img:
+  1594→            await close_img.click()
+  1595→            await page.wait_for_timeout(500)
+  1596→    except Exception:
+  1597→        pass  # Popup may not exist; best-effort
+  1598→
+  1599→    # Try close modal button
+  1600→    close_modal_sel = config.get_selector("enterprise.close_modal")
+  1601→    try:
+  1602→        close_btn = await page.wait_for_selector(close_modal_sel, timeout=2000)
+  1603→        if close_btn:
+  1604→            await close_btn.click()
+  1605→            await page.wait_for_timeout(500)
+  1606→    except Exception:
+  1607→        pass  # Modal may not exist; best-effort
+  1608→
+  1609→
+  1610→async def send_message_enterprise_inline(
+  1611→    page: Page,
+  1612→    content: str,
+  1613→    config=None,
+  1614→) -> bool:
+  1615→    """Send a message inline on the enterprise recruitment page.
+  1616→
+  1617→    This operates on the current visible candidate card — clicks "立即沟通",
+  1618→    types the message in the textarea, clicks "发送后留在此页", and closes
+  1619→    the popup.
+  1620→
+  1621→    Args:
+  1622→        page: Playwright page on the enterprise results page
+  1623→        content: Message content to send
+  1624→        config: Config instance (loaded if None)
+  1625→
+  1626→    Returns:
+  1627→        True if message was sent successfully
+  1628→    """
+  1629→    if config is None:
+  1630→        config = get_config()
+  1631→
+  1632→    try:
+  1633→        # Click 立即沟通
+  1634→        chat_sel = config.get_selector("enterprise.chat_now_button")
+  1635→        chat_btn = await page.wait_for_selector(chat_sel, timeout=5000)
+  1636→        if not chat_btn:
+  1637→            logger.warning("Enterprise: 立即沟通 button not found")
+  1638→            return False
+  1639→
+  1640→        await human_click(page, chat_sel)
+  1641→        await async_random_delay("action")
+  1642→
+  1643→        # Wait for message textarea
+  1644→        textarea_sel = config.get_selector("enterprise.message_textarea")
+  1645→        textarea = await page.wait_for_selector(textarea_sel, timeout=5000)
+  1646→        if not textarea:
+  1647→            logger.warning("Enterprise: message textarea not found")
+  1648→            return False
+  1649→
+  1650→        # Clear any default text and type message
+  1651→        await textarea.click()
+  1652→        select_all_key = "Meta+a" if sys.platform == "darwin" else "Control+a"
+  1653→        await page.keyboard.press(select_all_key)
+  1654→        await page.keyboard.press("Backspace")
+  1655→        await human_type(page, textarea_sel, content)
+  1656→        await async_random_delay("action")
+  1657→
+  1658→        # Click 发送后留在此页
+  1659→        send_sel = config.get_selector("enterprise.send_stay_button")
+  1660→        send_btn = await page.wait_for_selector(send_sel, timeout=5000)
+  1661→        if not send_btn:
+  1662→            logger.warning("Enterprise: send button not found")
+  1663→            return False
+  1664→
+  1665→        await human_click(page, send_sel)
+  1666→        await async_random_delay("action")
+  1667→
+  1668→        # Close popup/modal
+  1669→        await _close_enterprise_popup(page)
+  1670→
+  1671→        # Verify message was actually sent
+  1672→        verified = await _verify_message_sent(page, content)
+  1673→        if not verified:
+  1674→            logger.warning("Enterprise: message send could not be verified")
+  1675→            return False
+  1676→
+  1677→        logger.info("Enterprise: message sent and verified inline")
+  1678→        return True
+  1679→
+  1680→    except Exception as e:
+  1681→        logger.error(f"Enterprise inline send failed: {e}")
+  1682→        return False
+  1683→
+  1684→
+  1685→async def send_message_batch_enterprise(
+  1686→    page: Page,
+  1687→    candidates: List[dict],
+  1688→    template_name: str,
+  1689→    common_variables: Dict[str, str],
+  1690→    browser: 'BrowserManager',
+  1691→    skip_messaged: bool = True,
+  1692→    skip_confirmation: bool = False,
+  1693→) -> Dict[str, Any]:
+  1694→    """Batch send messages inline on the enterprise recruitment page.
+  1695→
+  1696→    Iterates visible candidate cards on the enterprise results page,
+  1697→    sending messages inline without navigating to separate chat pages.
+  1698→
+  1699→    Args:
+  1700→        page: Playwright page on the enterprise results page
+  1701→        candidates: List of candidate dicts with maimai_id, name, company, title
+  1702→        template_name: Template name to use
+  1703→        common_variables: Shared template variables
+  1704→        browser: Browser manager instance
+  1705→        skip_messaged: Skip already-messaged candidates
+  1706→
+  1707→    Returns:
+  1708→        Dict with total, sent, failed, skipped, rate_limited counts
+  1709→    """
+  1710→    config = get_config()
+  1711→    rate_limiter = get_rate_limiter()
+  1712→    db_manager = get_db_manager()
+  1713→
+  1714→    try:
+  1715→        template = config.get_template(template_name)
+  1716→    except Exception:
+  1717→        raise ValidationError(f"Template not found: {template_name}")
+  1718→
+  1719→    results = {
+  1720→        "total": len(candidates),
+  1721→        "sent": 0,
+  1722→        "failed": 0,
+  1723→        "skipped": 0,
+  1724→        "rate_limited": 0,
+  1725→        "details": [],
+  1726→    }
+  1727→
+  1728→    # Filter already-messaged
+  1729→    send_list = []
+  1730→    if skip_messaged:
+  1731→        # Batch pre-fetch all sent message IDs to avoid N+1 queries
+  1732→        all_ids = [c["maimai_id"] for c in candidates]
+  1733→        messaged_ids = set()
+  1734→        with db_manager.session_scope() as session:
+  1735→            rows = session.query(Message.candidate_maimai_id).filter(
+  1736→                Message.candidate_maimai_id.in_(all_ids),
+  1737→                Message.status == "sent"
+  1738→            ).distinct().all()
+  1739→            messaged_ids = {row[0] for row in rows}
+  1740→
+  1741→        for c in candidates:
+  1742→            if c["maimai_id"] in messaged_ids:
+  1743→                results["skipped"] += 1
+  1744→                results["details"].append({
+  1745→                    "maimai_id": c["maimai_id"],
+  1746→                    "name": c["name"],
+  1747→                    "status": "skipped",
+  1748→                    "reason": "already messaged",
+  1749→                })
+  1750→            else:
+  1751→                send_list.append(c)
+  1752→    else:
+  1753→        send_list = list(candidates)
+  1754→
+  1755→    if not send_list:
+  1756→        console.print("[yellow]No candidates to send messages to.[/yellow]")
+  1757→        return results
+  1758→
+  1759→    # Build preview
+  1760→    first = send_list[0]
+  1761→    first_vars = {
+  1762→        **common_variables,
+  1763→        "name": first["name"],
+  1764→        "company": first["company"],
+  1765→        "position": first["title"],
+  1766→    }
+  1767→    first_content = render_template(template["content"], first_vars)
+  1768→
+  1769→    # Display summary
+  1770→    summary_text = Text()
+  1771→    summary_text.append("Template: ", style="bold")
+  1772→    summary_text.append(f"{template_name}\n")
+  1773→    summary_text.append("Mode: ", style="bold")
+  1774→    summary_text.append("Enterprise Inline\n")
+  1775→    summary_text.append("Candidates: ", style="bold")
+  1776→    summary_text.append(f"{len(candidates)} found, {results['skipped']} already messaged\n")
+  1777→    summary_text.append("Will send to: ", style="bold")
+  1778→    summary_text.append(f"{len(send_list)} candidates\n\n")
+  1779→    summary_text.append("Message Preview ", style="bold cyan")
+  1780→    summary_text.append(f"(first candidate):\n", style="dim")
+  1781→    summary_text.append("To: ", style="bold cyan")
+  1782→    recipient = first["name"]
+  1783→    if first.get("title") and first.get("company"):
+  1784→        recipient += f" ({first['title']} @ {first['company']})"
+  1785→    summary_text.append(f"{recipient}\n\n")
+  1786→    summary_text.append(first_content)
+  1787→
+  1788→    console.print(Panel(
+  1789→        summary_text,
+  1790→        title="Enterprise Pipeline Summary",
+  1791→        border_style="green",
+  1792→        padding=(1, 2),
+  1793→    ))
+  1794→
+  1795→    # Confirmation
+  1796→    if skip_confirmation:
+  1797→        console.print(f"[green]Auto-confirmed: sending to {len(send_list)} candidates (enterprise)[/green]")
+  1798→    else:
+  1799→        loop = asyncio.get_running_loop()
+  1800→        confirm = await loop.run_in_executor(
+  1801→            None,
+  1802→            lambda: questionary.confirm(
+  1803→                f"Confirm batch send to {len(send_list)} candidates?"
+  1804→            ).unsafe_ask(),
+  1805→        )
+  1806→
+  1807→        if not confirm:
+  1808→            console.print("[yellow]Batch send cancelled.[/yellow]")
+  1809→            return results
+  1810→
+  1811→    # Send messages
+  1812→    from rich.progress import Progress, BarColumn, TextColumn as ProgressTextColumn, MofNCompleteColumn
+  1813→
+  1814→    with Progress(
+  1815→        ProgressTextColumn("[progress.description]{task.description}"),
+  1816→        BarColumn(),
+  1817→        MofNCompleteColumn(),
+  1818→        console=console,
+  1819→    ) as progress:
+  1820→        task = progress.add_task("Sending messages (enterprise)...", total=len(send_list))
+  1821→
+  1822→        for c in send_list:
+  1823→            # Rate limit check
+  1824→            try:
+  1825→                await async_check_rate_limit("send_message")
+  1826→            except RateLimitExceededError as e:
+  1827→                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+  1828→                remaining = len(send_list) - (results["sent"] + results["failed"])
+  1829→                results["rate_limited"] = remaining
+  1830→                results["details"].append({
+  1831→                    "maimai_id": c["maimai_id"],
+  1832→                    "name": c["name"],
+  1833→                    "status": "rate_limited",
+  1834→                    "reason": str(e),
+  1835→                })
+  1836→                break
+  1837→
+  1838→            # Build per-candidate variables
+  1839→            variables = {
+  1840→                **common_variables,
+  1841→                "name": c["name"],
+  1842→                "company": c["company"],
+  1843→                "position": c["title"],
+  1844→            }
+  1845→            content = render_template(template["content"], variables)
+  1846→
+  1847→            # Scroll to find the candidate card (by name match)
+  1848→            try:
+  1849→                card_locator = page.get_by_text(c["name"], exact=False).first
+  1850→                await card_locator.scroll_into_view_if_needed(timeout=5000)
+  1851→                await async_random_delay("action")
+  1852→            except Exception as e:
+  1853→                logger.warning(f"Could not scroll to card for '{c['name']}': {e}")
+  1854→
+  1855→            # Send inline
+  1856→            success = await send_message_enterprise_inline(page, content, config)
+  1857→
+  1858→            if success:
+  1859→                results["sent"] += 1
+  1860→                results["details"].append({
+  1861→                    "maimai_id": c["maimai_id"],
+  1862→                    "name": c["name"],
+  1863→                    "status": "sent",
+  1864→                })
+  1865→                rate_limiter.log_action("send_message", {
+  1866→                    "maimai_id": c["maimai_id"],
+  1867→                    "template": template_name,
+  1868→                    "mode": "enterprise",
+  1869→                })
+  1870→                _log_message(db_manager, c["maimai_id"], template_name, content, "sent")
+  1871→            else:
+  1872→                results["failed"] += 1
+  1873→                logger.warning(
+  1874→                    f"Enterprise inline send failed for {c['name']} ({c['maimai_id']}): "
+  1875→                    f"send_message_enterprise_inline returned False"
+  1876→                )
+  1877→                results["details"].append({
+  1878→                    "maimai_id": c["maimai_id"],
+  1879→                    "name": c["name"],
+  1880→                    "status": "failed",
+  1881→                    "reason": "inline send returned False",
+  1882→                })
+  1883→                _log_message(db_manager, c["maimai_id"], template_name, content, "failed")
+  1884→
+  1885→            progress.advance(task)
+  1886→            await async_random_delay("message")
+  1887→
+  1888→    return results
+  1889→

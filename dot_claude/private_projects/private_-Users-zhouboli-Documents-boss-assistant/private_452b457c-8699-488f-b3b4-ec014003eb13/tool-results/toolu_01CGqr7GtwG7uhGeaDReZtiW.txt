@@ -1,0 +1,56 @@
+     1→     1→"""Custom exceptions for Boss Assistant."""
+     2→     2→
+     3→     3→
+     4→     4→class BossAssistantError(Exception):
+     5→     5→    """Base exception for all Boss Assistant errors."""
+     6→     6→    pass
+     7→     7→
+     8→     8→
+     9→     9→class BrowserError(BossAssistantError):
+    10→    10→    """Raised when browser automation fails."""
+    11→    11→    pass
+    12→    12→
+    13→    13→
+    14→    14→class SessionExpiredError(BossAssistantError):
+    15→    15→    """Raised when Boss直聘 session has expired."""
+    16→    16→    pass
+    17→    17→
+    18→    18→
+    19→    19→class RateLimitExceededError(BossAssistantError):
+    20→    20→    """Raised when rate limit is exceeded."""
+    21→    21→
+    22→    22→    def __init__(self, action_type: str, wait_time: int, message: str = None):
+    23→    23→        self.action_type = action_type
+    24→    24→        self.wait_time = wait_time
+    25→    25→        if message is None:
+    26→    26→            message = f"Rate limit exceeded for {action_type}. Wait {wait_time} seconds."
+    27→    27→        super().__init__(message)
+    28→    28→
+    29→    29→
+    30→    30→class SelectorNotFoundError(BossAssistantError):
+    31→    31→    """Raised when page selector is not found."""
+    32→    32→    pass
+    33→    33→
+    34→    34→
+    35→    35→class ExtractionError(BossAssistantError):
+    36→    36→    """Raised when data extraction fails."""
+    37→    37→    pass
+    38→    38→
+    39→    39→
+    40→    40→class ConfigurationError(BossAssistantError):
+    41→    41→    """Raised when configuration is invalid."""
+    42→    42→    pass
+    43→    43→
+    44→    44→
+    45→    45→class ValidationError(BossAssistantError):
+    46→    46→    """Raised when input validation fails."""
+    47→    47→    pass
+    48→    48→
+    49→    49→
+    50→    50→class PermanentFailureError(BossAssistantError):
+    51→    51→    """Raised when a send failure is deterministic and should not be retried.
+    52→    52→
+    53→    53→    Examples: no profile URL, quota exhausted, candidate already messaged.
+    54→    54→    """
+    55→    55→    pass
+    56→    56→

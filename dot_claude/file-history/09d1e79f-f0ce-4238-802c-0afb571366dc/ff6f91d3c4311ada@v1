@@ -1,0 +1,95 @@
+"""Shared captcha detection utility.
+
+Detects captcha elements on page and pauses for manual resolution.
+Boss直聘 may use Geetest slider captcha or similar mechanisms.
+
+In Web mode, instead of waiting for stdin input, the function polls
+until the captcha element disappears (user solves it in Chrome) and
+sends an SSE notification via the progress_callback.
+"""
+
+import asyncio
+import sys
+from typing import Callable, Optional
+
+from patchright.async_api import Page
+from loguru import logger
+from rich.console import Console
+
+console = Console()
+
+CAPTCHA_SELECTORS = [
+    '[class*="captcha"]',
+    '[class*="verify"]',
+    '[id*="captcha"]',
+    '[class*="slider"]',
+    '[class*="geetest"]',
+    'iframe[src*="captcha"]',
+    '[class*="verify-wrap"]',
+    '[class*="slide-verify"]',
+]
+
+
+async def _async_input() -> str:
+    """Read a line from stdin without blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, sys.stdin.readline)
+
+
+async def _captcha_still_visible(page: Page) -> bool:
+    """Check if any captcha selector is still visible on the page."""
+    for selector in CAPTCHA_SELECTORS:
+        try:
+            elem = await page.query_selector(selector)
+            if elem and await elem.is_visible():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def check_captcha(
+    page: Page,
+    report_to_rate_limiter: bool = False,
+    progress_callback: Optional[Callable] = None,
+) -> None:
+    """Detect captcha elements on page and pause for manual resolution.
+
+    Args:
+        page: Playwright page instance
+        report_to_rate_limiter: Report captcha to adaptive throttling
+        progress_callback: Optional async callback for Web mode SSE notifications.
+            When provided, polls for captcha disappearance instead of blocking on stdin.
+    """
+    for selector in CAPTCHA_SELECTORS:
+        try:
+            elem = await page.query_selector(selector)
+            if elem and await elem.is_visible():
+                if report_to_rate_limiter:
+                    from src.utils.rate_limiter import get_rate_limiter
+                    rate_limiter = get_rate_limiter()
+                    rate_limiter.report_captcha()
+
+                if progress_callback:
+                    # Web mode: notify via SSE and poll until captcha disappears
+                    await progress_callback("captcha_detected", {})
+                    logger.warning("Captcha detected — waiting for user to solve in Chrome")
+                    max_wait = 300  # 5 minutes
+                    elapsed = 0
+                    while elapsed < max_wait:
+                        await asyncio.sleep(3)
+                        elapsed += 3
+                        if not await _captcha_still_visible(page):
+                            logger.info("Captcha resolved")
+                            await page.wait_for_timeout(2000)
+                            return
+                    logger.error("Captcha timeout after 5 minutes")
+                else:
+                    # CLI mode: block on stdin
+                    console.print("[bold red]Captcha detected! Please solve it in the browser window.[/bold red]")
+                    console.print("[dim]Press Enter here after solving the captcha...[/dim]")
+                    await _async_input()
+                    await page.wait_for_timeout(2000)
+                return
+        except Exception:
+            continue

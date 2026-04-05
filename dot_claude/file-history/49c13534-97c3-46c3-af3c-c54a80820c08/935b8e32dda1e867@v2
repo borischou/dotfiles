@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}搜索 — Boss Assistant{% endblock %}
+{% block header %}搜索候选人{% endblock %}
+
+{% block content %}
+<section>
+    <form hx-post="/search" hx-target="#search-results" hx-indicator="#search-spinner"
+          {% if pipeline_busy %}class="disabled"{% endif %}>
+        <fieldset {% if pipeline_busy %}disabled{% endif %}>
+            <label for="keywords">关键词（多个用逗号分隔）
+                <input type="text" id="keywords" name="keywords" placeholder="前端工程师, React" required>
+            </label>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+                <label for="location">城市
+                    <input type="text" id="location" name="location" placeholder="北京">
+                </label>
+                <label for="pages">滚动轮数
+                    <input type="number" id="pages" name="pages" value="1" min="1" max="20">
+                </label>
+                <label for="experience">经验
+                    <input type="text" id="experience" name="experience" placeholder="3-5年">
+                </label>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <label for="education">学历
+                    <input type="text" id="education" name="education" placeholder="本科">
+                </label>
+                <label for="salary">薪资
+                    <input type="text" id="salary" name="salary" placeholder="20-40K">
+                </label>
+            </div>
+
+            <button type="submit">搜索</button>
+            <span id="search-spinner" class="htmx-indicator">搜索中...</span>
+        </fieldset>
+    </form>
+
+    {% if pipeline_busy %}
+    <p><mark>Pipeline 运行中，搜索功能暂时禁用</mark></p>
+    {% endif %}
+</section>
+
+<section id="search-results">
+    <!-- HTMX will insert search results here -->
+</section>
+{% endblock %}

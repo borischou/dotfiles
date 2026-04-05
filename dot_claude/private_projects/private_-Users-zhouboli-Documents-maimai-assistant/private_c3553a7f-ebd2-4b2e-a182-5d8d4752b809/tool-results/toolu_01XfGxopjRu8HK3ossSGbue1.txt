@@ -1,0 +1,500 @@
+   800→        with db_manager.session_scope() as session:
+   801→            rows = (
+   802→                session.query(Message.candidate_maimai_id)
+   803→                .filter(Message.candidate_maimai_id.in_(all_ids), Message.status == "sent")
+   804→                .distinct()
+   805→                .all()
+   806→            )
+   807→            messaged_ids = {row[0] for row in rows}
+   808→
+   809→        for c in candidates:
+   810→            if c["maimai_id"] in messaged_ids:
+   811→                results["skipped"] += 1
+   812→                results["details"].append(
+   813→                    {
+   814→                        "maimai_id": c["maimai_id"],
+   815→                        "name": c["name"],
+   816→                        "status": "skipped",
+   817→                        "reason": "already messaged",
+   818→                    }
+   819→                )
+   820→            else:
+   821→                send_list.append(c)
+   822→    else:
+   823→        send_list = list(candidates)
+   824→
+   825→    if not send_list:
+   826→        if results["skipped"] > 0:
+   827→            console.print(
+   828→                f"[yellow]All {results['skipped']} candidates already messaged. Skipping send.[/yellow]"
+   829→            )
+   830→        else:
+   831→            console.print("[yellow]No candidates to send messages to.[/yellow]")
+   832→        return results
+   833→
+   834→    # --- Optional pre-validation (Path A) ---
+   835→    if batch_config.pre_validate:
+   836→        console.print("[dim]Validating template for all candidates...[/dim]")
+   837→        for c in send_list:
+   838→            test_vars = {
+   839→                **common_variables,
+   840→                "name": c.get("name", ""),
+   841→                "company": c.get("company", ""),
+   842→                "position": c.get("title", ""),
+   843→            }
+   844→            is_valid, missing = validate_template_rendering(template["content"], test_vars, c)
+   845→            if not is_valid:
+   846→                raise ValidationError(
+   847→                    f"候选人 {c.get('name', 'Unknown')} 的模板变量缺失或为空:\n"
+   848→                    f"  缺失: {', '.join(missing)}\n"
+   849→                    f"  候选人信息: {c}\n"
+   850→                    f"  请检查模板或补充变量"
+   851→                )
+   852→
+   853→    # --- Build preview ---
+   854→    first = send_list[0]
+   855→    first_vars = {
+   856→        **common_variables,
+   857→        "name": first["name"],
+   858→        "company": first["company"],
+   859→        "position": first["title"],
+   860→    }
+   861→    # If pre-validated, skip redundant validation in render
+   862→    first_content = render_template(
+   863→        template["content"], first_vars, validate=not batch_config.pre_validate
+   864→    )
+   865→
+   866→    summary_text = Text()
+   867→    summary_text.append("Template: ", style="bold")
+   868→    summary_text.append(f"{template_name}\n")
+   869→    if batch_config.mode_label:
+   870→        summary_text.append("Mode: ", style="bold")
+   871→        summary_text.append(f"{batch_config.mode_label}\n")
+   872→    summary_text.append("Candidates: ", style="bold")
+   873→    summary_text.append(f"{len(candidates)} found, {results['skipped']} already messaged\n")
+   874→    summary_text.append("Will send to: ", style="bold")
+   875→    summary_text.append(f"{len(send_list)} candidates\n\n")
+   876→    summary_text.append("Message Preview ", style="bold cyan")
+   877→    summary_text.append("(first candidate):\n", style="dim")
+   878→    summary_text.append("To: ", style="bold cyan")
+   879→    recipient = first["name"]
+   880→    if first.get("title") and first.get("company"):
+   881→        recipient += f" ({first['title']} @ {first['company']})"
+   882→    summary_text.append(f"{recipient}\n\n")
+   883→    summary_text.append(first_content)
+   884→
+   885→    console.print(
+   886→        Panel(
+   887→            summary_text,
+   888→            title=batch_config.panel_title,
+   889→            border_style="green",
+   890→            padding=(1, 2),
+   891→        )
+   892→    )
+   893→
+   894→    # --- Confirmation ---
+   895→    if skip_confirmation:
+   896→        console.print(f"[green]Auto-confirmed: sending to {len(send_list)} candidates[/green]")
+   897→    else:
+   898→        loop = asyncio.get_running_loop()
+   899→        confirm = await loop.run_in_executor(
+   900→            None,
+   901→            lambda: questionary.confirm(
+   902→                f"Confirm batch send to {len(send_list)} candidates?"
+   903→            ).unsafe_ask(),
+   904→        )
+   905→        if not confirm:
+   906→            console.print("[yellow]Batch send cancelled.[/yellow]")
+   907→            return results
+   908→
+   909→    # --- Send loop ---
+   910→    from rich.progress import (
+   911→        Progress,
+   912→        BarColumn,
+   913→        TextColumn as ProgressTextColumn,
+   914→        MofNCompleteColumn,
+   915→    )
+   916→
+   917→    with Progress(
+   918→        ProgressTextColumn("[progress.description]{task.description}"),
+   919→        BarColumn(),
+   920→        MofNCompleteColumn(),
+   921→        console=console,
+   922→    ) as progress:
+   923→        task = progress.add_task(batch_config.progress_description, total=len(send_list))
+   924→
+   925→        for c in send_list:
+   926→            # Rate limit check
+   927→            try:
+   928→                await async_check_rate_limit("send_message")
+   929→            except RateLimitExceededError as e:
+   930→                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+   931→                remaining = len(send_list) - (results["sent"] + results["failed"])
+   932→                results["rate_limited"] = remaining
+   933→                results["details"].append(
+   934→                    {
+   935→                        "maimai_id": c["maimai_id"],
+   936→                        "name": c["name"],
+   937→                        "status": "rate_limited",
+   938→                        "reason": str(e),
+   939→                    }
+   940→                )
+   941→                break
+   942→
+   943→            # Build per-candidate variables and render template
+   944→            variables = {
+   945→                **common_variables,
+   946→                "name": c["name"],
+   947→                "company": c["company"],
+   948→                "position": c["title"],
+   949→            }
+   950→            try:
+   951→                content = render_template(
+   952→                    template["content"],
+   953→                    variables,
+   954→                    validate=not batch_config.pre_validate,
+   955→                )
+   956→            except ValidationError as e:
+   957→                logger.error(f"Template rendering failed for {c['name']}: {e}")
+   958→                results["failed"] += 1
+   959→                results["details"].append(
+   960→                    {
+   961→                        "maimai_id": c["maimai_id"],
+   962→                        "name": c["name"],
+   963→                        "status": "failed",
+   964→                        "reason": f"模板渲染失败: {e}",
+   965→                    }
+   966→                )
+   967→                progress.advance(task)
+   968→                continue
+   969→
+   970→            # Delegate to path-specific sender
+   971→            result = await send_one(c, content)
+   972→
+   973→            # Record result
+   974→            if result.status == "sent":
+   975→                results["sent"] += 1
+   976→            elif result.status in ("quota_exhausted", "rate_limited"):
+   977→                if result.status == "rate_limited":
+   978→                    remaining = len(send_list) - (results["sent"] + results["failed"])
+   979→                    results["rate_limited"] = remaining
+   980→                else:
+   981→                    results["failed"] += 1
+   982→            else:
+   983→                results["failed"] += 1
+   984→
+   985→            detail = {
+   986→                "maimai_id": c["maimai_id"],
+   987→                "name": c["name"],
+   988→                "status": result.status,
+   989→            }
+   990→            if result.reason:
+   991→                detail["reason"] = result.reason
+   992→            if result.attempts > 1:
+   993→                detail["attempts"] = result.attempts
+   994→            if result.content:
+   995→                detail["content"] = result.content
+   996→            elif content:
+   997→                detail["content"] = content
+   998→            results["details"].append(detail)
+   999→
+  1000→            if result.abort_batch:
+  1001→                remaining = len(send_list) - (results["sent"] + results["failed"])
+  1002→                if remaining > 0:
+  1003→                    console.print(f"[yellow]跳过剩余 {remaining} 位候选人[/yellow]")
+  1004→                break
+  1005→
+  1006→            progress.advance(task)
+  1007→
+  1008→            await async_random_delay("message")
+  1009→
+  1010→    return results
+  1011→
+  1012→
+  1013→# ---------------------------------------------------------------------------
+  1014→# Path-specific sender callbacks
+  1015→# ---------------------------------------------------------------------------
+  1016→
+  1017→
+  1018→def _make_search_center_sender(
+  1019→    browser: BrowserManager,
+  1020→    template_name: str,
+  1021→    interactive: bool,
+  1022→    discovered_selectors,
+  1023→) -> Callable[[dict, str], Awaitable[CandidateSendResult]]:
+  1024→    """Create a sender callback for search-center (Path A) with retry + timeout."""
+  1025→
+  1026→    max_retries = 2
+  1027→    per_candidate_timeout = 90
+  1028→
+  1029→    async def _send(c: dict, content: str) -> CandidateSendResult:
+  1030→        variables = {
+  1031→            "name": c["name"],
+  1032→            "company": c["company"],
+  1033→            "position": c["title"],
+  1034→        }
+  1035→        last_error = None
+  1036→        for attempt in range(1 + max_retries):
+  1037→            try:
+  1038→                success = await asyncio.wait_for(
+  1039→                    send_message(
+  1040→                        maimai_id=c["maimai_id"],
+  1041→                        template_name=template_name,
+  1042→                        variables=variables,
+  1043→                        browser=browser,
+  1044→                        skip_confirmation=True,
+  1045→                        interactive=interactive,
+  1046→                        discovered_selectors=discovered_selectors,
+  1047→                        _skip_rate_check=True,
+  1048→                        profile_url=c.get("profile_url"),
+  1049→                    ),
+  1050→                    timeout=per_candidate_timeout,
+  1051→                )
+  1052→                if success:
+  1053→                    return CandidateSendResult(
+  1054→                        success=True,
+  1055→                        status="sent",
+  1056→                        attempts=attempt + 1,
+  1057→                        content=content,
+  1058→                    )
+  1059→                last_error = "send returned False"
+  1060→
+  1061→            except asyncio.TimeoutError:
+  1062→                console.print(
+  1063→                    f"[yellow]Timeout for {c['name']} ({c['maimai_id']}), skipping.[/yellow]"
+  1064→                )
+  1065→                return CandidateSendResult(
+  1066→                    success=False,
+  1067→                    status="failed",
+  1068→                    reason=f"Timed out after {per_candidate_timeout}s",
+  1069→                    attempts=attempt + 1,
+  1070→                    content=content,
+  1071→                )
+  1072→            except QuotaExhaustedError as e:
+  1073→                console.print(f"\n[red]联系券已用尽，终止批量发送[/red]")
+  1074→                return CandidateSendResult(
+  1075→                    success=False,
+  1076→                    status="quota_exhausted",
+  1077→                    reason=str(e),
+  1078→                    attempts=attempt + 1,
+  1079→                    content=content,
+  1080→                    abort_batch=True,
+  1081→                )
+  1082→            except PermanentFailureError as e:
+  1083→                console.print(f"[yellow]{e}. Skipping.[/yellow]")
+  1084→                return CandidateSendResult(
+  1085→                    success=False,
+  1086→                    status="failed",
+  1087→                    reason=str(e),
+  1088→                    attempts=attempt + 1,
+  1089→                    content=content,
+  1090→                )
+  1091→            except RateLimitExceededError as e:
+  1092→                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+  1093→                return CandidateSendResult(
+  1094→                    success=False,
+  1095→                    status="rate_limited",
+  1096→                    reason=str(e),
+  1097→                    attempts=attempt + 1,
+  1098→                    content=content,
+  1099→                    abort_batch=True,
+  1100→                )
+  1101→            except Exception as e:
+  1102→                last_error = str(e)
+  1103→
+  1104→            # Retry with exponential backoff
+  1105→            if attempt < max_retries:
+  1106→                from src.utils.delays import get_retry_delay
+  1107→
+  1108→                delay = get_retry_delay(attempt, base_delay=3.0, max_delay=30.0)
+  1109→                logger.info(f"Retry {attempt + 1}/{max_retries} for {c['name']} in {delay:.1f}s")
+  1110→                await asyncio.sleep(delay)
+  1111→
+  1112→        # All retries exhausted
+  1113→        actual_attempts = max_retries + 1
+  1114→        logger.error(
+  1115→            f"Failed to send message to {c['name']} after {actual_attempts} attempt(s): {last_error}"
+  1116→        )
+  1117→        return CandidateSendResult(
+  1118→            success=False,
+  1119→            status="failed",
+  1120→            reason=last_error or "unknown error",
+  1121→            attempts=actual_attempts,
+  1122→            content=content,
+  1123→        )
+  1124→
+  1125→    return _send
+  1126→
+  1127→
+  1128→def _make_enterprise_sender(
+  1129→    page: Page,
+  1130→    config,
+  1131→    rate_limiter,
+  1132→    db_manager,
+  1133→    template_name: str,
+  1134→) -> Callable[[dict, str], Awaitable[CandidateSendResult]]:
+  1135→    """Create a sender callback for enterprise inline (Path B)."""
+  1136→
+  1137→    async def _send(c: dict, content: str) -> CandidateSendResult:
+  1138→        # Scroll to candidate card
+  1139→        try:
+  1140→            card_locator = page.get_by_text(c["name"], exact=False).first
+  1141→            await card_locator.scroll_into_view_if_needed(timeout=5000)
+  1142→            await async_random_delay("action")
+  1143→        except Exception as e:
+  1144→            logger.warning(f"Could not scroll to card for '{c['name']}': {e}")
+  1145→
+  1146→        success = await send_message_enterprise_inline(page, content, config)
+  1147→
+  1148→        if success:
+  1149→            rate_limiter.log_action(
+  1150→                "send_message",
+  1151→                {
+  1152→                    "maimai_id": c["maimai_id"],
+  1153→                    "template": template_name,
+  1154→                    "mode": "enterprise",
+  1155→                },
+  1156→            )
+  1157→            _log_message(db_manager, c["maimai_id"], template_name, content, "sent")
+  1158→            return CandidateSendResult(success=True, status="sent", content=content)
+  1159→        else:
+  1160→            logger.warning(
+  1161→                f"Enterprise inline send failed for {c['name']} ({c['maimai_id']}): "
+  1162→                f"send_message_enterprise_inline returned False"
+  1163→            )
+  1164→            _log_message(db_manager, c["maimai_id"], template_name, content, "failed")
+  1165→            return CandidateSendResult(
+  1166→                success=False,
+  1167→                status="failed",
+  1168→                reason="inline send returned False",
+  1169→                content=content,
+  1170→            )
+  1171→
+  1172→    return _send
+  1173→
+  1174→
+  1175→def _make_talent_bank_sender(
+  1176→    page: Page,
+  1177→    browser: BrowserManager,
+  1178→    config,
+  1179→    rate_limiter,
+  1180→    db_manager,
+  1181→    template_name: str,
+  1182→    exchange_phone: bool,
+  1183→    exchange_wechat: bool,
+  1184→) -> Callable[[dict, str], Awaitable[CandidateSendResult]]:
+  1185→    """Create a sender callback for talent bank inline (Path C)."""
+  1186→
+  1187→    async def _send(c: dict, content: str) -> CandidateSendResult:
+  1188→        # Scroll to candidate card and locate its "立即沟通" button
+  1189→        chat_btn_handle = None
+  1190→        try:
+  1191→            name_locator = page.get_by_text(c["name"], exact=False).first
+  1192→            await name_locator.scroll_into_view_if_needed(timeout=5000)
+  1193→            await async_random_delay("action")
+  1194→
+  1195→            name_el = await name_locator.element_handle(timeout=3000)
+  1196→            if name_el:
+  1197→                chat_btn_handle = await page.evaluate_handle(
+  1198→                    """(nameEl) => {
+  1199→                    let el = nameEl.parentElement;
+  1200→                    while (el && el !== document.body) {
+  1201→                        const btns = el.querySelectorAll('span, button, a, div');
+  1202→                        for (const b of btns) {
+  1203→                            if (b.textContent.trim() === '立即沟通' && b.childElementCount <= 1) {
+  1204→                                return b;
+  1205→                            }
+  1206→                        }
+  1207→                        el = el.parentElement;
+  1208→                    }
+  1209→                    return null;
+  1210→                }""",
+  1211→                    name_el,
+  1212→                )
+  1213→                if chat_btn_handle:
+  1214→                    try:
+  1215→                        tag = await chat_btn_handle.evaluate("el => el ? el.tagName : null")
+  1216→                        if not tag:
+  1217→                            chat_btn_handle = None
+  1218→                    except Exception:
+  1219→                        chat_btn_handle = None
+  1220→        except Exception as e:
+  1221→            logger.warning(f"Could not locate card button for '{c['name']}': {e}")
+  1222→            chat_btn_handle = None
+  1223→
+  1224→        success = await send_message_talent_bank_inline(
+  1225→            page,
+  1226→            content,
+  1227→            browser,
+  1228→            config,
+  1229→            exchange_phone=exchange_phone,
+  1230→            exchange_wechat=exchange_wechat,
+  1231→            chat_btn_handle=chat_btn_handle,
+  1232→        )
+  1233→
+  1234→        if success:
+  1235→            rate_limiter.log_action(
+  1236→                "send_message",
+  1237→                {
+  1238→                    "maimai_id": c["maimai_id"],
+  1239→                    "template": template_name,
+  1240→                    "mode": "talent_bank",
+  1241→                },
+  1242→            )
+  1243→            _log_message(db_manager, c["maimai_id"], template_name, content, "sent")
+  1244→            return CandidateSendResult(success=True, status="sent", content=content)
+  1245→        else:
+  1246→            logger.warning(f"Talent bank inline send failed for {c['name']} ({c['maimai_id']})")
+  1247→            _log_message(db_manager, c["maimai_id"], template_name, content, "failed")
+  1248→            return CandidateSendResult(
+  1249→                success=False,
+  1250→                status="failed",
+  1251→                reason="inline send returned False",
+  1252→                content=content,
+  1253→            )
+  1254→
+  1255→    return _send
+  1256→
+  1257→
+  1258→# ---------------------------------------------------------------------------
+  1259→# Public batch-send functions (thin wrappers over _send_message_batch_common)
+  1260→# ---------------------------------------------------------------------------
+  1261→
+  1262→
+  1263→async def send_message_batch(
+  1264→    candidates: List[dict],
+  1265→    template_name: str,
+  1266→    common_variables: Dict[str, str],
+  1267→    browser: BrowserManager,
+  1268→    skip_messaged: bool = True,
+  1269→    interactive: bool = False,
+  1270→    skip_confirmation: bool = False,
+  1271→) -> Dict[str, Any]:
+  1272→    """Batch send messages via search-center path (Path A).
+  1273→
+  1274→    Signature preserved for backward compatibility.
+  1275→    """
+  1276→    if interactive:
+  1277→        from src.modules.selector_discovery import DiscoveredSelectors
+  1278→
+  1279→        discovered_selectors = DiscoveredSelectors()
+  1280→    else:
+  1281→        discovered_selectors = None
+  1282→
+  1283→    send_one = _make_search_center_sender(browser, template_name, interactive, discovered_selectors)
+  1284→
+  1285→    return await _send_message_batch_common(
+  1286→        candidates=candidates,
+  1287→        template_name=template_name,
+  1288→        common_variables=common_variables,
+  1289→        send_one=send_one,
+  1290→        batch_config=BatchConfig(
+  1291→            mode_label="",
+  1292→            panel_title="Pipeline Summary",
+  1293→            progress_description="Sending messages...",
+  1294→            pre_validate=True,
+  1295→        ),
+  1296→        skip_messaged=skip_messaged,
+  1297→        skip_confirmation=skip_confirmation,
+  1298→    )
+  1299→

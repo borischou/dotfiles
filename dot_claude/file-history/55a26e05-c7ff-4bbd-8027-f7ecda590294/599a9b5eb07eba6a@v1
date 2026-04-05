@@ -1,0 +1,53 @@
+# Lessons Learned
+
+## 2026-03-03: Talent Bank Pipeline 首次全流程调试
+
+### 背景
+使用甘霖模板通过人才银行模式搜索+打招呼+交换手机微信，4个关键词，最终成功发送29人。
+从0到全流程跑通经历了7个bug修复。
+
+### Bug 列表与根因
+
+| # | 问题 | 根因 | 修复 | 防范规则 |
+|---|------|------|------|----------|
+| 1 | Emunium `click_at()`/`type_at()` 抛 TypeError | CDP 模式下 `page.viewport_size` 为 None，Emunium 内部 `viewport_size["width"]` 报错 | `human_click`/`human_type` 加 try/except TypeError fallback 到原生 click/type | **新模块引入前必须在 CDP 模式下测试** |
+| 2 | 人才银行提取数据错乱（年龄当公司、学历当职位） | 脉脉页面 DOM 结构变化，旧选择器 `talent-card` 等不再匹配 | 重写 `_extract_talent_bank_results()` JS，用 class-based 选择器 | **提取逻辑加 sanity check（名字长度、公司非数字等）** |
+| 3 | 搜完所有关键词再发消息，候选人不在页面上 | 人才银行是 SPA，切关键词后上一批候选人 DOM 消失 | 重构为 per-keyword search+send（搜完一个关键词立即发） | **SPA 场景下搜索和操作必须在同一页面上下文** |
+| 4 | `Config` object has no attribute `data` | 直接访问 `config.data.get()` 而非 `config.get()` | 改为 `config.get("timings.im_tab_open_wait_ms", 3000)` | **Config API 只用 `config.get()` 点分路径** |
+| 5 | 消息带入上一个候选人的名字 | `text='立即沟通'` 选择器匹配页面第一个可见按钮，不是当前候选人的 | 从候选人名字元素向上遍历 DOM 找所属卡片，在卡片内定位按钮 | **页面有多个同名按钮时，必须通过父容器限定作用域** |
+| 6 | textarea 内容被平台预填名字叠加 | 平台"立即沟通"弹窗自动预填候选人名字，Playwright `fill()` 在 React 受控组件上可能合并而非替换 | 用 JS native setter 强制清空再设值；模板去掉 `{name}` 变量 | **React 受控组件用 `HTMLTextAreaElement.prototype.value.set` + dispatchEvent** |
+| 7 | 交换手机/微信不生效 | (a) 按钮文本是"交换手机"非"交换电话" (b) Playwright 复合选择器在 iframe 中静默失败 (c) 交换微信有确认弹窗 `a.confirm` 未点击 | (a) 更新选择器文本 (b) 改用 `frame.evaluate()` JS 直接点击 (c) 加确认弹窗处理 | **iframe 内交互一律用 evaluate() + JS click；新功能上线前在真实页面逐步验证** |
+
+### 关键教训
+
+1. **CDP 模式是特殊环境**: viewport_size=None、Emunium 不可靠、需要 fallback 策略
+2. **iframe 是隔离世界**: Playwright 高级选择器（`:has()`, `:text-is()`）在 iframe 中不可靠，用 `frame.evaluate()` 最稳
+3. **脉脉页面按钮文本不可假设**: "交换电话" vs "交换手机" vs "交换手机号" 三个都试过才对——**必须先诊断再修**
+4. **SPA 页面状态转瞬即逝**: 搜索结果切页后 DOM 消失，搜索和操作不能分离
+5. **React 受控组件陷阱**: `fill()` 和 `type()` 可能不完全覆盖预填内容，native setter 更可靠
+6. **诊断脚本比猜测高效**: 每次都是连上 Chrome 用 evaluate() 直接看 DOM 结构才找到真正原因
+
+### 待优化项
+
+1. **提取数据 sanity check**: `_extract_talent_bank_results()` 应在返回前校验 name 不含数字、company 不是年龄等
+2. **公司过滤应在页面端实现**: 当前是客户端过滤（搜到后筛），大部分候选人被丢弃，浪费搜索配额。应调研页面是否支持公司筛选 UI
+3. **失败记录清理**: 125 条 failed 记录是调试产生的脏数据，应提供清理命令
+4. **人才银行翻页检测**: 当前两次提取相同数据就判断无更多结果（page 2 = page 1 的内容），需更精确的翻页判断
+5. **rate limiter 间隔可优化**: 每次发送后固定等 9-10s（rate limit hit），可调小 settings.json 中的 min_interval
+
+---
+
+## 2026-03-03: Review #8 — 新代码审查补漏
+
+### 背景
+c403333 提交后对 8 个文件 +334/-151 行进行代码审查，发现 11 个问题。
+
+### 新增防范规则
+
+| # | 规则 | 来源 |
+|---|------|------|
+| 1 | **新增 CLI 参数必须同步更新 checkpoint save/restore** | checkpoint 丢失 exchange_phone/wechat/min_years |
+| 2 | **Preview 模式必须传递与 pipeline 相同的筛选参数** | preview 不传 min_years 导致预览与实际不一致 |
+| 3 | **第三方库 fallback 用 Exception 而非具体异常** | Emunium 可能抛 TypeError 以外的异常 |
+| 4 | **URL 匹配用路径前缀（`/im`）而非子串（`im`）** | "im" 匹配 "climb"、"priming" 等误判 |
+| 5 | **JS evaluate_handle 返回值可能是 null handle** | 需额外 try/except 包裹 .evaluate() 调用 |

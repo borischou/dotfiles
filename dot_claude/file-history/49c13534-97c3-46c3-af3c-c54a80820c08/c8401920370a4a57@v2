@@ -1,0 +1,140 @@
+/* Boss Assistant custom styles — supplements Simple.css */
+
+/* Toast notifications */
+#toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.toast {
+    padding: 0.75rem 1.25rem;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 0.9rem;
+    animation: toast-in 0.3s ease, toast-out 0.3s ease 3.5s forwards;
+    max-width: 400px;
+}
+
+.toast-success { background: var(--accent, #2563eb); }
+.toast-error { background: #dc2626; }
+.toast-warning { background: #d97706; }
+.toast-info { background: #6b7280; }
+
+@keyframes toast-in {
+    from { opacity: 0; transform: translateX(100%); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toast-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+/* Status indicators */
+.status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+}
+
+.status-dot.online { background: #22c55e; }
+.status-dot.offline { background: #ef4444; }
+.status-dot.warning { background: #f59e0b; }
+
+/* Stat cards on dashboard */
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.stat-card {
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    text-align: center;
+}
+
+.stat-card .stat-value {
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--accent, #2563eb);
+}
+
+.stat-card .stat-label {
+    font-size: 0.85rem;
+    color: var(--text-light, #6b7280);
+}
+
+/* Progress bar */
+.progress-bar {
+    width: 100%;
+    height: 20px;
+    background: var(--bg-secondary, #e5e7eb);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 0.5rem 0;
+}
+
+.progress-bar .progress-fill {
+    height: 100%;
+    background: var(--accent, #2563eb);
+    border-radius: 10px;
+    transition: width 0.3s ease;
+}
+
+/* Pipeline log */
+.pipeline-log {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 1rem;
+    background: var(--bg-secondary, #f3f4f6);
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    line-height: 1.6;
+}
+
+.pipeline-log .log-entry {
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.pipeline-log .log-entry:last-child {
+    border-bottom: none;
+}
+
+/* HTMX loading indicator */
+.htmx-indicator {
+    display: none;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+    display: inline-block;
+}
+
+/* Disabled state for buttons during pipeline */
+button[disabled], input[disabled] {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Tag pills */
+.tag {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    background: var(--accent-bg, #dbeafe);
+    color: var(--accent, #2563eb);
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin: 0.1rem;
+}

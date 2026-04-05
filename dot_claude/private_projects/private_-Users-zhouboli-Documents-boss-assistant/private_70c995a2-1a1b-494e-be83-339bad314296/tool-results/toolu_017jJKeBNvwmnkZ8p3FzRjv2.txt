@@ -1,0 +1,1192 @@
+src/services/pipeline.py:153:    except Exception:
+src/services/pipeline.py:154:        pass
+src/modules/search.py:30:from src.exceptions.errors import ExtractionError, BrowserError
+src/modules/search.py:31:
+src/modules/search.py:32:console = Console()
+src/modules/search.py:33:
+src/modules/search.py:34:
+src/modules/search.py:35:@dataclass
+src/modules/search.py:36:class CandidateBasic:
+src/modules/search.py:37:    """Basic candidate info extracted from search results."""
+src/modules/search.py:38:    boss_id: str
+src/modules/search.py:39:    name: str
+src/modules/search.py:40:    title: str
+src/modules/search.py:41:    company: str
+src/modules/search.py:42:    location: Optional[str] = None
+src/modules/search.py:43:    salary_expect: Optional[str] = None
+src/modules/search.py:44:    work_years: Optional[str] = None
+src/modules/search.py:45:    education_level: Optional[str] = None
+src/modules/search.py:46:    profile_url: Optional[str] = None
+src/modules/search.py:47:
+src/modules/search.py:48:    def __hash__(self):
+src/modules/search.py:49:        return hash(self.boss_id)
+src/modules/search.py:50:
+src/modules/search.py:51:    def __eq__(self, other):
+src/modules/search.py:52:        if isinstance(other, CandidateBasic):
+src/modules/search.py:53:            return self.boss_id == other.boss_id
+src/modules/search.py:54:        return False
+src/modules/search.py:55:
+src/modules/search.py:56:
+src/modules/search.py:57:# Non-R&D roles to filter out
+src/modules/search.py:58:NON_RD_KEYWORDS = {
+src/modules/search.py:59:    "销售", "产品经理", "市场", "运营", "行政", "人事", "财务",
+src/modules/search.py:60:    "法务", "采购", "客服", "前台", "助理", "秘书",
+src/modules/search.py:61:}
+src/modules/search.py:62:
+src/modules/search.py:63:
+src/modules/search.py:64:def _is_non_rd_role(title: str) -> bool:
+src/modules/search.py:65:    """Check if title indicates a non-R&D role."""
+src/modules/search.py:66:    if not title:
+src/modules/search.py:67:        return False
+src/modules/search.py:68:    for keyword in NON_RD_KEYWORDS:
+src/modules/search.py:69:        if keyword in title:
+src/modules/search.py:70:            return True
+src/modules/search.py:71:    return False
+src/modules/search.py:72:
+src/modules/search.py:73:
+src/modules/search.py:74:def _generate_boss_id(name: str, company: str) -> str:
+src/modules/search.py:75:    """Generate a fallback Boss ID from name + company hash.
+src/modules/search.py:76:
+src/modules/search.py:77:    Uses SHA-256 with 20 hex chars to reduce collision probability
+src/modules/search.py:78:    compared to MD5 with 12 chars.
+src/modules/search.py:79:    """
+src/modules/search.py:80:    raw = f"{name}_{company}"
+src/modules/search.py:81:    h = hashlib.sha256(raw.encode()).hexdigest()[:20]
+src/modules/search.py:82:    return f"zp_{h}"
+src/modules/search.py:83:
+src/modules/search.py:84:
+src/modules/search.py:85:# JavaScript extraction function for Boss直聘 search results page
+src/modules/search.py:86:EXTRACT_CANDIDATES_JS = """
+src/modules/search.py:87:() => {
+src/modules/search.py:88:    const candidates = [];
+src/modules/search.py:89:
+src/modules/search.py:90:    // Strategy 1: Look for candidate cards in search results
+src/modules/search.py:91:    // Boss直聘 search result cards typically have geek info containers
+src/modules/search.py:92:    const cards = document.querySelectorAll(
+src/modules/search.py:93:        '[class*="card-inner"], [class*="geek-card"], [class*="candidate-card"], ' +
+src/modules/search.py:94:        '[class*="recommend-card"], [class*="job-card-wrap"], [class*="user-item"]'
+src/modules/search.py:95:    );
+src/modules/search.py:96:
+src/modules/search.py:97:    for (const card of cards) {
+src/modules/search.py:98:        try {
+src/modules/search.py:99:            // Extract name
+src/modules/search.py:100:            const nameEl = card.querySelector(
+src/modules/search.py:101:                '[class*="name"], [class*="geek-name"], h3, [class*="username"]'
+src/modules/search.py:102:            );
+src/modules/search.py:103:            const name = nameEl ? nameEl.innerText.trim() : '';
+src/modules/search.py:104:
+src/modules/search.py:105:            if (!name || name.length > 20) continue;
+src/modules/search.py:106:
+src/modules/search.py:107:            // Extract title/position
+src/modules/search.py:108:            const titleEl = card.querySelector(
+src/modules/search.py:109:                '[class*="title"], [class*="position"], [class*="expect-position"], ' +
+src/modules/search.py:110:                '[class*="job-title"]'
+src/modules/search.py:111:            );
+src/modules/search.py:112:            const title = titleEl ? titleEl.innerText.trim() : '';
+src/modules/search.py:113:
+src/modules/search.py:114:            // Extract company
+src/modules/search.py:115:            const companyEl = card.querySelector(
+src/modules/search.py:116:                '[class*="company"], [class*="comp-name"]'
+src/modules/search.py:117:            );
+src/modules/search.py:118:            const company = companyEl ? companyEl.innerText.trim() : '';
+src/modules/search.py:119:
+src/modules/search.py:120:            // Extract location
+src/modules/search.py:121:            const locationEl = card.querySelector(
+src/modules/search.py:122:                '[class*="area"], [class*="location"], [class*="city"]'
+src/modules/search.py:123:            );
+src/modules/search.py:124:            const location = locationEl ? locationEl.innerText.trim() : '';
+src/modules/search.py:125:
+src/modules/search.py:126:            // Extract salary expectation
+src/modules/search.py:127:            const salaryEl = card.querySelector(
+src/modules/search.py:128:                '[class*="salary"], [class*="expect-salary"]'
+src/modules/search.py:129:            );
+src/modules/search.py:130:            const salary = salaryEl ? salaryEl.innerText.trim() : '';
+src/modules/search.py:131:
+src/modules/search.py:132:            // Extract work years
+src/modules/search.py:133:            const yearsEl = card.querySelector(
+src/modules/search.py:134:                '[class*="work-year"], [class*="experience"]'
+src/modules/search.py:135:            );
+src/modules/search.py:136:            const workYears = yearsEl ? yearsEl.innerText.trim() : '';
+src/modules/search.py:137:
+src/modules/search.py:138:            // Extract education
+src/modules/search.py:139:            const eduEl = card.querySelector(
+src/modules/search.py:140:                '[class*="education"], [class*="degree"], [class*="edu"]'
+src/modules/search.py:141:            );
+src/modules/search.py:142:            const education = eduEl ? eduEl.innerText.trim() : '';
+src/modules/search.py:143:
+src/modules/search.py:144:            // Try to extract profile URL and encrypted geek ID
+src/modules/search.py:145:            let profileUrl = '';
+src/modules/search.py:146:            let bossId = '';
+src/modules/search.py:147:
+src/modules/search.py:148:            // Check for links in the card
+src/modules/search.py:149:            const link = card.querySelector('a[href*="/web/geek/"], a[href*="geek"], a[href*="resume"]');
+src/modules/search.py:150:            if (link) {
+src/modules/search.py:151:                profileUrl = link.href;
+src/modules/search.py:152:                // Try to extract encryptGeekId from URL
+src/modules/search.py:153:                const match = profileUrl.match(/\\/web\\/geek\\/([^?/]+)/);
+src/modules/search.py:154:                if (match) {
+src/modules/search.py:155:                    bossId = 'zp_' + match[1];
+src/modules/search.py:156:                }
+src/modules/search.py:157:            }
+src/modules/search.py:158:
+src/modules/search.py:159:            // Fallback: check data attributes
+src/modules/search.py:160:            if (!bossId) {
+src/modules/search.py:161:                const dataId = card.getAttribute('data-geekid') ||
+src/modules/search.py:162:                               card.getAttribute('data-uid') ||
+src/modules/search.py:163:                               card.getAttribute('data-id') ||
+src/modules/search.py:164:                               card.getAttribute('data-encrypt-id');
+src/modules/search.py:165:                if (dataId) {
+src/modules/search.py:166:                    bossId = 'zp_' + dataId;
+src/modules/search.py:167:                }
+src/modules/search.py:168:            }
+src/modules/search.py:169:
+src/modules/search.py:170:            // Fallback: check card onclick or inner links for IDs
+src/modules/search.py:171:            if (!bossId) {
+src/modules/search.py:172:                const allLinks = card.querySelectorAll('a[href]');
+src/modules/search.py:173:                for (const a of allLinks) {
+src/modules/search.py:174:                    const href = a.href;
+src/modules/search.py:175:                    const match = href.match(/encryptGeekId=([^&]+)/);
+src/modules/search.py:176:                    if (match) {
+src/modules/search.py:177:                        bossId = 'zp_' + match[1];
+src/modules/search.py:178:                        if (!profileUrl) profileUrl = href;
+src/modules/search.py:179:                        break;
+src/modules/search.py:180:                    }
+src/modules/search.py:181:                }
+src/modules/search.py:182:            }
+src/modules/search.py:183:
+src/modules/search.py:184:            candidates.push({
+src/modules/search.py:185:                boss_id: bossId,
+src/modules/search.py:186:                name: name,
+src/modules/search.py:187:                title: title,
+src/modules/search.py:188:                company: company,
+src/modules/search.py:189:                location: location,
+src/modules/search.py:190:                salary_expect: salary,
+src/modules/search.py:191:                work_years: workYears,
+src/modules/search.py:192:                education_level: education,
+src/modules/search.py:193:                profile_url: profileUrl
+src/modules/search.py:194:            });
+src/modules/search.py:195:        } catch (e) {
+src/modules/search.py:196:            console.error('Error extracting candidate:', e);
+src/modules/search.py:197:        }
+src/modules/search.py:198:    }
+src/modules/search.py:199:
+src/modules/search.py:200:    // Strategy 2: If no cards found, try extracting from list items
+src/modules/search.py:201:    if (candidates.length === 0) {
+src/modules/search.py:202:        const listItems = document.querySelectorAll(
+src/modules/search.py:203:            '[class*="geek-list"] > *, [class*="resume-list"] > *, ' +
+src/modules/search.py:204:            '[class*="talent-list"] > *, [class*="recommend-list"] > *'
+src/modules/search.py:205:        );
+src/modules/search.py:206:
+src/modules/search.py:207:        for (const item of listItems) {
+src/modules/search.py:208:            try {
+src/modules/search.py:209:                const text = item.innerText || '';
+src/modules/search.py:210:                const lines = text.split('\\n').filter(l => l.trim());
+src/modules/search.py:211:                if (lines.length < 2) continue;
+src/modules/search.py:212:
+src/modules/search.py:213:                const name = lines[0].trim();
+src/modules/search.py:214:                if (!name || name.length > 20) continue;
+src/modules/search.py:215:
+src/modules/search.py:216:                const title = lines.length > 1 ? lines[1].trim() : '';
+src/modules/search.py:217:                const company = lines.length > 2 ? lines[2].trim() : '';
+src/modules/search.py:218:
+src/modules/search.py:219:                let bossId = '';
+src/modules/search.py:220:                const link = item.querySelector('a[href]');
+src/modules/search.py:221:                if (link) {
+src/modules/search.py:222:                    const match = link.href.match(/\\/web\\/geek\\/([^?/]+)/);
+src/modules/search.py:223:                    if (match) bossId = 'zp_' + match[1];
+src/modules/search.py:224:                }
+src/modules/search.py:225:
+src/modules/search.py:226:                candidates.push({
+src/modules/search.py:227:                    boss_id: bossId,
+src/modules/search.py:228:                    name: name,
+src/modules/search.py:229:                    title: title,
+src/modules/search.py:230:                    company: company,
+src/modules/search.py:231:                    location: '',
+src/modules/search.py:232:                    salary_expect: '',
+src/modules/search.py:233:                    work_years: '',
+src/modules/search.py:234:                    education_level: '',
+src/modules/search.py:235:                    profile_url: link ? link.href : ''
+src/modules/search.py:236:                });
+src/modules/search.py:237:            } catch (e) {
+src/modules/search.py:238:                continue;
+src/modules/search.py:239:            }
+src/modules/search.py:240:        }
+src/modules/search.py:241:    }
+src/modules/search.py:242:
+src/modules/search.py:243:    return candidates;
+src/modules/search.py:244:}
+src/modules/search.py:245:"""
+src/modules/search.py:246:
+src/modules/search.py:247:
+src/modules/search.py:248:async def search_candidates(
+src/modules/search.py:249:    keywords: List[str],
+src/modules/search.py:250:    location: Optional[str] = None,
+src/modules/search.py:251:    max_pages: int = 1,
+src/modules/search.py:252:    experience: Optional[str] = None,
+src/modules/search.py:253:    education: Optional[str] = None,
+src/modules/search.py:254:    salary: Optional[str] = None,
+src/modules/search.py:255:    browser: Optional[BrowserManager] = None,
+src/modules/search.py:256:) -> List[CandidateBasic]:
+src/modules/search.py:257:    """
+src/modules/search.py:258:    Search for candidates on Boss直聘.
+src/modules/search.py:259:
+src/modules/search.py:260:    Supports multi-keyword search with deduplication.
+src/modules/search.py:261:
+src/modules/search.py:262:    Args:
+src/modules/search.py:263:        keywords: List of search keywords
+src/modules/search.py:264:        location: Location filter (e.g., "北京")
+src/modules/search.py:265:        max_pages: Maximum number of pages to scrape per keyword
+src/modules/search.py:266:        experience: Experience filter (e.g., "3-5年")
+src/modules/search.py:267:        education: Education filter (e.g., "本科")
+src/modules/search.py:268:        salary: Salary filter (e.g., "20-40K")
+src/modules/search.py:269:        browser: Browser manager instance
+src/modules/search.py:270:
+src/modules/search.py:271:    Returns:
+src/modules/search.py:272:        List of CandidateBasic instances
+src/modules/search.py:273:    """
+src/modules/search.py:274:    if browser is None:
+src/modules/search.py:275:        browser = get_browser_manager()
+src/modules/search.py:276:
+src/modules/search.py:277:    page = browser.page
+src/modules/search.py:278:    if not page:
+src/modules/search.py:279:        page = await browser.start()
+src/modules/search.py:280:
+src/modules/search.py:281:    config = get_config()
+src/modules/search.py:282:    rate_limiter = get_rate_limiter()
+src/modules/search.py:283:    db_manager = get_db_manager()
+src/modules/search.py:284:
+src/modules/search.py:285:    all_candidates: List[CandidateBasic] = []
+src/modules/search.py:286:    seen_ids: Set[str] = set()
+src/modules/search.py:287:
+src/modules/search.py:288:    for keyword in keywords:
+src/modules/search.py:289:        console.print(f"\n[cyan]Searching for: {keyword}[/cyan]")
+src/modules/search.py:290:
+src/modules/search.py:291:        # Rate limit check
+src/modules/search.py:292:        await async_check_rate_limit('search')
+src/modules/search.py:293:
+src/modules/search.py:294:        try:
+src/modules/search.py:295:            # Navigate to search page
+src/modules/search.py:296:            search_url = _build_search_url(keyword, location, 1, experience, education, salary)
+src/modules/search.py:297:            await page.goto(search_url, wait_until='domcontentloaded')
+src/modules/search.py:298:            await async_random_delay('page_load')
+src/modules/search.py:299:
+src/modules/search.py:300:            # Check for captcha
+src/modules/search.py:301:            await check_captcha(page, report_to_rate_limiter=True)
+src/modules/search.py:302:
+src/modules/search.py:303:            # Check for quota exhaustion page
+src/modules/search.py:304:            if await _check_quota_exhausted(page):
+src/modules/search.py:305:                console.print("[red]Daily contact quota exhausted. Stopping search.[/red]")
+src/modules/search.py:306:                break
+src/modules/search.py:307:
+src/modules/search.py:308:            # Boss直聘 uses infinite scroll (auto-load on scroll), no pagination buttons.
+src/modules/search.py:309:            # Scroll multiple rounds to load more candidates.
+src/modules/search.py:310:            # max_pages controls how many scroll rounds to perform.
+src/modules/search.py:311:            for scroll_round in range(1, max_pages + 1):
+src/modules/search.py:312:                console.print(f"  [dim]Scroll round {scroll_round}/{max_pages}...[/dim]")
+src/modules/search.py:313:
+src/modules/search.py:314:                # Scroll within the content container to trigger auto-load.
+src/modules/search.py:315:                # The page uses an inner scrollable container, not window scroll.
+src/modules/search.py:316:                await _scroll_search_results(page)
+src/modules/search.py:317:                await async_random_delay('scroll')
+src/modules/search.py:318:
+src/modules/search.py:319:            # Extract candidates via JavaScript after all scrolling is done
+src/modules/search.py:320:            raw_candidates = await page.evaluate(EXTRACT_CANDIDATES_JS)
+src/modules/search.py:321:
+src/modules/search.py:322:            if not raw_candidates:
+src/modules/search.py:323:                logger.warning(f"No candidates found for '{keyword}'")
+src/modules/search.py:324:                continue
+src/modules/search.py:325:
+src/modules/search.py:326:            # Process results
+src/modules/search.py:327:            page_count = 0
+src/modules/search.py:328:            for raw in raw_candidates:
+src/modules/search.py:329:                name = raw.get('name', '').strip()
+src/modules/search.py:330:                title = raw.get('title', '').strip()
+src/modules/search.py:331:                company = raw.get('company', '').strip()
+src/modules/search.py:332:
+src/modules/search.py:333:                if not name:
+src/modules/search.py:334:                    continue
+src/modules/search.py:335:
+src/modules/search.py:336:                # Filter non-R&D roles
+src/modules/search.py:337:                if _is_non_rd_role(title):
+src/modules/search.py:338:                    continue
+src/modules/search.py:339:
+src/modules/search.py:340:                # Generate or use boss_id
+src/modules/search.py:341:                boss_id = raw.get('boss_id', '')
+src/modules/search.py:342:                if not boss_id:
+src/modules/search.py:343:                    boss_id = _generate_boss_id(name, company)
+src/modules/search.py:344:
+src/modules/search.py:345:                # Deduplicate
+src/modules/search.py:346:                if boss_id in seen_ids:
+src/modules/search.py:347:                    continue
+src/modules/search.py:348:
+src/modules/search.py:349:                # Also check name+company dedup
+src/modules/search.py:350:                dedup_key = f"{name}_{company}"
+src/modules/search.py:351:                if dedup_key in seen_ids:
+src/modules/search.py:352:                    continue
+src/modules/message.py:41:from src.exceptions.errors import (
+src/modules/message.py:42:    ExtractionError,
+src/modules/message.py:43:    BrowserError,
+src/modules/message.py:44:    PermanentFailureError,
+src/modules/message.py:45:    SelectorNotFoundError,
+src/modules/message.py:46:)
+src/modules/message.py:47:
+src/modules/message.py:48:console = Console()
+src/modules/message.py:49:
+src/modules/message.py:50:
+src/modules/message.py:51:def render_template(template: Dict, variables: Dict[str, str]) -> str:
+src/modules/message.py:52:    """
+src/modules/message.py:53:    Render a message template with variable substitution.
+src/modules/message.py:54:
+src/modules/message.py:55:    Uses a single-pass approach to avoid recursive replacement issues
+src/modules/message.py:56:    (e.g., variable values containing {other_var} patterns).
+src/modules/message.py:57:
+src/modules/message.py:58:    Args:
+src/modules/message.py:59:        template: Template dict with 'content' and 'variables' keys
+src/modules/message.py:60:        variables: Variable name-value pairs
+src/modules/message.py:61:
+src/modules/message.py:62:    Returns:
+src/modules/message.py:63:        Rendered message string
+src/modules/message.py:64:    """
+src/modules/message.py:65:    import re
+src/modules/message.py:66:
+src/modules/message.py:67:    content = template['content']
+src/modules/message.py:68:
+src/modules/message.py:69:    def replacer(match):
+src/modules/message.py:70:        var_name = match.group(1)
+src/modules/message.py:71:        if var_name in variables:
+src/modules/message.py:72:            return str(variables[var_name])
+src/modules/message.py:73:        return match.group(0)  # Keep original if no matching variable
+src/modules/message.py:74:
+src/modules/message.py:75:    content = re.sub(r'\{(\w+)\}', replacer, content)
+src/modules/message.py:76:    return content
+src/modules/message.py:77:
+src/modules/message.py:78:
+src/modules/message.py:79:async def send_message(
+src/modules/message.py:80:    boss_id: str,
+src/modules/message.py:81:    template_name: str,
+src/modules/message.py:82:    variables: Optional[Dict[str, str]] = None,
+src/modules/message.py:83:    preview_only: bool = False,
+src/modules/message.py:84:    browser: Optional[BrowserManager] = None,
+src/modules/message.py:85:) -> bool:
+src/modules/message.py:86:    """
+src/modules/message.py:87:    Send a templated message to a candidate on Boss直聘.
+src/modules/message.py:88:
+src/modules/message.py:89:    Args:
+src/modules/message.py:90:        boss_id: Candidate Boss ID
+src/modules/message.py:91:        template_name: Name of the message template
+src/modules/message.py:92:        variables: Template variable overrides
+src/modules/message.py:93:        preview_only: If True, only preview the message without sending
+src/modules/message.py:94:        browser: Browser manager instance
+src/modules/message.py:95:
+src/modules/message.py:96:    Returns:
+src/modules/message.py:97:        True if message sent successfully
+src/modules/message.py:98:    """
+src/modules/message.py:99:    if browser is None:
+src/modules/message.py:100:        browser = get_browser_manager()
+src/modules/message.py:101:
+src/modules/message.py:102:    page = browser.page
+src/modules/message.py:103:    if not page:
+src/modules/message.py:104:        page = await browser.start()
+src/modules/message.py:105:
+src/modules/message.py:106:    config = get_config()
+src/modules/message.py:107:    rate_limiter = get_rate_limiter()
+src/modules/message.py:108:    db_manager = get_db_manager()
+src/modules/message.py:109:
+src/modules/message.py:110:    # Load template
+src/modules/message.py:111:    template = config.get_template(template_name)
+src/modules/message.py:112:
+src/modules/message.py:113:    # Merge variables
+src/modules/message.py:114:    final_vars = dict(variables or {})
+src/modules/message.py:115:
+src/modules/message.py:116:    # Try to fill candidate info from database
+src/modules/message.py:117:    with db_manager.session_scope() as session:
+src/modules/message.py:118:        candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+src/modules/message.py:119:        if candidate:
+src/modules/message.py:120:            if 'name' not in final_vars and candidate.name:
+src/modules/message.py:121:                final_vars['name'] = candidate.name
+src/modules/message.py:122:            if 'company' not in final_vars and candidate.company:
+src/modules/message.py:123:                final_vars['company'] = candidate.company
+src/modules/message.py:124:            if 'position' not in final_vars and candidate.title:
+src/modules/message.py:125:                final_vars['position'] = candidate.title
+src/modules/message.py:126:
+src/modules/message.py:127:    # Validate variables
+src/modules/message.py:128:    validate_template_variables(template, final_vars)
+src/modules/message.py:129:
+src/modules/message.py:130:    # Render message
+src/modules/message.py:131:    message_content = render_template(template, final_vars)
+src/modules/message.py:132:
+src/modules/message.py:133:    # Preview
+src/modules/message.py:134:    console.print(Panel(
+src/modules/message.py:135:        f"[bold]To:[/bold] {boss_id}\n"
+src/modules/message.py:136:        f"[bold]Template:[/bold] {template_name}\n"
+src/modules/message.py:137:        f"[bold]Message:[/bold]\n{message_content}",
+src/modules/message.py:138:        title="Message Preview",
+src/modules/message.py:139:        border_style="cyan"
+src/modules/message.py:140:    ))
+src/modules/message.py:141:
+src/modules/message.py:142:    if preview_only:
+src/modules/message.py:143:        console.print("[dim]Preview only — message not sent.[/dim]")
+src/modules/message.py:144:        return False
+src/modules/message.py:145:
+src/modules/message.py:146:    # Confirm send
+src/modules/message.py:147:    confirm = questionary.confirm(
+src/modules/message.py:148:        "Send this message?",
+src/modules/message.py:149:        default=False,
+src/modules/message.py:150:    ).ask()
+src/modules/message.py:151:
+src/modules/message.py:152:    if not confirm:
+src/modules/message.py:153:        console.print("[yellow]Message cancelled.[/yellow]")
+src/modules/message.py:154:        # Record cancellation
+src/modules/message.py:155:        _save_message_to_db(boss_id, template_name, message_content, 'cancelled', db_manager)
+src/modules/message.py:156:        return False
+src/modules/message.py:157:
+src/modules/message.py:158:    # Rate limit check
+src/modules/message.py:159:    await async_check_rate_limit('send_message')
+src/modules/message.py:160:
+src/modules/message.py:161:    try:
+src/modules/message.py:162:        # Navigate to chat with the candidate
+src/modules/message.py:163:        success = await _navigate_to_chat(page, boss_id, db_manager)
+src/modules/message.py:164:        if not success:
+src/modules/message.py:165:            raise BrowserError(f"Failed to open chat with {boss_id}")
+src/modules/message.py:166:
+src/modules/message.py:167:        # Type and send the message
+src/modules/message.py:168:        await _type_and_send_message(page, message_content)
+src/modules/message.py:169:
+src/modules/message.py:170:        # Log success
+src/modules/message.py:171:        rate_limiter.log_action('send_message', {'boss_id': boss_id, 'template': template_name})
+src/modules/message.py:172:        _save_message_to_db(boss_id, template_name, message_content, 'sent', db_manager)
+src/modules/message.py:173:
+src/modules/message.py:174:        console.print(f"[green]Message sent to {boss_id}![/green]")
+src/modules/message.py:175:        return True
+src/modules/message.py:176:
+src/modules/message.py:177:    except PermanentFailureError as e:
+src/modules/message.py:178:        logger.error(f"Permanent failure sending to {boss_id}: {e}")
+src/modules/message.py:179:        _save_message_to_db(boss_id, template_name, message_content, 'failed', db_manager)
+src/modules/message.py:180:        console.print(f"[red]Failed to send: {e}[/red]")
+src/modules/message.py:181:        return False
+src/modules/message.py:182:    except Exception as e:
+src/modules/message.py:183:        logger.error(f"Error sending message to {boss_id}: {e}")
+src/modules/message.py:184:        _save_message_to_db(boss_id, template_name, message_content, 'failed', db_manager)
+src/modules/message.py:185:        console.print(f"[red]Error: {e}[/red]")
+src/modules/message.py:186:        return False
+src/modules/message.py:187:
+src/modules/message.py:188:
+src/modules/message.py:189:async def send_message_batch(
+src/modules/message.py:190:    candidates: list,
+src/modules/message.py:191:    template_name: str,
+src/modules/message.py:192:    variables: Optional[Dict[str, str]] = None,
+src/modules/message.py:193:    interactive: bool = True,
+src/modules/message.py:194:    skip_messaged: bool = True,
+src/modules/message.py:195:    dry_run: bool = False,
+src/modules/message.py:196:    browser: Optional[BrowserManager] = None,
+src/modules/message.py:197:) -> Dict[str, int]:
+src/modules/message.py:198:    """
+src/modules/message.py:199:    Send messages to multiple candidates.
+src/modules/message.py:200:
+src/modules/message.py:201:    Args:
+src/modules/message.py:202:        candidates: List of CandidateBasic or dicts with boss_id
+src/modules/message.py:203:        template_name: Template name
+src/modules/message.py:204:        variables: Shared template variables
+src/modules/message.py:205:        interactive: Confirm each message individually
+src/modules/message.py:206:        skip_messaged: Skip candidates already messaged
+src/modules/message.py:207:        dry_run: Simulate without actually sending
+src/modules/message.py:208:        browser: Browser manager instance
+src/modules/message.py:209:
+src/modules/message.py:210:    Returns:
+src/modules/message.py:211:        Dict with counts: sent, failed, skipped, cancelled
+src/modules/message.py:212:    """
+src/modules/message.py:213:    if browser is None:
+src/modules/message.py:214:        browser = get_browser_manager()
+src/modules/message.py:215:
+src/modules/message.py:216:    config = get_config()
+src/modules/message.py:217:    db_manager = get_db_manager()
+src/modules/message.py:218:    rate_limiter = get_rate_limiter()
+src/modules/message.py:219:
+src/modules/message.py:220:    stats = {'sent': 0, 'failed': 0, 'skipped': 0, 'cancelled': 0}
+src/modules/message.py:221:
+src/modules/message.py:222:    for i, candidate in enumerate(candidates):
+src/modules/message.py:223:        if isinstance(candidate, dict):
+src/modules/message.py:224:            boss_id = candidate.get('boss_id', '')
+src/modules/message.py:225:            name = candidate.get('name', '')
+src/modules/message.py:226:            title = candidate.get('title', '')
+src/modules/message.py:227:            company = candidate.get('company', '')
+src/modules/message.py:228:        else:
+src/modules/message.py:229:            boss_id = getattr(candidate, 'boss_id', '')
+src/modules/message.py:230:            name = getattr(candidate, 'name', '')
+src/modules/message.py:231:            title = getattr(candidate, 'title', '')
+src/modules/message.py:232:            company = getattr(candidate, 'company', '')
+src/modules/message.py:233:
+src/modules/message.py:234:        if not boss_id:
+src/modules/message.py:235:            stats['skipped'] += 1
+src/modules/message.py:236:            continue
+src/modules/message.py:237:
+src/modules/message.py:238:        console.print(f"\n[cyan]({i+1}/{len(candidates)})[/cyan] {name} - {title} @ {company}")
+src/modules/message.py:239:
+src/modules/message.py:240:        # Check if already messaged
+src/modules/message.py:241:        if skip_messaged:
+src/modules/message.py:242:            with db_manager.session_scope() as session:
+src/modules/message.py:243:                existing_msg = session.query(Message).filter_by(
+src/modules/message.py:244:                    candidate_boss_id=boss_id, status='sent'
+src/modules/message.py:245:                ).first()
+src/modules/message.py:246:                if existing_msg:
+src/modules/message.py:247:                    console.print(f"  [dim]Already messaged, skipping[/dim]")
+src/modules/message.py:248:                    stats['skipped'] += 1
+src/modules/message.py:249:                    continue
+src/modules/message.py:250:
+src/modules/message.py:251:        if dry_run:
+src/modules/message.py:252:            console.print(f"  [dim]Dry run — would send '{template_name}' template[/dim]")
+src/modules/message.py:253:            stats['sent'] += 1
+src/modules/message.py:254:            continue
+src/modules/message.py:255:
+src/modules/message.py:256:        # Build per-candidate variables
+src/modules/message.py:257:        per_vars = dict(variables or {})
+src/modules/message.py:258:        if name:
+src/modules/message.py:259:            per_vars.setdefault('name', name)
+src/modules/message.py:260:        if company:
+src/modules/message.py:261:            per_vars.setdefault('company', company)
+src/modules/message.py:262:        if title:
+src/modules/message.py:263:            per_vars.setdefault('position', title)
+src/modules/message.py:264:
+src/modules/message.py:265:        try:
+src/modules/message.py:266:            if interactive:
+src/modules/message.py:267:                # Use single send (with preview + confirmation)
+src/modules/message.py:268:                result = await send_message(
+src/modules/message.py:269:                    boss_id=boss_id,
+src/modules/message.py:270:                    template_name=template_name,
+src/modules/message.py:271:                    variables=per_vars,
+src/modules/message.py:272:                    browser=browser,
+src/modules/message.py:273:                )
+src/modules/message.py:274:                if result:
+src/modules/message.py:275:                    stats['sent'] += 1
+src/modules/message.py:276:                else:
+src/modules/message.py:277:                    stats['cancelled'] += 1
+src/modules/message.py:278:            else:
+src/modules/message.py:279:                # Non-interactive: send without confirmation
+src/modules/message.py:280:                await async_check_rate_limit('send_message')
+src/modules/message.py:281:
+src/modules/message.py:282:                template = config.get_template(template_name)
+src/modules/message.py:283:                validate_template_variables(template, per_vars)
+src/modules/message.py:284:                message_content = render_template(template, per_vars)
+src/modules/message.py:285:
+src/modules/message.py:286:                page = browser.page
+src/modules/message.py:287:                success = await _navigate_to_chat(page, boss_id, db_manager)
+src/modules/message.py:288:                if success:
+src/modules/message.py:289:                    await _type_and_send_message(page, message_content)
+src/modules/message.py:290:                    rate_limiter.log_action('send_message', {'boss_id': boss_id})
+src/modules/message.py:291:                    _save_message_to_db(boss_id, template_name, message_content, 'sent', db_manager)
+src/modules/message.py:292:                    stats['sent'] += 1
+src/modules/message.py:293:                    console.print(f"  [green]Sent![/green]")
+src/modules/message.py:294:                else:
+src/modules/message.py:295:                    _save_message_to_db(boss_id, template_name, message_content, 'failed', db_manager)
+src/modules/message.py:296:                    stats['failed'] += 1
+src/modules/message.py:297:                    console.print(f"  [red]Failed to open chat[/red]")
+src/modules/message.py:298:
+src/modules/message.py:299:        except Exception as e:
+src/modules/message.py:300:            logger.error(f"Error sending to {boss_id}: {e}")
+src/modules/message.py:301:            stats['failed'] += 1
+src/modules/message.py:302:            console.print(f"  [red]Error: {e}[/red]")
+src/modules/message.py:303:
+src/modules/message.py:304:        # Delay between messages
+src/modules/message.py:305:        if i < len(candidates) - 1:
+src/modules/message.py:306:            await async_random_delay('message')
+src/modules/message.py:307:
+src/modules/message.py:308:    # Summary
+src/modules/message.py:309:    console.print(Panel(
+src/modules/message.py:310:        f"[green]Sent: {stats['sent']}[/green] | "
+src/modules/message.py:311:        f"[red]Failed: {stats['failed']}[/red] | "
+src/modules/message.py:312:        f"[yellow]Skipped: {stats['skipped']}[/yellow] | "
+src/modules/message.py:313:        f"[dim]Cancelled: {stats['cancelled']}[/dim]",
+src/modules/message.py:314:        title="Batch Message Summary",
+src/modules/message.py:315:    ))
+src/modules/message.py:316:
+src/modules/message.py:317:    return stats
+src/modules/message.py:318:
+src/modules/message.py:319:
+src/modules/message.py:320:async def _navigate_to_chat(page: Page, boss_id: str, db_manager) -> bool:
+src/modules/message.py:321:    """
+src/modules/message.py:322:    Navigate to the chat window for a candidate.
+src/modules/message.py:323:
+src/modules/message.py:324:    Tries multiple strategies:
+src/modules/message.py:325:    1. Direct chat URL (if known)
+src/modules/message.py:326:    2. Navigate to candidate profile and click "立即沟通"
+src/modules/message.py:327:    3. Search in existing conversations
+src/modules/message.py:328:
+src/modules/message.py:329:    Args:
+src/modules/message.py:330:        page: Playwright page instance
+src/modules/message.py:331:        boss_id: Candidate Boss ID
+src/modules/message.py:332:        db_manager: Database manager
+src/modules/message.py:333:
+src/modules/message.py:334:    Returns:
+src/modules/message.py:335:        True if chat window is ready
+src/modules/message.py:336:    """
+src/modules/message.py:337:    encrypt_id = boss_id.replace('zp_', '') if boss_id.startswith('zp_') else boss_id
+src/modules/message.py:338:
+src/modules/message.py:339:    # Get profile URL from database
+src/modules/message.py:340:    profile_url = None
+src/modules/message.py:341:    with db_manager.session_scope() as session:
+src/modules/message.py:342:        candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+src/modules/message.py:343:        if candidate and candidate.profile_url:
+src/modules/message.py:344:            profile_url = candidate.profile_url
+src/modules/message.py:345:
+src/modules/message.py:346:    # Strategy 1: Navigate to profile and click chat button
+src/modules/message.py:347:    if profile_url:
+src/modules/message.py:348:        try:
+src/modules/message.py:349:            await page.goto(profile_url, wait_until='domcontentloaded')
+src/modules/message.py:350:            await async_random_delay('page_load')
+src/modules/message.py:351:            await check_captcha(page, report_to_rate_limiter=True)
+src/modules/message.py:352:
+src/modules/message.py:353:            # Look for "立即沟通" button
+src/modules/message.py:354:            chat_button = await _find_chat_button(page)
+src/modules/message.py:355:            if chat_button:
+src/modules/message.py:356:                await chat_button.click()
+src/modules/message.py:357:                await async_random_delay('action')
+src/modules/message.py:358:                # Wait for chat to load
+src/modules/message.py:359:                await page.wait_for_timeout(2000)
+src/modules/message.py:360:                return True
+src/modules/message.py:361:        except Exception as e:
+src/modules/message.py:362:            logger.warning(f"Strategy 1 (profile click) failed for {boss_id}: {e}")
+src/modules/message.py:363:
+src/modules/message.py:364:    # Strategy 2: Try direct geek URL
+src/modules/message.py:365:    try:
+src/modules/message.py:366:        geek_url = f"https://www.zhipin.com/web/geek/{encrypt_id}"
+src/modules/message.py:367:        await page.goto(geek_url, wait_until='domcontentloaded')
+src/modules/message.py:368:        await async_random_delay('page_load')
+src/modules/message.py:369:        await check_captcha(page, report_to_rate_limiter=True)
+src/modules/message.py:370:
+src/modules/message.py:371:        chat_button = await _find_chat_button(page)
+src/modules/message.py:372:        if chat_button:
+src/modules/message.py:373:            await chat_button.click()
+src/modules/message.py:374:            await async_random_delay('action')
+src/modules/message.py:375:            await page.wait_for_timeout(2000)
+src/modules/message.py:376:            return True
+src/modules/message.py:377:    except Exception as e:
+src/modules/message.py:378:        logger.warning(f"Strategy 2 (direct geek URL) failed for {boss_id}: {e}")
+src/modules/message.py:379:
+src/modules/message.py:380:    # Strategy 3: Try to find a chat link on the current page
+src/modules/message.py:381:    try:
+src/modules/message.py:382:        # Check if there's a chat link on the current page
+src/modules/message.py:383:        chat_link = await page.query_selector(
+src/modules/message.py:384:            'a[href*="chat"], a[href*="im"], [class*="chat-link"]'
+src/modules/message.py:385:        )
+src/modules/message.py:386:        if chat_link:
+src/modules/message.py:387:            await chat_link.click()
+src/modules/message.py:388:            await page.wait_for_timeout(2000)
+src/modules/message.py:389:            return True
+src/modules/message.py:390:    except Exception as e:
+src/modules/message.py:391:        logger.warning(f"Strategy 3 (chat link) failed for {boss_id}: {e}")
+src/modules/message.py:392:
+src/modules/message.py:393:    logger.error(f"All chat navigation strategies failed for {boss_id}")
+src/modules/message.py:394:    return False
+src/modules/message.py:395:
+src/modules/message.py:396:
+src/modules/message.py:397:async def _find_chat_button(page: Page):
+src/modules/message.py:398:    """Find the chat/communication button on the page."""
+src/modules/message.py:399:    selectors = [
+src/modules/message.py:400:        'button:has-text("搜索畅聊卡")',
+src/modules/message.py:401:        'button:has-text("立即沟通")',
+src/modules/message.py:402:        'a:has-text("立即沟通")',
+src/modules/message.py:403:        'button:has-text("开始沟通")',
+src/modules/message.py:404:        'button:has-text("继续沟通")',
+src/modules/message.py:405:        '[class*="btn-chat"]',
+src/modules/message.py:406:        '[class*="chat-btn"]',
+src/modules/message.py:407:    ]
+src/modules/message.py:408:
+src/modules/message.py:409:    for selector in selectors:
+src/modules/message.py:410:        try:
+src/modules/message.py:411:            element = await page.query_selector(selector)
+src/modules/message.py:412:            if element and await element.is_visible():
+src/modules/message.py:413:                return element
+src/modules/message.py:414:        except Exception:
+src/modules/message.py:415:            continue
+src/modules/message.py:416:
+src/modules/message.py:417:    return None
+src/modules/message.py:418:
+src/modules/message.py:419:
+src/modules/message.py:420:async def _type_and_send_message(page: Page, message: str) -> None:
+src/modules/message.py:421:    """
+src/modules/message.py:422:    Type a message into the chat input and send it.
+src/modules/message.py:423:
+src/modules/message.py:424:    Args:
+src/modules/message.py:425:        page: Playwright page instance
+src/modules/message.py:426:        message: Message text to send
+src/modules/message.py:427:    """
+src/modules/message.py:428:    # Find the message input
+src/modules/message.py:429:    # Recording confirmed: #boss-chat-global-input is the primary chat input (a div element)
+src/modules/message.py:430:    input_selectors = [
+src/modules/message.py:431:        '#boss-chat-global-input',
+src/modules/message.py:432:        '[contenteditable="true"]',
+src/modules/message.py:433:        '[class*="chat-input"] textarea',
+src/modules/message.py:434:        '[class*="input-area"] textarea',
+src/modules/message.py:435:        'textarea[class*="message"]',
+src/modules/message.py:436:        'textarea',
+src/modules/message.py:437:    ]
+src/modules/message.py:438:
+src/modules/message.py:439:    input_element = None
+src/modules/message.py:440:    for selector in input_selectors:
+src/modules/message.py:441:        try:
+src/modules/message.py:442:            element = await page.query_selector(selector)
+src/modules/message.py:443:            if element and await element.is_visible():
+src/modules/message.py:444:                input_element = element
+src/modules/message.py:445:                break
+src/modules/message.py:446:        except Exception:
+src/modules/message.py:447:            continue
+src/modules/message.py:448:
+src/modules/message.py:449:    if not input_element:
+src/modules/message.py:450:        raise SelectorNotFoundError("Chat message input not found")
+src/modules/message.py:451:
+src/modules/message.py:452:    # Click to focus
+src/modules/message.py:453:    await input_element.click()
+src/modules/message.py:454:    await page.wait_for_timeout(300)
+src/modules/message.py:455:
+src/modules/message.py:456:    # Clear any existing content (use Meta+a on macOS, Control+a elsewhere)
+src/modules/message.py:457:    import sys
+src/modules/message.py:458:    select_all_key = "Meta+a" if sys.platform == "darwin" else "Control+a"
+src/modules/message.py:459:    await page.keyboard.press(select_all_key)
+src/modules/message.py:460:    await page.keyboard.press("Backspace")
+src/modules/message.py:461:    await page.wait_for_timeout(200)
+src/modules/message.py:462:
+src/modules/message.py:463:    # Type message with human-like timing
+src/modules/message.py:464:    # For longer messages, use fill() to avoid timeout, then add small delay
+src/modules/message.py:465:    if len(message) > 50:
+src/modules/message.py:466:        await input_element.fill(message)
+src/modules/message.py:467:    else:
+src/modules/message.py:468:        await input_element.type(message, delay=80)
+src/modules/message.py:469:
+src/modules/message.py:470:    await async_random_delay('action')
+src/modules/message.py:471:
+src/modules/message.py:472:    # Find and click send button
+src/modules/message.py:473:    # Recording confirmed: send button contains text "发送" (span inside button)
+src/modules/message.py:474:    send_selectors = [
+src/modules/message.py:475:        'text="发送"',
+src/modules/message.py:476:        'button:has-text("发送")',
+src/modules/message.py:477:        '[class*="btn-send"]',
+src/modules/message.py:478:        '[class*="send-btn"]',
+src/modules/message.py:479:    ]
+src/modules/message.py:480:
+src/modules/message.py:481:    for selector in send_selectors:
+src/modules/message.py:482:        try:
+src/modules/message.py:483:            btn = await page.query_selector(selector)
+src/modules/message.py:484:            if btn and await btn.is_visible():
+src/modules/message.py:485:                await btn.click()
+src/modules/message.py:486:                await page.wait_for_timeout(1000)
+src/modules/message.py:487:                logger.info("Message sent via send button click")
+src/modules/message.py:488:                return
+src/modules/message.py:489:        except Exception:
+src/modules/message.py:490:            continue
+src/utils/captcha.py:50:        except Exception:
+src/utils/captcha.py:51:            continue
+src/utils/checkpoint.py:80:            except BaseException:
+src/utils/checkpoint.py:81:                try:
+src/utils/checkpoint.py:82:                    os.unlink(tmp_path)
+src/utils/checkpoint.py:83:                except OSError:
+src/utils/checkpoint.py:84:                    pass
+src/core/browser.py:19:from src.exceptions.errors import BrowserError
+src/core/browser.py:20:
+src/core/browser.py:21:
+src/core/browser.py:22:class BrowserManager:
+src/core/browser.py:23:    """
+src/core/browser.py:24:    Singleton browser manager for Boss直聘 automation.
+src/core/browser.py:25:
+src/core/browser.py:26:    Connects to a user-managed Chrome instance via CDP endpoint.
+src/core/browser.py:27:    The user starts Chrome with --remote-debugging-port=9222 and logs in
+src/core/browser.py:28:    manually. This manager connects/disconnects without closing Chrome.
+src/core/browser.py:29:    """
+src/core/browser.py:30:
+src/core/browser.py:31:    _instance: Optional['BrowserManager'] = None
+src/core/browser.py:32:    _lock: Optional[asyncio.Lock] = None
+src/core/browser.py:33:    _init_lock: threading.Lock = threading.Lock()
+src/core/browser.py:34:
+src/core/browser.py:35:    def __new__(cls, **kwargs):
+src/core/browser.py:36:        with cls._init_lock:
+src/core/browser.py:37:            if cls._instance is None:
+src/core/browser.py:38:                cls._instance = super().__new__(cls)
+src/core/browser.py:39:                cls._instance._initialized = False
+src/core/browser.py:40:            return cls._instance
+src/core/browser.py:41:
+src/core/browser.py:42:    def __init__(
+src/core/browser.py:43:        self,
+src/core/browser.py:44:        config: Optional[Config] = None,
+src/core/browser.py:45:        session_manager: Optional[SessionManager] = None,
+src/core/browser.py:46:    ):
+src/core/browser.py:47:        if self._initialized:
+src/core/browser.py:48:            return
+src/core/browser.py:49:
+src/core/browser.py:50:        self._playwright: Optional[Playwright] = None
+src/core/browser.py:51:        self._browser: Optional[Browser] = None
+src/core/browser.py:52:        self._context: Optional[BrowserContext] = None
+src/core/browser.py:53:        self._page: Optional[Page] = None
+src/core/browser.py:54:        self._primary_page: Optional[Page] = None
+src/core/browser.py:55:        self._opened_tabs: List[Page] = []
+src/core/browser.py:56:        self._session_manager: SessionManager = session_manager or get_session_manager()
+src/core/browser.py:57:        self._config: Config = config or get_config()
+src/core/browser.py:58:        self._cdp_endpoint: Optional[str] = None
+src/core/browser.py:59:        self._owned_page: bool = False
+src/core/browser.py:60:        self._initialized = True
+src/core/browser.py:61:
+src/core/browser.py:62:    @property
+src/core/browser.py:63:    def is_running(self) -> bool:
+src/core/browser.py:64:        """Check if browser is currently connected."""
+src/core/browser.py:65:        return self._browser is not None and self._browser.is_connected()
+src/core/browser.py:66:
+src/core/browser.py:67:    @property
+src/core/browser.py:68:    def page(self) -> Optional[Page]:
+src/core/browser.py:69:        """Get current page instance."""
+src/core/browser.py:70:        return self._page
+src/core/browser.py:71:
+src/core/browser.py:72:    @property
+src/core/browser.py:73:    def context(self) -> Optional[BrowserContext]:
+src/core/browser.py:74:        """Get current browser context."""
+src/core/browser.py:75:        return self._context
+src/core/browser.py:76:
+src/core/browser.py:77:    @classmethod
+src/core/browser.py:78:    def _ensure_lock(cls):
+src/core/browser.py:79:        """Lazily create the asyncio.Lock inside a running event loop."""
+src/core/browser.py:80:        # Always recreate the lock for the current event loop to avoid
+src/core/browser.py:81:        # "attached to a different event loop" errors
+src/core/browser.py:82:        try:
+src/core/browser.py:83:            loop = asyncio.get_running_loop()
+src/core/browser.py:84:        except RuntimeError:
+src/core/browser.py:85:            loop = None
+src/core/browser.py:86:        if cls._lock is None or (loop and hasattr(cls._lock, '_loop') and getattr(cls._lock, '_loop', None) is not loop):
+src/core/browser.py:87:            cls._lock = asyncio.Lock()
+src/core/browser.py:88:
+src/core/browser.py:89:    def set_cdp_endpoint(self, endpoint: str) -> None:
+src/core/browser.py:90:        """Override CDP endpoint (e.g. from CLI --cdp flag)."""
+src/core/browser.py:91:        self._cdp_endpoint = endpoint
+src/core/browser.py:92:
+src/core/browser.py:93:    async def start(self) -> Page:
+src/core/browser.py:94:        """
+src/core/browser.py:95:        Connect to Chrome via CDP and return a page.
+src/core/browser.py:96:
+src/core/browser.py:97:        Returns:
+src/core/browser.py:98:            Configured Playwright page instance
+src/core/browser.py:99:
+src/core/browser.py:100:        Raises:
+src/core/browser.py:101:            BrowserError: If connection fails
+src/core/browser.py:102:        """
+src/core/browser.py:103:        self._ensure_lock()
+src/core/browser.py:104:        async with self._lock:
+src/core/browser.py:105:            if self.is_running:
+src/core/browser.py:106:                logger.debug("Browser already connected, returning existing page")
+src/core/browser.py:107:                return self._page
+src/core/browser.py:108:
+src/core/browser.py:109:            try:
+src/core/browser.py:110:                endpoint = self._cdp_endpoint or self._config.get(
+src/core/browser.py:111:                    'browser.cdp_endpoint', 'http://localhost:9222'
+src/core/browser.py:112:                )
+src/core/browser.py:113:                timeout = self._config.get('browser.timeout', 30000)
+src/core/browser.py:114:
+src/core/browser.py:115:                logger.info(f"Connecting to Chrome via CDP: {endpoint}")
+src/core/browser.py:116:
+src/core/browser.py:117:                self._playwright = await async_playwright().start()
+src/core/browser.py:118:                self._browser = await self._playwright.chromium.connect_over_cdp(endpoint)
+src/core/browser.py:119:
+src/core/browser.py:120:                contexts = self._browser.contexts
+src/core/browser.py:121:                if contexts:
+src/core/browser.py:122:                    self._context = contexts[0]
+src/core/browser.py:123:                else:
+src/core/browser.py:124:                    logger.warning("No existing context found, creating new one")
+src/core/browser.py:125:                    self._context = await self._browser.new_context()
+src/core/browser.py:126:
+src/core/browser.py:127:                self._context.set_default_timeout(timeout)
+src/core/browser.py:128:
+src/core/browser.py:129:                pages = self._context.pages
+src/core/browser.py:130:                if pages:
+src/core/browser.py:131:                    self._page = pages[0]
+src/core/browser.py:132:                    self._owned_page = False
+src/core/browser.py:133:                    logger.info(f"Reusing existing tab: {self._page.url}")
+src/core/browser.py:134:                else:
+src/core/browser.py:135:                    self._page = await self._context.new_page()
+src/core/browser.py:136:                    self._owned_page = True
+src/core/browser.py:137:                    logger.info("Created new tab")
+src/core/browser.py:138:
+src/core/browser.py:139:                self._primary_page = self._page
+src/core/browser.py:140:                self._opened_tabs = []
+src/core/browser.py:141:
+src/core/browser.py:142:                logger.info("Connected to Chrome via CDP successfully")
+src/core/browser.py:143:                return self._page
+src/core/browser.py:144:
+src/core/browser.py:145:            except Exception as e:
+src/core/browser.py:146:                logger.error(f"Failed to connect to Chrome via CDP: {e}")
+src/core/browser.py:147:                await self._close_internal()
+src/core/browser.py:148:                raise BrowserError(
+src/core/browser.py:149:                    f"Failed to connect to Chrome via CDP at {endpoint}. "
+src/core/browser.py:150:                    f"Make sure Chrome is running with --remote-debugging-port=9222. "
+src/core/browser.py:151:                    f"Error: {e}"
+src/core/browser.py:152:                )
+src/core/browser.py:153:
+src/core/browser.py:154:    async def close(self) -> None:
+src/core/browser.py:155:        """Disconnect from Chrome via CDP. Does NOT close the user's Chrome."""
+src/core/browser.py:156:        self._ensure_lock()
+src/core/browser.py:157:        async with self._lock:
+src/core/browser.py:158:            await self._close_internal()
+src/core/browser.py:159:
+src/core/browser.py:160:    async def _close_internal(self) -> None:
+src/core/browser.py:161:        """Actual cleanup logic."""
+src/core/browser.py:162:        try:
+src/core/browser.py:163:            for tab in self._opened_tabs:
+src/core/browser.py:164:                try:
+src/core/browser.py:165:                    if not tab.is_closed():
+src/core/browser.py:166:                        await tab.close()
+src/core/browser.py:167:                except Exception:
+src/core/browser.py:168:                    pass
+src/core/browser.py:169:            self._opened_tabs = []
+src/core/browser.py:170:
+src/core/browser.py:171:            if self._page and self._owned_page:
+src/core/browser.py:172:                try:
+src/core/browser.py:173:                    await self._page.close()
+src/core/browser.py:174:                except Exception:
+src/core/browser.py:175:                    pass
+src/utils/llm_scorer.py:21:    except Exception:
+src/utils/llm_scorer.py:22:        return False
+src/utils/llm_scorer.py:23:
+src/utils/llm_scorer.py:24:
+src/utils/llm_scorer.py:25:def _build_scoring_prompt(candidate_info: Dict[str, Any], jd_config: Dict[str, Any]) -> str:
+src/utils/llm_scorer.py:26:    """Build a Chinese evaluation prompt for the LLM."""
+src/utils/llm_scorer.py:27:    jd_title = jd_config.get("title", "")
+src/utils/llm_scorer.py:28:    jd_desc = jd_config.get("description", "")
+src/utils/llm_scorer.py:29:    required = ", ".join(jd_config.get("required_skills", []))
+src/utils/llm_scorer.py:30:    preferred = ", ".join(jd_config.get("preferred_skills", []))
+src/utils/llm_scorer.py:31:    min_exp = jd_config.get("min_experience_years", "")
+src/utils/llm_scorer.py:32:    pref_edu = jd_config.get("preferred_education", "")
+src/utils/llm_scorer.py:33:
+src/utils/llm_scorer.py:34:    c_name = candidate_info.get("name", "未知")
+src/utils/llm_scorer.py:35:    c_title = candidate_info.get("title", "未知")
+src/utils/llm_scorer.py:36:    c_company = candidate_info.get("company", "未知")
+src/utils/llm_scorer.py:37:    c_edu = candidate_info.get("education_level", "未知")
+src/utils/llm_scorer.py:38:    c_years = candidate_info.get("work_years", "未知")
+src/utils/llm_scorer.py:39:    c_skills = ", ".join(candidate_info.get("skills", [])) or "未提供"
+src/utils/llm_scorer.py:40:
+src/utils/llm_scorer.py:41:    work_exp_text = ""
+src/utils/llm_scorer.py:42:    for exp in candidate_info.get("work_experience", []):
+src/utils/llm_scorer.py:43:        if isinstance(exp, dict):
+src/utils/llm_scorer.py:44:            work_exp_text += f"- {exp.get('company', '')} | {exp.get('title', '')} | {exp.get('description', '')}\n"
+src/utils/llm_scorer.py:45:
+src/utils/llm_scorer.py:46:    return f"""你是一位资深技术招聘专家。请根据职位描述评估以下候选人的匹配程度。
+src/utils/llm_scorer.py:47:
+src/utils/llm_scorer.py:48:## 职位描述
+src/utils/llm_scorer.py:49:- 职位: {jd_title}
+src/utils/llm_scorer.py:50:- 描述: {jd_desc}
+src/utils/llm_scorer.py:51:- 必备技能: {required}
+src/utils/llm_scorer.py:52:- 加分技能: {preferred}
+src/utils/llm_scorer.py:53:- 最低经验: {min_exp}年
+src/utils/llm_scorer.py:54:- 期望学历: {pref_edu}
+src/utils/llm_scorer.py:55:
+src/utils/llm_scorer.py:56:## 候选人信息
+src/utils/llm_scorer.py:57:- 姓名: {c_name}
+src/utils/llm_scorer.py:58:- 当前职位: {c_title}
+src/utils/llm_scorer.py:59:- 当前公司: {c_company}
+src/utils/llm_scorer.py:60:- 学历: {c_edu}
+src/utils/llm_scorer.py:61:- 工作年限: {c_years}
+src/utils/llm_scorer.py:62:- 技能标签: {c_skills}
+src/utils/llm_scorer.py:63:- 工作经历:
+src/utils/llm_scorer.py:64:{work_exp_text or '未提供'}
+src/utils/llm_scorer.py:65:
+src/utils/llm_scorer.py:66:## 评估要求
+src/utils/llm_scorer.py:67:综合考虑技能匹配度、经验相关性、学历背景、职业发展轨迹，给出0-100分的评分。
+src/utils/llm_scorer.py:68:
+src/utils/llm_scorer.py:69:请严格按以下JSON格式返回（不要包含其他内容）:
+src/utils/llm_scorer.py:70:{{"score": <0-100的整数>, "explanation": "<一句话中文说明>"}}"""
+src/utils/llm_scorer.py:71:
+src/utils/llm_scorer.py:72:
+src/utils/llm_scorer.py:73:def _parse_llm_response(text: str) -> Optional[Dict[str, Any]]:
+src/utils/llm_scorer.py:74:    """Parse LLM response with multiple fallback strategies."""
+src/utils/llm_scorer.py:75:    if not text:
+src/utils/llm_scorer.py:76:        return None
+src/utils/llm_scorer.py:77:
+src/utils/llm_scorer.py:78:    # Strategy 1: Direct JSON parse
+src/utils/llm_scorer.py:79:    try:
+src/utils/llm_scorer.py:80:        result = json.loads(text.strip())
+src/utils/llm_scorer.py:81:        if isinstance(result, dict) and "score" in result:
+src/utils/llm_scorer.py:82:            return _validate_result(result)
+src/utils/llm_scorer.py:83:    except json.JSONDecodeError:
+src/utils/llm_scorer.py:84:        pass
+src/utils/llm_scorer.py:85:
+src/utils/llm_scorer.py:86:    # Strategy 2: Extract from code block
+src/utils/llm_scorer.py:87:    code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+src/utils/llm_scorer.py:88:    if code_block:
+src/utils/llm_scorer.py:89:        try:
+src/utils/llm_scorer.py:90:            result = json.loads(code_block.group(1))
+src/utils/llm_scorer.py:91:            if isinstance(result, dict) and "score" in result:
+src/utils/llm_scorer.py:92:                return _validate_result(result)
+src/utils/llm_scorer.py:93:        except json.JSONDecodeError:
+src/utils/llm_scorer.py:94:            pass
+src/utils/llm_scorer.py:95:
+src/utils/llm_scorer.py:96:    # Strategy 3: Find JSON object in text
+src/utils/llm_scorer.py:97:    json_match = re.search(r"\{[^{}]*\"score\"\s*:\s*\d+[^{}]*\}", text)
+src/utils/llm_scorer.py:98:    if json_match:
+src/utils/llm_scorer.py:99:        try:
+src/utils/llm_scorer.py:100:            result = json.loads(json_match.group(0))
+src/utils/llm_scorer.py:101:            return _validate_result(result)
+src/utils/llm_scorer.py:102:        except json.JSONDecodeError:
+src/utils/llm_scorer.py:103:            pass
+src/utils/llm_scorer.py:104:
+src/utils/llm_scorer.py:105:    # Strategy 4: Regex extract score number
+src/utils/llm_scorer.py:106:    score_match = re.search(r"[\"']?score[\"']?\s*[:：]\s*(\d+)", text)
+src/utils/llm_scorer.py:107:    if score_match:
+src/utils/llm_scorer.py:108:        score = int(score_match.group(1))
+src/utils/llm_scorer.py:109:        explanation_match = re.search(r"[\"']?explanation[\"']?\s*[:：]\s*[\"']([^\"']+)[\"']", text)
+src/utils/llm_scorer.py:110:        explanation = explanation_match.group(1) if explanation_match else ""
+src/utils/llm_scorer.py:111:        return _validate_result({"score": score, "explanation": explanation})
+src/utils/llm_scorer.py:112:
+src/utils/llm_scorer.py:113:    logger.warning(f"Failed to parse LLM response: {text[:200]}")
+src/utils/llm_scorer.py:114:    return None
+src/utils/llm_scorer.py:115:
+src/utils/llm_scorer.py:116:
+src/utils/llm_scorer.py:117:def _validate_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+src/utils/llm_scorer.py:118:    """Validate and clamp the score."""
+src/utils/llm_scorer.py:119:    try:
+src/utils/llm_scorer.py:120:        score = int(result.get("score", -1))
+src/utils/llm_scorer.py:121:        if 0 <= score <= 100:
+src/utils/llm_scorer.py:122:            return {
+src/utils/llm_scorer.py:123:                "score": score,
+src/utils/llm_scorer.py:124:                "explanation": str(result.get("explanation", "")),
+src/utils/llm_scorer.py:125:            }
+src/utils/llm_scorer.py:126:    except (ValueError, TypeError):
+src/utils/llm_scorer.py:127:        pass
+src/utils/scoring.py:24:except ImportError:
+src/utils/scoring.py:25:    _HAS_JIEBA = False
+src/utils/scoring.py:26:    logger.debug("jieba not installed, skill matching will use substring fallback")
+src/utils/scoring.py:27:
+src/utils/scoring.py:28:# ---------------------------------------------------------------------------
+src/utils/scoring.py:29:# Constants
+src/utils/scoring.py:30:# ---------------------------------------------------------------------------
+src/utils/scoring.py:31:
+src/utils/scoring.py:32:SENIORITY_SCORES: Dict[str, int] = {
+src/utils/scoring.py:33:    "CTO": 50, "CEO": 40, "COO": 35, "VP": 40,
+src/utils/scoring.py:34:    "首席": 45, "总裁": 40, "副总裁": 40,
+src/utils/scoring.py:35:    "总监": 35, "技术总监": 40,
+src/utils/scoring.py:36:    "技术负责人": 35, "负责人": 30, "Tech Lead": 35,
+src/utils/scoring.py:37:    "架构师": 35, "专家": 30, "staff": 30, "Staff": 30,
+src/utils/scoring.py:38:    "principal": 35, "Principal": 35,
+src/utils/scoring.py:39:    "资深": 25, "高级": 20, "Senior": 20, "senior": 20,
+src/utils/scoring.py:40:    "经理": 15, "主管": 15, "lead": 15, "Lead": 15,
+src/utils/scoring.py:41:    "中级": 10,
+src/utils/scoring.py:42:    "初级": 5, "Junior": 5, "junior": 5,
+src/utils/scoring.py:43:    "助理": 3, "实习": 1,
+src/utils/scoring.py:44:}
+src/utils/scoring.py:45:
+src/utils/scoring.py:46:TIER1_COMPANIES = {
+src/utils/scoring.py:47:    "字节跳动", "ByteDance", "腾讯", "Tencent", "阿里巴巴", "阿里", "Alibaba",
+src/utils/scoring.py:48:    "百度", "Baidu", "美团", "Meituan", "京东", "JD", "拼多多", "PDD",
+src/utils/scoring.py:49:    "华为", "Huawei", "小米", "Xiaomi", "网易", "NetEase", "快手", "Kwai",
+src/utils/scoring.py:50:    "蚂蚁集团", "蚂蚁金服", "滴滴", "DiDi",
+src/utils/scoring.py:51:    "Google", "谷歌", "Microsoft", "微软", "Apple", "苹果",
+src/utils/scoring.py:52:    "Amazon", "亚马逊", "Meta", "Facebook",
+src/utils/scoring.py:53:    "Netflix", "Uber", "OpenAI", "Anthropic",
+src/utils/scoring.py:54:}
+src/utils/scoring.py:55:
+src/utils/scoring.py:56:TIER2_COMPANIES = {
+src/utils/scoring.py:57:    "携程", "Trip.com", "B站", "bilibili", "哔哩哔哩",
+src/utils/scoring.py:58:    "知乎", "Zhihu", "小红书", "得物", "SHEIN",
+src/utils/scoring.py:59:    "商汤", "旷视", "依图", "寒武纪", "地平线",
+src/utils/scoring.py:60:    "理想汽车", "蔚来", "小鹏", "大疆", "DJI",
+src/utils/scoring.py:61:    "米哈游", "miHoYo", "莉莉丝", "叠纸",
+src/utils/scoring.py:62:    "360", "新浪", "微博", "搜狐", "爱奇艺",
+src/utils/scoring.py:63:    "OPPO", "vivo", "一加", "联想", "Lenovo",
+src/utils/scoring.py:64:    "SAP", "Oracle", "IBM", "Adobe", "Salesforce",
+src/utils/scoring.py:65:    "Stripe", "Airbnb", "Spotify", "Twitter", "X",
+src/utils/scoring.py:66:}
+src/utils/scoring.py:67:
+src/utils/scoring.py:68:EDUCATION_SCORES: Dict[str, int] = {
+src/utils/scoring.py:69:    "博士": 100,
+src/utils/scoring.py:70:    "硕士": 80,
+src/utils/scoring.py:71:    "本科": 60,
+src/utils/scoring.py:72:    "大专": 40,
+src/utils/scoring.py:73:    "中专": 20,
+src/utils/scoring.py:74:    "高中": 10,
+src/utils/scoring.py:75:}
+src/utils/scoring.py:76:
+src/utils/scoring.py:77:# Default weights (used when no config present)
+src/utils/scoring.py:78:_DEFAULT_WEIGHTS: Dict[str, float] = {
+src/utils/scoring.py:79:    "seniority": 15,
+src/utils/scoring.py:80:    "company_tier": 15,
+src/utils/scoring.py:81:    "education": 10,
+src/utils/scoring.py:82:    "experience": 15,
+src/utils/scoring.py:83:    "skill_match": 25,
+src/utils/scoring.py:84:    "keyword_relevance": 10,
+src/utils/scoring.py:85:    "rd_bonus": 5,
+src/utils/scoring.py:86:    "llm_score": 5,
+src/utils/scoring.py:87:}
+src/utils/scoring.py:88:
+src/utils/scoring.py:89:# ---------------------------------------------------------------------------
+src/utils/scoring.py:90:# Config helpers (lazy-loaded, cached)
+src/utils/scoring.py:91:# ---------------------------------------------------------------------------
+src/utils/scoring.py:92:_cached_jd_config: Optional[Dict[str, Any]] = None
+src/utils/scoring.py:93:_cached_weights: Optional[Dict[str, float]] = None
+src/utils/scoring.py:94:
+src/utils/scoring.py:95:
+src/utils/scoring.py:96:def _get_jd_config() -> Optional[Dict[str, Any]]:
+src/utils/scoring.py:97:    """Load JD config from settings.json, cached after first call."""
+src/utils/scoring.py:98:    global _cached_jd_config
+src/utils/scoring.py:99:    if _cached_jd_config is not None:
+src/utils/scoring.py:100:        return _cached_jd_config
+src/utils/scoring.py:101:    try:
+src/utils/scoring.py:102:        from src.utils.config import get_config
+src/utils/scoring.py:103:        cfg = get_config()
+src/utils/scoring.py:104:        jd = cfg.get("scoring.jd")
+src/utils/scoring.py:105:        if jd:
+src/utils/scoring.py:106:            _cached_jd_config = jd
+src/utils/scoring.py:107:            return _cached_jd_config
+src/utils/scoring.py:108:    except Exception:
+src/utils/scoring.py:109:        pass
+src/utils/scoring.py:110:    return None
+src/utils/scoring.py:111:
+src/utils/scoring.py:112:
+src/utils/scoring.py:113:def _get_weights() -> Dict[str, float]:
+src/utils/scoring.py:114:    """Load scoring weights from settings.json, cached after first call."""
+src/utils/scoring.py:115:    global _cached_weights
+src/utils/scoring.py:116:    if _cached_weights is not None:
+src/utils/scoring.py:117:        return _cached_weights
+src/utils/scoring.py:118:    try:
+src/utils/scoring.py:119:        from src.utils.config import get_config
+src/utils/scoring.py:120:        cfg = get_config()
+src/utils/scoring.py:121:        w = cfg.get("scoring.weights")
+src/utils/scoring.py:122:        if w and isinstance(w, dict):
+src/utils/scoring.py:123:            _cached_weights = w
+src/utils/scoring.py:124:            return _cached_weights
+src/utils/scoring.py:125:    except Exception:
+src/utils/scoring.py:126:        pass
+src/core/session.py:41:        except OSError:
+src/core/session.py:42:            logger.warning("Could not set restrictive permissions on session directory")
+src/core/session.py:43:
+src/core/session.py:44:    def _get_fernet(self) -> Fernet:
+src/core/session.py:45:        """Get or create Fernet encryption instance."""
+src/core/session.py:46:        if self._fernet is not None:
+src/core/session.py:47:            return self._fernet
+src/core/session.py:48:
+src/core/session.py:49:        if self._key_path.exists():
+src/core/session.py:50:            key = self._key_path.read_bytes().strip()
+src/core/session.py:51:        else:
+src/core/session.py:52:            key = Fernet.generate_key()
+src/core/session.py:53:            fd = os.open(str(self._key_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+src/core/session.py:54:            try:
+src/core/session.py:55:                os.write(fd, key)
+src/core/session.py:56:            finally:
+src/core/session.py:57:                os.close(fd)
+src/core/session.py:58:
+src/core/session.py:59:        self._fernet = Fernet(key)
+src/core/session.py:60:        return self._fernet
+src/core/session.py:61:
+src/core/session.py:62:    def _decrypt_session_data(self) -> dict:
+src/core/session.py:63:        """Decrypt and parse the stored session file."""
+src/core/session.py:64:        encrypted = self.session_path.read_bytes()
+src/core/session.py:65:        plaintext = self._get_fernet().decrypt(encrypted)
+src/core/session.py:66:        return json.loads(plaintext.decode('utf-8'))
+src/core/session.py:67:
+src/core/session.py:68:    def _write_secure(self, path: Path, data: bytes) -> None:
+src/core/session.py:69:        """Atomically write data to file with owner-only permissions (0600)."""
+src/core/session.py:70:        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+src/core/session.py:71:        try:
+src/core/session.py:72:            os.write(tmp_fd, data)
+src/core/session.py:73:            os.close(tmp_fd)
+src/core/session.py:74:            tmp_fd = -1
+src/core/session.py:75:            os.chmod(tmp_path, 0o600)
+src/core/session.py:76:            os.replace(tmp_path, str(path))
+src/core/session.py:77:        except BaseException:
+src/core/session.py:78:            if tmp_fd >= 0:
+src/core/session.py:79:                os.close(tmp_fd)
+src/core/session.py:80:            try:
+src/core/session.py:81:                os.unlink(tmp_path)
+src/core/session.py:82:            except OSError:
+src/core/session.py:83:                pass

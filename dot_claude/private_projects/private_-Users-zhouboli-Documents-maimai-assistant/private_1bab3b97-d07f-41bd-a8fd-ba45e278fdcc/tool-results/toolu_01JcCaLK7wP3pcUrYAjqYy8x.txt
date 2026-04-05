@@ -1,0 +1,92 @@
+     1→"""Anti-detection module for browser automation.
+     2→
+     3→Implements medium-level anti-detection:
+     4→- Hide webdriver property
+     5→- Mask navigator properties
+     6→- Randomize mouse movements
+     7→- Human-like scrolling behavior
+     8→"""
+     9→
+    10→import random
+    11→
+    12→from patchright.async_api import Page
+    13→from emunium import EmuniumPlaywright
+    14→
+    15→from src.exceptions.errors import SelectorNotFoundError
+    16→
+    17→
+    18→async def human_scroll(page: Page, direction: str = 'down', distance: int = None) -> None:
+    19→    """
+    20→    Perform human-like scrolling with variable speed.
+    21→
+    22→    Args:
+    23→        page: Playwright page instance
+    24→        direction: 'up' or 'down'
+    25→        distance: Scroll distance in pixels (random if None)
+    26→    """
+    27→    if distance is None:
+    28→        distance = random.randint(200, 600)
+    29→
+    30→    if direction == 'up':
+    31→        distance = -distance
+    32→
+    33→    # Break scroll into smaller chunks
+    34→    chunks = random.randint(3, 8)
+    35→    chunk_size = distance // chunks
+    36→
+    37→    for i in range(chunks):
+    38→        # Add variance to each chunk
+    39→        actual_chunk = chunk_size + random.randint(-20, 20)
+    40→
+    41→        await page.mouse.wheel(0, actual_chunk)
+    42→
+    43→        # Variable delay between scroll chunks
+    44→        delay = random.uniform(0.05, 0.15)
+    45→        await page.wait_for_timeout(delay * 1000)
+    46→
+    47→    # Small pause after scrolling (human would look at content)
+    48→    await page.wait_for_timeout(random.uniform(0.2, 0.5) * 1000)
+    49→
+    50→
+    51→async def human_click(page: Page, selector: str) -> None:
+    52→    """
+    53→    Click an element with human-like behavior using Emunium.
+    54→
+    55→    Emunium provides natural mouse movement and click simulation.
+    56→
+    57→    Args:
+    58→        page: Playwright page instance
+    59→        selector: CSS selector for element to click
+    60→    """
+    61→    try:
+    62→        element = await page.wait_for_selector(selector, timeout=10000)
+    63→    except TimeoutError:
+    64→        raise SelectorNotFoundError(f"Element not found: {selector}")
+    65→
+    66→    emunium = EmuniumPlaywright(page)
+    67→    await emunium.click_at(element)
+    68→
+    69→
+    70→async def human_type(page: Page, selector: str, text: str) -> None:
+    71→    """
+    72→    Type text with human-like timing using Emunium.
+    73→
+    74→    Args:
+    75→        page: Playwright page instance
+    76→        selector: CSS selector for input element
+    77→        text: Text to type
+    78→    """
+    79→    try:
+    80→        element = await page.wait_for_selector(selector, timeout=10000)
+    81→    except TimeoutError:
+    82→        raise SelectorNotFoundError(f"Element not found: {selector}")
+    83→
+    84→    emunium = EmuniumPlaywright(page)
+    85→    await emunium.type_at(element, text)
+    86→
+    87→
+    88→
+
+<system-reminder>
+Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+</system-reminder>

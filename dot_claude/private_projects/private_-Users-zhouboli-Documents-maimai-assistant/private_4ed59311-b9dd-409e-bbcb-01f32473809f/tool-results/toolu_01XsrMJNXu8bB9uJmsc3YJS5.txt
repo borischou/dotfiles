@@ -1,0 +1,194 @@
+     1→"""Authentication module for Maimai login.
+     2→
+     3→In CDP mode, the user logs in manually in their own Chrome before running
+     4→CLI commands. This module verifies login status and provides guidance
+     5→if the user is not logged in.
+     6→"""
+     7→
+     8→import asyncio
+     9→from typing import Optional
+    10→
+    11→from patchright.async_api import Page
+    12→from loguru import logger
+    13→from rich.console import Console
+    14→from rich.panel import Panel
+    15→
+    16→from src.core.browser import BrowserManager, get_browser_manager
+    17→from src.utils.captcha import check_captcha
+    18→from src.exceptions.errors import SessionExpiredError
+    19→
+    20→console = Console()
+    21→
+    22→
+    23→async def login(browser: Optional[BrowserManager] = None) -> bool:
+    24→    """
+    25→    Verify login status in CDP-connected Chrome.
+    26→
+    27→    In CDP mode, the user is expected to already be logged in.
+    28→    If not, instructions are printed for manual login in the browser.
+    29→
+    30→    Args:
+    31→        browser: Browser manager instance (uses global if None)
+    32→
+    33→    Returns:
+    34→        True if logged in
+    35→    """
+    36→    if browser is None:
+    37→        browser = get_browser_manager()
+    38→
+    39→    # Connect to Chrome via CDP
+    40→    page = await browser.start()
+    41→
+    42→    # Check if already logged in
+    43→    if await check_login_status(page):
+    44→        console.print("[green]Already logged in![/green]")
+    45→        # Save session as backup
+    46→        await browser.save_session()
+    47→        return True
+    48→
+    49→    # Not logged in — guide the user
+    50→    console.print(Panel(
+    51→        "[bold]Not Logged In[/bold]\n\n"
+    52→        "Please log in to Maimai in your Chrome browser:\n"
+    53→        "1. Go to https://maimai.cn/login in Chrome\n"
+    54→        "2. Scan QR code with Maimai app, OR\n"
+    55→        "3. Enter phone number and verification code\n\n"
+    56→        "[dim]Then run this command again to verify.[/dim]",
+    57→        title="Maimai Login",
+    58→        border_style="cyan"
+    59→    ))
+    60→
+    61→    # Poll for login (user may log in while we wait)
+    62→    max_wait_seconds = 300  # 5 minutes timeout
+    63→    poll_interval = 3
+    64→    elapsed = 0
+    65→
+    66→    console.print("[dim]Waiting for login... (timeout: 5 minutes)[/dim]")
+    67→
+    68→    while elapsed < max_wait_seconds:
+    69→        await asyncio.sleep(poll_interval)
+    70→        elapsed += poll_interval
+    71→
+    72→        # Check for captcha
+    73→        await check_captcha(page)
+    74→
+    75→        if await check_login_status(page):
+    76→            console.print("[green]Login successful![/green]")
+    77→            await browser.save_session()
+    78→            console.print("[green]Session saved as backup[/green]")
+    79→            return True
+    80→
+    81→    console.print("[red]Login timeout. Please log in manually and try again.[/red]")
+    82→    return False
+    83→
+    84→
+    85→async def check_login_status(page: Page) -> bool:
+    86→    """
+    87→    Check if user is currently logged in by navigating to a protected page
+    88→    and observing whether Maimai redirects to the login page.
+    89→
+    90→    API probes can give false positives (server returns 200 but session is
+    91→    actually stale). The redirect-based approach is reliable because Maimai's
+    92→    server-side auth check only fires on real page navigations, and it will
+    93→    redirect to the login page if the session is invalid.
+    94→
+    95→    Args:
+    96→        page: Playwright page instance
+    97→
+    98→    Returns:
+    99→        True if logged in (no redirect to login page)
+   100→    """
+   101→    try:
+   102→        # Navigate to a protected page that requires authentication.
+   103→        # The search center page reliably triggers server-side auth checks.
+   104→        protected_url = "https://maimai.cn/web/search_center"
+   105→        await page.goto(protected_url, wait_until='domcontentloaded')
+   106→
+   107→        # Wait for any redirects to settle (server-side auth redirect happens
+   108→        # after initial page load and JS execution)
+   109→        await page.wait_for_timeout(3000)
+   110→
+   111→        # Check 1: URL-based detection - did we get redirected to login?
+   112→        final_url = page.url
+   113→        if 'login' in final_url.lower():
+   114→            logger.info(f"Login status check: logged_in=False, detail=redirected_to_login (url={final_url})")
+   115→            return False
+   116→
+   117→        # Check 2: Page content detection - look for login form elements
+   118→        # even if URL didn't change (some login overlays don't change the URL)
+   119→        is_login_page = await page.evaluate("""
+   120→            () => {
+   121→                const bodyText = document.body ? document.body.innerText : '';
+   122→                const loginIndicators = [
+   123→                    '欢迎使用脉脉',
+   124→                    '登录/注册',
+   125→                    '请输入手机号',
+   126→                    '获取验证码',
+   127→                    '扫码登录',
+   128→                    '手机号登录'
+   129→                ];
+   130→                for (const indicator of loginIndicators) {
+   131→                    if (bodyText.includes(indicator)) {
+   132→                        return { is_login: true, matched: indicator };
+   133→                    }
+   134→                }
+   135→
+   136→                // Also check for login form elements in DOM
+   137→                const loginForm = document.querySelector(
+   138→                    'input[type="tel"], input[placeholder*="手机"], ' +
+   139→                    '[class*="qrcode"], [class*="scan-login"]'
+   140→                );
+   141→                if (loginForm) {
+   142→                    return { is_login: true, matched: 'login_form_element' };
+   143→                }
+   144→
+   145→                return { is_login: false, matched: null };
+   146→            }
+   147→        """)
+   148→
+   149→        if is_login_page.get('is_login', False):
+   150→            detail = is_login_page.get('matched', 'unknown')
+   151→            logger.info(f"Login status check: logged_in=False, detail=login_page_detected ({detail})")
+   152→            return False
+   153→
+   154→        logger.info(f"Login status check: logged_in=True, detail=protected_page_accessible (url={final_url})")
+   155→        return True
+   156→
+   157→    except Exception as e:
+   158→        logger.error(f"Error checking login status: {e}")
+   159→        return False
+   160→
+   161→
+   162→async def ensure_logged_in(browser: Optional[BrowserManager] = None) -> bool:
+   163→    """
+   164→    Ensure user is logged in, prompting for login if needed.
+   165→
+   166→    Args:
+   167→        browser: Browser manager instance
+   168→
+   169→    Returns:
+   170→        True if logged in (existing or new login)
+   171→
+   172→    Raises:
+   173→        SessionExpiredError: If login fails
+   174→    """
+   175→    if browser is None:
+   176→        browser = get_browser_manager()
+   177→
+   178→    # Connect to Chrome via CDP if not already connected
+   179→    if not browser.is_running:
+   180→        await browser.start()
+   181→
+   182→    # Check login status
+   183→    if browser.page:
+   184→        if await check_login_status(browser.page):
+   185→            return True
+   186→
+   187→    # Not logged in — guide user
+   188→    console.print("[yellow]Not logged in. Please log in to Maimai in your Chrome browser.[/yellow]")
+   189→
+   190→    if await login(browser):
+   191→        return True
+   192→
+   193→    raise SessionExpiredError("Not logged in to Maimai. Please log in manually in Chrome and try again.")
+   194→

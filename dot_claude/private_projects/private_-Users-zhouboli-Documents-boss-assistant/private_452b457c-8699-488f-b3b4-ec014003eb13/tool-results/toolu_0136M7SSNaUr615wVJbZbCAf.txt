@@ -1,0 +1,111 @@
+     1→     1→"""Messages routes — preview and send."""
+     2→     2→
+     3→     3→import html
+     4→     4→
+     5→     5→from fastapi import APIRouter, Request, Form
+     6→     6→from fastapi.responses import HTMLResponse
+     7→     7→
+     8→     8→from src.web.app import task_queue
+     9→     9→from src.core.browser import get_browser_manager
+    10→    10→from src.modules.auth import ensure_logged_in
+    11→    11→from src.modules.message import render_template, send_message
+    12→    12→from src.utils.config import get_config
+    13→    13→from src.models.database import Candidate, get_db_manager
+    14→    14→
+    15→    15→router = APIRouter()
+    16→    16→
+    17→    17→
+    18→    18→@router.post("/preview", response_class=HTMLResponse)
+    19→    19→async def preview_message(
+    20→    20→    request: Request,
+    21→    21→    boss_id: str = Form(...),
+    22→    22→    template_name: str = Form(...),
+    23→    23→):
+    24→    24→    """Preview a rendered message for a candidate."""
+    25→    25→    if not template_name:
+    26→    26→        return HTMLResponse("")
+    27→    27→
+    28→    28→    try:
+    29→    29→        config = get_config()
+    30→    30→        template = config.get_template(template_name)
+    31→    31→        db = get_db_manager()
+    32→    32→
+    33→    33→        variables = {}
+    34→    34→        with db.session_scope() as session:
+    35→    35→            candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+    36→    36→            if candidate:
+    37→    37→                if candidate.name:
+    38→    38→                    variables['name'] = candidate.name
+    39→    39→                if candidate.company:
+    40→    40→                    variables['company'] = candidate.company
+    41→    41→                if candidate.title:
+    42→    42→                    variables['position'] = candidate.title
+    43→    43→
+    44→    44→        content = render_template(template, variables)
+    45→    45→
+    46→    46→        missing = []
+    47→    47→        for var in template.get('variables', []):
+    48→    48→            if var not in variables:
+    49→    49→                missing.append(var)
+    50→    50→
+    51→    51→        preview_html = f'<blockquote>{html.escape(content)}</blockquote>'
+    52→    52→        if missing:
+    53→    53→            preview_html += f'<p><small>缺少变量: {", ".join(missing)}</small></p>'
+    54→    54→        return HTMLResponse(preview_html)
+    55→    55→
+    56→    56→    except Exception as e:
+    57→    57→        return HTMLResponse(f'<p><mark>预览失败: {html.escape(str(e))}</mark></p>')
+    58→    58→
+    59→    59→
+    60→    60→@router.post("/send", response_class=HTMLResponse)
+    61→    61→async def send_msg(
+    62→    62→    request: Request,
+    63→    63→    boss_id: str = Form(...),
+    64→    64→    template_name: str = Form(...),
+    65→    65→):
+    66→    66→    """Send a message to a candidate (non-interactive, no confirmation)."""
+    67→    67→    if task_queue.is_busy:
+    68→    68→        return HTMLResponse(
+    69→    69→            '<p><mark>Pipeline 运行中，无法发送消息</mark></p>',
+    70→    70→            status_code=409,
+    71→    71→        )
+    72→    72→
+    73→    73→    if not template_name:
+    74→    74→        return HTMLResponse('<p><mark>请选择消息模板</mark></p>', status_code=400)
+    75→    75→
+    76→    76→    try:
+    77→    77→        browser = get_browser_manager()
+    78→    78→        await ensure_logged_in(browser)
+    79→    79→
+    80→    80→        config = get_config()
+    81→    81→        template = config.get_template(template_name)
+    82→    82→        db = get_db_manager()
+    83→    83→
+    84→    84→        variables = {}
+    85→    85→        with db.session_scope() as session:
+    86→    86→            candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+    87→    87→            if candidate:
+    88→    88→                if candidate.name:
+    89→    89→                    variables['name'] = candidate.name
+    90→    90→                if candidate.company:
+    91→    91→                    variables['company'] = candidate.company
+    92→    92→                if candidate.title:
+    93→    93→                    variables['position'] = candidate.title
+    94→    94→
+    95→    95→        result = await send_message(
+    96→    96→            boss_id=boss_id,
+    97→    97→            template_name=template_name,
+    98→    98→            variables=variables,
+    99→    99→            preview_only=False,
+   100→   100→            interactive=False,
+   101→   101→            browser=browser,
+   102→   102→        )
+   103→   103→
+   104→   104→        if result:
+   105→   105→            return HTMLResponse('<p>消息发送成功！</p>')
+   106→   106→        else:
+   107→   107→            return HTMLResponse('<p><mark>消息发送失败</mark></p>')
+   108→   108→
+   109→   109→    except Exception as e:
+   110→   110→        return HTMLResponse(f'<p><mark>发送失败: {html.escape(str(e))}</mark></p>', status_code=500)
+   111→   111→

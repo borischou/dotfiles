@@ -1,0 +1,55 @@
+"""Dashboard route — GET /"""
+
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Request
+
+from src.web.app import chrome_manager, task_queue, templates
+from src.models.database import Candidate, Message, SearchHistory, get_db_manager
+from src.utils.rate_limiter import get_rate_limiter
+
+router = APIRouter()
+
+
+@router.get("/")
+async def dashboard(request: Request):
+    """Main dashboard with status overview and today's stats."""
+    db = get_db_manager()
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    with db.session_scope() as session:
+        total_candidates = session.query(Candidate).count()
+        total_messages_sent = session.query(Message).filter(Message.status == 'sent').count()
+        today_searches = session.query(SearchHistory).filter(
+            SearchHistory.executed_at >= today_start
+        ).count()
+        today_messages = session.query(Message).filter(
+            Message.created_at >= today_start,
+            Message.status == 'sent',
+        ).count()
+
+    # Chrome status
+    chrome_healthy = await chrome_manager._check_cdp_health()
+
+    # Pipeline status
+    pipeline_busy = task_queue.is_busy
+    pipeline_task_id = task_queue.current_task_id
+
+    # Rate limiter status
+    try:
+        rate_limiter = get_rate_limiter()
+        throttle = rate_limiter.throttle_factor
+    except Exception:
+        throttle = 1.0
+
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "chrome_healthy": chrome_healthy,
+        "pipeline_busy": pipeline_busy,
+        "pipeline_task_id": pipeline_task_id,
+        "total_candidates": total_candidates,
+        "total_messages_sent": total_messages_sent,
+        "today_searches": today_searches,
+        "today_messages": today_messages,
+        "throttle_factor": throttle,
+    })

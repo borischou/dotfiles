@@ -1,0 +1,67 @@
+"""Settings routes — view and edit configuration."""
+
+import html
+import json
+from pathlib import Path
+
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from src.web.app import templates
+from src.utils.config import get_config
+
+# Keys that must exist and their expected types for basic schema validation
+_REQUIRED_KEYS = {"browser", "rate_limits", "search", "pipeline", "web"}
+_DANGEROUS_KEYS = {"browser.cdp_endpoint", "web.chrome_auto_launch"}
+
+router = APIRouter()
+
+
+@router.get("/", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    """Render settings page with current configuration."""
+    config = get_config()
+
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "settings": config._settings,
+        "settings_json": json.dumps(config._settings, ensure_ascii=False, indent=2),
+    })
+
+
+@router.post("/")
+async def save_settings(request: Request, settings_json: str = Form(...)):
+    """Save settings to disk."""
+    config = get_config()
+
+    try:
+        new_settings = json.loads(settings_json)
+    except json.JSONDecodeError as e:
+        return HTMLResponse(
+            f'<p><mark>JSON 格式错误: {html.escape(str(e))}</mark></p>',
+            status_code=400,
+        )
+
+    if not isinstance(new_settings, dict):
+        return HTMLResponse(
+            '<p><mark>配置必须是 JSON 对象</mark></p>',
+            status_code=400,
+        )
+
+    missing = _REQUIRED_KEYS - new_settings.keys()
+    if missing:
+        return HTMLResponse(
+            f'<p><mark>缺少必要配置项: {html.escape(", ".join(sorted(missing)))}</mark></p>',
+            status_code=400,
+        )
+
+    # Update in-memory
+    config._settings = new_settings
+
+    # Persist to disk
+    settings_path = Path(config.config_dir) / "settings.json"
+    with open(settings_path, 'w', encoding='utf-8') as f:
+        json.dump(new_settings, f, ensure_ascii=False, indent=2)
+        f.write('\n')
+
+    return RedirectResponse(url="/settings", status_code=303)

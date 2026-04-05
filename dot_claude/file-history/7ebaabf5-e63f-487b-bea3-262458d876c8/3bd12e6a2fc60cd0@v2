@@ -1,0 +1,20 @@
+patchright
+emunium
+cryptography>=41.0.0
+opencv-python-headless  # required by emunium (not declared in its deps)
+click==8.1.7
+rich==13.7.0
+questionary==2.0.1
+pandas==2.2.0
+openpyxl==3.1.2
+sqlalchemy==2.0.25
+loguru==0.7.2
+httpx==0.26.0  # used by llm_scorer (optional)
+jieba>=0.42.1
+
+# Dev dependencies
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.12.1
+ruff==0.1.9
+mypy==1.8.0

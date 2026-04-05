@@ -1,0 +1,158 @@
+     1→{% extends "base.html" %}
+     2→{% block title %}{{ candidate.name }} — Boss Assistant{% endblock %}
+     3→{% block header %}{{ candidate.name }}{% endblock %}
+     4→
+     5→{% block content %}
+     6→<section>
+     7→    <h2>基本信息</h2>
+     8→    <dl>
+     9→        <dt>Boss ID</dt>
+    10→        <dd>{{ candidate.boss_id }}</dd>
+    11→
+    12→        <dt>职位</dt>
+    13→        <dd>{{ candidate.title or "—" }}</dd>
+    14→
+    15→        <dt>公司</dt>
+    16→        <dd>{{ candidate.company or "—" }}</dd>
+    17→
+    18→        <dt>城市</dt>
+    19→        <dd>{{ candidate.location or "—" }}</dd>
+    20→
+    21→        <dt>期望薪资</dt>
+    22→        <dd>{{ candidate.salary_expect or "—" }}</dd>
+    23→
+    24→        <dt>工作年限</dt>
+    25→        <dd>{{ candidate.work_years or "—" }}</dd>
+    26→
+    27→        <dt>学历</dt>
+    28→        <dd>{{ candidate.education_level or "—" }}</dd>
+    29→
+    30→        <dt>来源搜索</dt>
+    31→        <dd>{{ candidate.source_search or "—" }}</dd>
+    32→    </dl>
+    33→
+    34→    {% if candidate.profile_url %}
+    35→    <p><a href="{{ candidate.profile_url }}" target="_blank" rel="noopener">Boss直聘 Profile &rarr;</a></p>
+    36→    {% endif %}
+    37→
+    38→    <div>
+    39→        <button hx-post="/candidates/{{ candidate.boss_id }}/extract"
+    40→                hx-target="#extract-result"
+    41→                hx-indicator="#extract-spinner"
+    42→                {% if pipeline_busy %}disabled{% endif %}>
+    43→            抓取详细 Profile
+    44→        </button>
+    45→        <span id="extract-spinner" class="htmx-indicator">抓取中...</span>
+    46→        <div id="extract-result"></div>
+    47→    </div>
+    48→</section>
+    49→
+    50→{% if candidate.skills %}
+    51→<section>
+    52→    <h2>技能</h2>
+    53→    <p>
+    54→        {% for skill in candidate.skills %}
+    55→        <span class="tag">{{ skill }}</span>
+    56→        {% endfor %}
+    57→    </p>
+    58→</section>
+    59→{% endif %}
+    60→
+    61→{% if candidate.education %}
+    62→<section>
+    63→    <h2>教育经历</h2>
+    64→    {% for edu in candidate.education %}
+    65→    <p>
+    66→        <strong>{{ edu.school or "" }}</strong>
+    67→        {% if edu.degree %} — {{ edu.degree }}{% endif %}
+    68→        {% if edu.major %} — {{ edu.major }}{% endif %}
+    69→        {% if edu.period %} <small>({{ edu.period }})</small>{% endif %}
+    70→    </p>
+    71→    {% endfor %}
+    72→</section>
+    73→{% endif %}
+    74→
+    75→{% if candidate.work_experience %}
+    76→<section>
+    77→    <h2>工作经历</h2>
+    78→    {% for work in candidate.work_experience %}
+    79→    <p>
+    80→        <strong>{{ work.company or "" }}</strong>
+    81→        {% if work.title %} — {{ work.title }}{% endif %}
+    82→        {% if work.period %} <small>({{ work.period }})</small>{% endif %}
+    83→    </p>
+    84→    {% if work.description %}
+    85→    <p><small>{{ work.description[:200] }}</small></p>
+    86→    {% endif %}
+    87→    {% endfor %}
+    88→</section>
+    89→{% endif %}
+    90→
+    91→{% if candidate.basic_info and candidate.basic_info.self_description %}
+    92→<section>
+    93→    <h2>自我描述</h2>
+    94→    <p>{{ candidate.basic_info.self_description[:500] }}</p>
+    95→</section>
+    96→{% endif %}
+    97→
+    98→<section>
+    99→    <h2>消息记录 ({{ messages|length }})</h2>
+   100→    {% if messages %}
+   101→    <table>
+   102→        <thead>
+   103→            <tr>
+   104→                <th>模板</th>
+   105→                <th>内容</th>
+   106→                <th>状态</th>
+   107→                <th>时间</th>
+   108→            </tr>
+   109→        </thead>
+   110→        <tbody>
+   111→            {% for msg in messages %}
+   112→            <tr>
+   113→                <td>{{ msg.template_name }}</td>
+   114→                <td>{{ msg.content[:50] }}...</td>
+   115→                <td>{{ msg.status }}</td>
+   116→                <td>{{ (msg.sent_at or msg.created_at).strftime('%Y-%m-%d %H:%M') if (msg.sent_at or msg.created_at) else "—" }}</td>
+   117→            </tr>
+   118→            {% endfor %}
+   119→        </tbody>
+   120→    </table>
+   121→    {% else %}
+   122→    <p>暂无消息记录</p>
+   123→    {% endif %}
+   124→
+   125→    <h3>发送消息</h3>
+   126→    <form hx-post="/messages/send" hx-target="#send-result">
+   127→        <input type="hidden" name="boss_id" value="{{ candidate.boss_id }}">
+   128→        <label for="template_name">模板
+   129→            <select name="template_name" id="template_name"
+   130→                    hx-post="/messages/preview" hx-target="#message-preview"
+   131→                    hx-include="[name='boss_id']" hx-trigger="change">
+   132→                <option value="">选择模板...</option>
+   133→            </select>
+   134→        </label>
+   135→        <div id="message-preview"></div>
+   136→        <button type="submit" {% if pipeline_busy %}disabled{% endif %}>发送</button>
+   137→        <div id="send-result"></div>
+   138→    </form>
+   139→</section>
+   140→
+   141→{% block scripts %}
+   142→<script>
+   143→// Load template options on page load
+   144→fetch("/templates?format=json")
+   145→    .then(r => r.json())
+   146→    .then(data => {
+   147→        const select = document.getElementById("template_name");
+   148→        data.forEach(t => {
+   149→            const opt = document.createElement("option");
+   150→            opt.value = t.name;
+   151→            opt.textContent = t.display_name + " — " + t.description;
+   152→            select.appendChild(opt);
+   153→        });
+   154→    })
+   155→    .catch(() => {});
+   156→</script>
+   157→{% endblock %}
+   158→

@@ -1,0 +1,271 @@
+     1→"""Session management for persistent browser sessions.
+     2→
+     3→Handles saving and loading browser sessions (cookies, localStorage)
+     4→to enable resuming without re-login.
+     5→"""
+     6→
+     7→import json
+     8→import os
+     9→import stat
+    10→from pathlib import Path
+    11→from datetime import datetime, timedelta, timezone
+    12→from typing import Optional
+    13→
+    14→from cryptography.fernet import Fernet
+    15→from patchright.async_api import Page, BrowserContext
+    16→from loguru import logger
+    17→
+    18→from src.utils.config import get_config
+    19→
+    20→
+    21→class SessionManager:
+    22→    """Manages browser session persistence."""
+    23→
+    24→    def __init__(self, session_path: Optional[str] = None):
+    25→        """
+    26→        Initialize session manager.
+    27→
+    28→        Args:
+    29→            session_path: Path to session file. Uses config default if None.
+    30→        """
+    31→        if session_path is None:
+    32→            config = get_config()
+    33→            session_path = config.get('data.session_path', 'data/.session/maimai_session.json')
+    34→
+    35→        self.session_path = Path(session_path)
+    36→        self._key_path = self.session_path.parent / '.session_key'
+    37→        self._fernet: Optional[Fernet] = None
+    38→        self._ensure_session_dir()
+    39→
+    40→    def _ensure_session_dir(self) -> None:
+    41→        """Ensure session directory exists with restrictive permissions."""
+    42→        session_dir = self.session_path.parent
+    43→        session_dir.mkdir(parents=True, exist_ok=True)
+    44→        # Restrict directory to owner only (rwx------)
+    45→        try:
+    46→            os.chmod(session_dir, stat.S_IRWXU)
+    47→        except OSError:
+    48→            logger.warning("Could not set restrictive permissions on session directory")
+    49→
+    50→    def _get_fernet(self) -> Fernet:
+    51→        """Get or create Fernet encryption instance."""
+    52→        if self._fernet is not None:
+    53→            return self._fernet
+    54→
+    55→        if self._key_path.exists():
+    56→            key = self._key_path.read_bytes().strip()
+    57→        else:
+    58→            key = Fernet.generate_key()
+    59→            # Write key with owner-only permissions
+    60→            fd = os.open(str(self._key_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    61→            try:
+    62→                os.write(fd, key)
+    63→            finally:
+    64→                os.close(fd)
+    65→
+    66→        self._fernet = Fernet(key)
+    67→        return self._fernet
+    68→
+    69→    def _decrypt_session_data(self) -> dict:
+    70→        """Decrypt and parse the stored session file.
+    71→
+    72→        Returns:
+    73→            Parsed session data dict.
+    74→
+    75→        Raises:
+    76→            Exception: If decryption or JSON parsing fails.
+    77→        """
+    78→        encrypted = self.session_path.read_bytes()
+    79→        plaintext = self._get_fernet().decrypt(encrypted)
+    80→        return json.loads(plaintext.decode('utf-8'))
+    81→
+    82→    def _write_secure(self, path: Path, data: bytes) -> None:
+    83→        """Write data to file with owner-only permissions (0600)."""
+    84→        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    85→        try:
+    86→            os.write(fd, data)
+    87→        finally:
+    88→            os.close(fd)
+    89→
+    90→    def has_saved_session(self) -> bool:
+    91→        """
+    92→        Check if a saved session exists.
+    93→
+    94→        Returns:
+    95→            True if session file exists
+    96→        """
+    97→        return self.session_path.exists()
+    98→
+    99→    async def save(self, context: BrowserContext) -> None:
+   100→        """
+   101→        Save browser session state.
+   102→
+   103→        Args:
+   104→            context: Playwright browser context
+   105→        """
+   106→        try:
+   107→            # Get storage state (cookies + localStorage)
+   108→            storage_state = await context.storage_state()
+   109→
+   110→            # Add metadata
+   111→            session_data = {
+   112→                'saved_at': datetime.now(timezone.utc).isoformat(),
+   113→                'storage_state': storage_state
+   114→            }
+   115→
+   116→            # Encrypt and write with restrictive permissions
+   117→            plaintext = json.dumps(session_data, ensure_ascii=False).encode('utf-8')
+   118→            encrypted = self._get_fernet().encrypt(plaintext)
+   119→            self._write_secure(self.session_path, encrypted)
+   120→
+   121→            logger.info(f"Session saved (encrypted) to {self.session_path}")
+   122→
+   123→        except Exception as e:
+   124→            logger.error(f"Failed to save session: {e}")
+   125→            raise
+   126→
+   127→    async def load(self, context: BrowserContext) -> bool:
+   128→        """
+   129→        Load saved session into browser context.
+   130→
+   131→        Args:
+   132→            context: Playwright browser context
+   133→
+   134→        Returns:
+   135→            True if session was loaded successfully
+   136→        """
+   137→        if not self.has_saved_session():
+   138→            logger.debug("No saved session found")
+   139→            return False
+   140→
+   141→        try:
+   142→            session_data = self._decrypt_session_data()
+   143→
+   144→            # Check session age (warn if old)
+   145→            saved_at = datetime.fromisoformat(session_data.get('saved_at', '2000-01-01'))
+   146→            age = datetime.now(timezone.utc) - saved_at
+   147→
+   148→            if age > timedelta(days=7):
+   149→                logger.warning(f"Session is {age.days} days old, may be expired")
+   150→
+   151→            # Apply storage state
+   152→            storage_state = session_data.get('storage_state', {})
+   153→
+   154→            # Add cookies
+   155→            cookies = storage_state.get('cookies', [])
+   156→            if cookies:
+   157→                await context.add_cookies(cookies)
+   158→                logger.debug(f"Loaded {len(cookies)} cookies")
+   159→
+   160→            logger.info("Session loaded successfully")
+   161→            return True
+   162→
+   163→        except json.JSONDecodeError as e:
+   164→            logger.error(f"Invalid session file: {e}")
+   165→            return False
+   166→        except Exception as e:
+   167→            logger.error(f"Failed to load session: {e}")
+   168→            return False
+   169→
+   170→    async def is_valid(self, page: Page) -> bool:
+   171→        """
+   172→        Check if current session is valid (user is logged in).
+   173→
+   174→        Detects login state by checking for logged-in indicators on page.
+   175→
+   176→        Args:
+   177→            page: Playwright page instance
+   178→
+   179→        Returns:
+   180→            True if session appears valid
+   181→        """
+   182→        try:
+   183→            config = get_config()
+   184→
+   185→            # Try to find logged-in indicator elements
+   186→            logged_in_selector = config.get_selector('login.logged_in_indicator')
+   187→
+   188→            # Wait briefly for indicator
+   189→            try:
+   190→                await page.wait_for_selector(
+   191→                    logged_in_selector,
+   192→                    timeout=5000,
+   193→                    state='visible'
+   194→                )
+   195→                logger.debug("Session is valid - logged in indicator found")
+   196→                return True
+   197→            except Exception:
+   198→                logger.debug("Session invalid - logged in indicator not found")
+   199→                return False
+   200→
+   201→        except Exception as e:
+   202→            logger.error(f"Error checking session validity: {e}")
+   203→            return False
+   204→
+   205→    async def clear(self) -> None:
+   206→        """Clear saved session and encryption key."""
+   207→        if self.session_path.exists():
+   208→            self.session_path.unlink()
+   209→            logger.info("Session cleared")
+   210→
+   211→        # Also clear storage state file if exists
+   212→        state_path = self.session_path.parent / 'storage_state.json'
+   213→        if state_path.exists():
+   214→            state_path.unlink()
+   215→
+   216→        # Remove encryption key so a fresh one is generated next time
+   217→        if self._key_path.exists():
+   218→            self._key_path.unlink()
+   219→        self._fernet = None
+   220→
+   221→    def get_session_info(self) -> Optional[dict]:
+   222→        """
+   223→        Get information about saved session.
+   224→
+   225→        Returns:
+   226→            Dict with session metadata or None if no session
+   227→        """
+   228→        if not self.has_saved_session():
+   229→            return None
+   230→
+   231→        try:
+   232→            session_data = self._decrypt_session_data()
+   233→
+   234→            saved_at = session_data.get('saved_at')
+   235→            storage_state = session_data.get('storage_state', {})
+   236→            cookies = storage_state.get('cookies', [])
+   237→
+   238→            # Calculate age
+   239→            if saved_at:
+   240→                saved_datetime = datetime.fromisoformat(saved_at)
+   241→                age = datetime.now(timezone.utc) - saved_datetime
+   242→                age_str = f"{age.days}d {age.seconds // 3600}h"
+   243→            else:
+   244→                age_str = "unknown"
+   245→
+   246→            return {
+   247→                'saved_at': saved_at,
+   248→                'age': age_str,
+   249→                'cookie_count': len(cookies),
+   250→            }
+   251→
+   252→        except Exception as e:
+   253→            logger.error(f"Failed to get session info: {e}")
+   254→            return None
+   255→
+   256→
+   257→# Global session manager instance
+   258→_session_manager = None
+   259→
+   260→
+   261→def get_session_manager() -> SessionManager:
+   262→    """Get global session manager instance."""
+   263→    global _session_manager
+   264→    if _session_manager is None:
+   265→        _session_manager = SessionManager()
+   266→    return _session_manager
+   267→
+
+<system-reminder>
+Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+</system-reminder>

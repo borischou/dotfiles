@@ -1,0 +1,176 @@
+     1→"""Database models and setup using SQLAlchemy."""
+     2→
+     3→from contextlib import contextmanager
+     4→from datetime import datetime
+     5→from pathlib import Path
+     6→from typing import Optional
+     7→
+     8→from sqlalchemy import (
+     9→    Column, Integer, String, Text, DateTime, JSON,
+    10→    ForeignKey, create_engine, Index, CheckConstraint
+    11→)
+    12→from sqlalchemy.ext.declarative import declarative_base
+    13→from sqlalchemy.orm import sessionmaker, relationship
+    14→from loguru import logger
+    15→
+    16→from src.utils.config import get_config
+    17→
+    18→Base = declarative_base()
+    19→
+    20→
+    21→class Candidate(Base):
+    22→    """Candidate model - stores candidate profile information."""
+    23→
+    24→    __tablename__ = 'candidates'
+    25→
+    26→    id = Column(Integer, primary_key=True, autoincrement=True)
+    27→    maimai_id = Column(String(50), unique=True, nullable=False, index=True)
+    28→    name = Column(String(100))
+    29→    title = Column(String(200))
+    30→    company = Column(String(200))
+    31→    location = Column(String(100))
+    32→    profile_url = Column(Text)
+    33→
+    34→    # JSON fields for structured data
+    35→    basic_info = Column(JSON)
+    36→    education = Column(JSON)
+    37→    work_experience = Column(JSON)
+    38→    skills = Column(JSON)
+    39→
+    40→    # Metadata
+    41→    first_seen = Column(DateTime, default=datetime.utcnow)
+    42→    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    43→    source_search = Column(Text)  # Search keywords that found this candidate
+    44→
+    45→    # Relationships
+    46→    messages = relationship("Message", back_populates="candidate")
+    47→
+    48→    def __repr__(self):
+    49→        return f"<Candidate(maimai_id='{self.maimai_id}', name='{self.name}', company='{self.company}')>"
+    50→
+    51→
+    52→class Message(Base):
+    53→    """Message model - stores sent messages to candidates."""
+    54→
+    55→    __tablename__ = 'messages'
+    56→
+    57→    id = Column(Integer, primary_key=True, autoincrement=True)
+    58→    candidate_maimai_id = Column(String(50), ForeignKey('candidates.maimai_id'), index=True)
+    59→    template_name = Column(String(100))
+    60→    content = Column(Text, nullable=False)
+    61→    status = Column(String(20), CheckConstraint("status IN ('sent', 'failed', 'cancelled')"))
+    62→    retry_count = Column(Integer, default=0)
+    63→    sent_at = Column(DateTime)
+    64→    created_at = Column(DateTime, default=datetime.utcnow)
+    65→
+    66→    # Relationships
+    67→    candidate = relationship("Candidate", back_populates="messages")
+    68→
+    69→    def __repr__(self):
+    70→        return f"<Message(id={self.id}, candidate_id='{self.candidate_maimai_id}', status='{self.status}')>"
+    71→
+    72→
+    73→class SearchHistory(Base):
+    74→    """Search history model - tracks all searches performed."""
+    75→
+    76→    __tablename__ = 'search_history'
+    77→
+    78→    id = Column(Integer, primary_key=True, autoincrement=True)
+    79→    criteria = Column(JSON)  # Search parameters as JSON
+    80→    results_count = Column(Integer, default=0)
+    81→    executed_at = Column(DateTime, default=datetime.utcnow, index=True)
+    82→
+    83→    def __repr__(self):
+    84→        return f"<SearchHistory(id={self.id}, results={self.results_count}, date='{self.executed_at}')>"
+    85→
+    86→
+    87→class ActionLog(Base):
+    88→    """Action log model - tracks all actions for rate limiting."""
+    89→
+    90→    __tablename__ = 'action_logs'
+    91→
+    92→    id = Column(Integer, primary_key=True, autoincrement=True)
+    93→    action_type = Column(String(50), nullable=False)  # 'search', 'view_profile', 'send_message'
+    94→    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    95→    details = Column(JSON)  # Additional action details
+    96→
+    97→    # Composite index for efficient rate limiting queries
+    98→    __table_args__ = (
+    99→        Index('idx_action_logs_type_time', 'action_type', 'timestamp'),
+   100→    )
+   101→
+   102→    def __repr__(self):
+   103→        return f"<ActionLog(id={self.id}, type='{self.action_type}', time='{self.timestamp}')>"
+   104→
+   105→
+   106→class DatabaseManager:
+   107→    """Database manager for initialization and session management."""
+   108→
+   109→    def __init__(self, db_path: Optional[str] = None):
+   110→        """Initialize database manager."""
+   111→        if db_path is None:
+   112→            config = get_config()
+   113→            db_path = config.get('data.database_path', 'data/maimai.db')
+   114→
+   115→        # Ensure data directory exists
+   116→        db_file = Path(db_path)
+   117→        db_file.parent.mkdir(parents=True, exist_ok=True)
+   118→
+   119→        # Create engine and session
+   120→        self.db_path = db_path
+   121→        self.engine = create_engine(f'sqlite:///{db_path}', echo=False)
+   122→        self.Session = sessionmaker(bind=self.engine)
+   123→
+   124→        # Auto-create tables and run migrations
+   125→        self.init_db()
+   126→
+   127→        logger.info(f"Database initialized at: {db_path}")
+   128→
+   129→    def init_db(self):
+   130→        """Create all tables and run pending migrations."""
+   131→        Base.metadata.create_all(self.engine)
+   132→        logger.info("Database tables created successfully")
+   133→
+   134→        from src.models.migrations import run_migrations
+   135→        run_migrations(self.engine)
+   136→
+   137→    @contextmanager
+   138→    def session_scope(self):
+   139→        """Provide a transactional scope with auto commit/rollback/close."""
+   140→        session = self.Session()
+   141→        try:
+   142→            yield session
+   143→            session.commit()
+   144→        except Exception:
+   145→            session.rollback()
+   146→            raise
+   147→        finally:
+   148→            session.close()
+   149→
+   150→    def drop_all(self):
+   151→        """Drop all tables (use with caution!)."""
+   152→        Base.metadata.drop_all(self.engine)
+   153→        logger.warning("All database tables dropped")
+   154→
+   155→
+   156→# Global database manager instance
+   157→_db_manager = None
+   158→
+   159→
+   160→def get_db_manager() -> DatabaseManager:
+   161→    """Get global database manager instance."""
+   162→    global _db_manager
+   163→    if _db_manager is None:
+   164→        _db_manager = DatabaseManager()
+   165→    return _db_manager
+   166→
+   167→
+   168→def init_database():
+   169→    """Initialize database with all tables."""
+   170→    db_manager = get_db_manager()
+   171→    db_manager.init_db()
+   172→
+
+<system-reminder>
+Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+</system-reminder>

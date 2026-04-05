@@ -1,0 +1,592 @@
+"""Candidate search module for Boss直聘.
+
+Handles searching for candidates on Boss直聘's talent search pages:
+- Search page: /web/chat/search (搜索候选人)
+- Job list: /web/chat/job/list (职位管理)
+
+Uses page.evaluate() for JavaScript-based DOM extraction rather than
+CSS selectors for better reliability against page structure changes.
+"""
+
+import hashlib
+from dataclasses import dataclass, field
+from typing import List, Optional, Set
+from urllib.parse import urlencode
+
+from patchright.async_api import Page
+from loguru import logger
+from rich.console import Console
+from rich.table import Table
+
+from src.core.browser import BrowserManager, get_browser_manager
+from src.utils.delays import async_random_delay
+from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+from src.utils.captcha import check_captcha
+from src.utils.retry import retry_navigation
+from src.models.database import Candidate, SearchHistory, get_db_manager
+console = Console()
+
+
+@dataclass
+class CandidateBasic:
+    """Basic candidate info extracted from search results."""
+    boss_id: str
+    name: str
+    title: str
+    company: str
+    location: Optional[str] = None
+    salary_expect: Optional[str] = None
+    work_years: Optional[str] = None
+    education_level: Optional[str] = None
+    profile_url: Optional[str] = None
+    _score: int = field(default=0, init=False, repr=False)
+
+    def __hash__(self):
+        return hash(self.boss_id)
+
+    def __eq__(self, other):
+        if isinstance(other, CandidateBasic):
+            return self.boss_id == other.boss_id
+        return False
+
+
+# Non-R&D roles to filter out
+NON_RD_KEYWORDS = {
+    "销售", "产品经理", "市场", "运营", "行政", "人事", "财务",
+    "法务", "采购", "客服", "前台", "助理", "秘书",
+}
+
+
+def _is_non_rd_role(title: str) -> bool:
+    """Check if title indicates a non-R&D role."""
+    if not title:
+        return False
+    for keyword in NON_RD_KEYWORDS:
+        if keyword in title:
+            return True
+    return False
+
+
+def _generate_boss_id(name: str, company: str) -> str:
+    """Generate a fallback Boss ID from name + company hash.
+
+    Uses SHA-256 with 20 hex chars to reduce collision probability
+    compared to MD5 with 12 chars.
+    """
+    raw = f"{name}_{company}"
+    h = hashlib.sha256(raw.encode()).hexdigest()[:20]
+    return f"zp_{h}"
+
+
+# JavaScript extraction function for Boss直聘 search results page
+EXTRACT_CANDIDATES_JS = """
+() => {
+    const candidates = [];
+
+    // Strategy 1: Look for candidate cards in search results
+    // Boss直聘 search result cards typically have geek info containers
+    const cards = document.querySelectorAll(
+        '[class*="card-inner"], [class*="geek-card"], [class*="candidate-card"], ' +
+        '[class*="recommend-card"], [class*="job-card-wrap"], [class*="user-item"]'
+    );
+
+    for (const card of cards) {
+        try {
+            // Extract name
+            const nameEl = card.querySelector(
+                '[class*="name"], [class*="geek-name"], h3, [class*="username"]'
+            );
+            const name = nameEl ? nameEl.innerText.trim() : '';
+
+            if (!name || name.length > 20) continue;
+
+            // Extract title/position
+            const titleEl = card.querySelector(
+                '[class*="title"], [class*="position"], [class*="expect-position"], ' +
+                '[class*="job-title"]'
+            );
+            const title = titleEl ? titleEl.innerText.trim() : '';
+
+            // Extract company
+            const companyEl = card.querySelector(
+                '[class*="company"], [class*="comp-name"]'
+            );
+            const company = companyEl ? companyEl.innerText.trim() : '';
+
+            // Extract location
+            const locationEl = card.querySelector(
+                '[class*="area"], [class*="location"], [class*="city"]'
+            );
+            const location = locationEl ? locationEl.innerText.trim() : '';
+
+            // Extract salary expectation
+            const salaryEl = card.querySelector(
+                '[class*="salary"], [class*="expect-salary"]'
+            );
+            const salary = salaryEl ? salaryEl.innerText.trim() : '';
+
+            // Extract work years
+            const yearsEl = card.querySelector(
+                '[class*="work-year"], [class*="experience"]'
+            );
+            const workYears = yearsEl ? yearsEl.innerText.trim() : '';
+
+            // Extract education
+            const eduEl = card.querySelector(
+                '[class*="education"], [class*="degree"], [class*="edu"]'
+            );
+            const education = eduEl ? eduEl.innerText.trim() : '';
+
+            // Try to extract profile URL and encrypted geek ID
+            let profileUrl = '';
+            let bossId = '';
+
+            // Check for links in the card
+            const link = card.querySelector('a[href*="/web/geek/"], a[href*="geek"], a[href*="resume"]');
+            if (link) {
+                profileUrl = link.href;
+                // Try to extract encryptGeekId from URL
+                const match = profileUrl.match(/\\/web\\/geek\\/([^?/]+)/);
+                if (match) {
+                    bossId = 'zp_' + match[1];
+                }
+            }
+
+            // Fallback: check data attributes
+            if (!bossId) {
+                const dataId = card.getAttribute('data-geekid') ||
+                               card.getAttribute('data-uid') ||
+                               card.getAttribute('data-id') ||
+                               card.getAttribute('data-encrypt-id');
+                if (dataId) {
+                    bossId = 'zp_' + dataId;
+                }
+            }
+
+            // Fallback: check card onclick or inner links for IDs
+            if (!bossId) {
+                const allLinks = card.querySelectorAll('a[href]');
+                for (const a of allLinks) {
+                    const href = a.href;
+                    const match = href.match(/encryptGeekId=([^&]+)/);
+                    if (match) {
+                        bossId = 'zp_' + match[1];
+                        if (!profileUrl) profileUrl = href;
+                        break;
+                    }
+                }
+            }
+
+            candidates.push({
+                boss_id: bossId,
+                name: name,
+                title: title,
+                company: company,
+                location: location,
+                salary_expect: salary,
+                work_years: workYears,
+                education_level: education,
+                profile_url: profileUrl
+            });
+        } catch (e) {
+            console.error('Error extracting candidate:', e);
+        }
+    }
+
+    // Strategy 2: If no cards found, try extracting from list items
+    if (candidates.length === 0) {
+        const listItems = document.querySelectorAll(
+            '[class*="geek-list"] > *, [class*="resume-list"] > *, ' +
+            '[class*="talent-list"] > *, [class*="recommend-list"] > *'
+        );
+
+        for (const item of listItems) {
+            try {
+                const text = item.innerText || '';
+                const lines = text.split('\\n').filter(l => l.trim());
+                if (lines.length < 2) continue;
+
+                const name = lines[0].trim();
+                if (!name || name.length > 20) continue;
+
+                const title = lines.length > 1 ? lines[1].trim() : '';
+                const company = lines.length > 2 ? lines[2].trim() : '';
+
+                let bossId = '';
+                const link = item.querySelector('a[href]');
+                if (link) {
+                    const match = link.href.match(/\\/web\\/geek\\/([^?/]+)/);
+                    if (match) bossId = 'zp_' + match[1];
+                }
+
+                candidates.push({
+                    boss_id: bossId,
+                    name: name,
+                    title: title,
+                    company: company,
+                    location: '',
+                    salary_expect: '',
+                    work_years: '',
+                    education_level: '',
+                    profile_url: link ? link.href : ''
+                });
+            } catch (e) {
+                continue;
+            }
+        }
+    }
+
+    return candidates;
+}
+"""
+
+
+async def search_candidates(
+    keywords: List[str],
+    location: Optional[str] = None,
+    max_pages: int = 1,
+    experience: Optional[str] = None,
+    education: Optional[str] = None,
+    salary: Optional[str] = None,
+    browser: Optional[BrowserManager] = None,
+    start_page: int = 1,
+) -> List[CandidateBasic]:
+    """
+    Search for candidates on Boss直聘.
+
+    Supports multi-keyword search with deduplication.
+
+    Args:
+        keywords: List of search keywords
+        location: Location filter (e.g., "北京")
+        max_pages: Maximum number of pages to scrape per keyword
+        experience: Experience filter (e.g., "3-5年")
+        education: Education filter (e.g., "本科")
+        salary: Salary filter (e.g., "20-40K")
+        browser: Browser manager instance
+
+    Returns:
+        List of CandidateBasic instances
+    """
+    if browser is None:
+        browser = get_browser_manager()
+
+    page = browser.page
+    if not page:
+        page = await browser.start()
+
+    rate_limiter = get_rate_limiter()
+    db_manager = get_db_manager()
+
+    all_candidates: List[CandidateBasic] = []
+    seen_ids: Set[str] = set()
+    seen_dedup_keys: Set[str] = set()
+
+    for keyword in keywords:
+        console.print(f"\n[cyan]Searching for: {keyword}[/cyan]")
+
+        # Rate limit check
+        await async_check_rate_limit('search')
+
+        try:
+            # Navigate to search page
+            search_url = _build_search_url(keyword, location, experience, education, salary)
+            await retry_navigation(page, search_url, wait_until='domcontentloaded')
+            await async_random_delay('page_load')
+
+            # Check for captcha
+            await check_captcha(page, report_to_rate_limiter=True)
+
+            # Check for quota exhaustion page
+            if await _check_quota_exhausted(page):
+                console.print("[red]Daily contact quota exhausted. Stopping search.[/red]")
+                break
+
+            # Boss直聘 uses infinite scroll (auto-load on scroll), no pagination buttons.
+            # Scroll multiple rounds to load more candidates.
+            # start_page allows resuming from a previous scroll position.
+            total_rounds = start_page + max_pages - 1
+            for scroll_round in range(start_page, total_rounds + 1):
+                console.print(f"  [dim]Scroll round {scroll_round}/{total_rounds}...[/dim]")
+
+                # Scroll within the content container to trigger auto-load.
+                # The page uses an inner scrollable container, not window scroll.
+                await _scroll_search_results(page)
+                await async_random_delay('scroll')
+
+            # Extract candidates via JavaScript after all scrolling is done
+            raw_candidates = await page.evaluate(EXTRACT_CANDIDATES_JS)
+
+            if not raw_candidates:
+                logger.warning(f"No candidates found for '{keyword}'")
+                continue
+
+            # Process results
+            page_count = 0
+            for raw in raw_candidates:
+                name = raw.get('name', '').strip()
+                title = raw.get('title', '').strip()
+                company = raw.get('company', '').strip()
+
+                if not name:
+                    continue
+
+                # Filter non-R&D roles
+                if _is_non_rd_role(title):
+                    continue
+
+                # Generate or use boss_id
+                boss_id = raw.get('boss_id', '')
+                if not boss_id:
+                    boss_id = _generate_boss_id(name, company)
+
+                # Deduplicate
+                if boss_id in seen_ids:
+                    continue
+
+                # Also check name+company dedup
+                dedup_key = f"{name}_{company}"
+                if dedup_key in seen_dedup_keys:
+                    continue
+
+                seen_ids.add(boss_id)
+                seen_dedup_keys.add(dedup_key)
+
+                candidate = CandidateBasic(
+                    boss_id=boss_id,
+                    name=name,
+                    title=title,
+                    company=company,
+                    location=raw.get('location', ''),
+                    salary_expect=raw.get('salary_expect', ''),
+                    work_years=raw.get('work_years', ''),
+                    education_level=raw.get('education_level', ''),
+                    profile_url=raw.get('profile_url', ''),
+                )
+
+                all_candidates.append(candidate)
+                page_count += 1
+
+            # Log action
+            rate_limiter.log_action('search', {
+                'keyword': keyword,
+                'scroll_rounds': max_pages,
+                'results': page_count,
+            })
+
+            console.print(f"  [green]Found {page_count} candidates for '{keyword}'[/green]")
+
+            # Save search history
+            with db_manager.session_scope() as session:
+                history = SearchHistory(
+                    criteria={
+                        'keywords': keyword,
+                        'location': location,
+                        'scroll_rounds': max_pages,
+                        'experience': experience,
+                        'education': education,
+                        'salary': salary,
+                    },
+                    results_count=page_count,
+                )
+                session.add(history)
+
+        except Exception as e:
+            logger.error(f"Error searching for '{keyword}': {e}")
+            console.print(f"  [red]Error: {e}[/red]")
+            rate_limiter.report_error()
+
+    # Save candidates to database
+    _save_candidates_to_db(all_candidates, keywords, db_manager)
+
+    # Display results summary
+    _display_results(all_candidates, keywords)
+
+    return all_candidates
+
+
+def _build_search_url(
+    keyword: str,
+    location: Optional[str] = None,
+    experience: Optional[str] = None,
+    education: Optional[str] = None,
+    salary: Optional[str] = None,
+) -> str:
+    """Build Boss直聘 search URL with query parameters.
+
+    Note: Boss直聘 search uses infinite scroll, not URL-based pagination.
+    """
+    base_url = "https://www.zhipin.com/web/chat/search"
+
+    params = {"query": keyword}
+
+    if location:
+        params["city"] = location
+
+    if experience:
+        params["experience"] = experience
+
+    if education:
+        params["degree"] = education
+
+    if salary:
+        params["salary"] = salary
+
+    url = f"{base_url}?{urlencode(params)}"
+    return url
+
+
+async def _scroll_search_results(page: Page) -> None:
+    """
+    Scroll the search results container to trigger auto-load.
+
+    Boss直聘 uses infinite scroll within an inner container,
+    not window-level scroll. We scroll the container or fall back
+    to keyboard-based scrolling.
+    """
+    # Try scrolling within the candidate list container
+    scrolled = await page.evaluate("""
+        () => {
+            // Find the scrollable container for search results
+            const containers = document.querySelectorAll(
+                '[class*="recommend-list"], [class*="geek-list"], [class*="search-result"],
+                 [class*="candidate-list"], [class*="card-list"], [class*="scroll-container"]'
+            );
+            for (const c of containers) {
+                if (c.scrollHeight > c.clientHeight) {
+                    c.scrollTop += 600;
+                    return true;
+                }
+            }
+
+            // Fallback: find any large scrollable div
+            const allDivs = document.querySelectorAll('div');
+            for (const d of allDivs) {
+                if (d.scrollHeight > d.clientHeight + 100 && d.clientHeight > 300) {
+                    d.scrollTop += 600;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    """)
+
+    if not scrolled:
+        # Final fallback: use keyboard Page Down
+        await page.keyboard.press('PageDown')
+        await page.wait_for_timeout(500)
+        await page.keyboard.press('PageDown')
+
+    # Wait for new content to load
+    await page.wait_for_timeout(1500)
+
+
+async def _check_quota_exhausted(page: Page) -> bool:
+    """Check if Boss直聘 shows a quota exhaustion page."""
+    try:
+        result = await page.evaluate("""
+            () => {
+                const bodyText = document.body ? document.body.innerText : '';
+                const quotaIndicators = [
+                    '今日沟通次数已用完',
+                    '沟通次数已达上限',
+                    '今日联系人数已满',
+                    '升级会员',
+                    '开通会员享更多沟通'
+                ];
+                for (const indicator of quotaIndicators) {
+                    if (bodyText.includes(indicator)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        """)
+        return result
+    except Exception:
+        return False
+
+
+def _save_candidates_to_db(
+    candidates: List[CandidateBasic],
+    keywords: List[str],
+    db_manager,
+) -> None:
+    """Save or update candidates in the database."""
+    source = ', '.join(keywords)
+
+    with db_manager.session_scope() as session:
+        # Batch-fetch existing candidates to avoid N+1 queries
+        boss_ids = [c.boss_id for c in candidates]
+        existing_map = {}
+        # Query in chunks of 500 to avoid SQLite variable limit
+        for i in range(0, len(boss_ids), 500):
+            chunk = boss_ids[i:i + 500]
+            rows = session.query(Candidate).filter(
+                Candidate.boss_id.in_(chunk)
+            ).all()
+            for row in rows:
+                existing_map[row.boss_id] = row
+
+        for c in candidates:
+            existing = existing_map.get(c.boss_id)
+            if existing:
+                existing.name = c.name or existing.name
+                existing.title = c.title or existing.title
+                existing.company = c.company or existing.company
+                existing.location = c.location or existing.location
+                existing.salary_expect = c.salary_expect or existing.salary_expect
+                existing.work_years = c.work_years or existing.work_years
+                existing.education_level = c.education_level or existing.education_level
+                existing.profile_url = c.profile_url or existing.profile_url
+                if source and source not in (existing.source_search or ''):
+                    existing.source_search = f"{existing.source_search or ''}, {source}".strip(', ')
+            else:
+                new_candidate = Candidate(
+                    boss_id=c.boss_id,
+                    name=c.name,
+                    title=c.title,
+                    company=c.company,
+                    location=c.location,
+                    salary_expect=c.salary_expect,
+                    work_years=c.work_years,
+                    education_level=c.education_level,
+                    profile_url=c.profile_url,
+                    source_search=source,
+                )
+                session.add(new_candidate)
+
+
+def _display_results(candidates: List[CandidateBasic], keywords: List[str]) -> None:
+    """Display search results in a Rich table."""
+    if not candidates:
+        console.print("[yellow]No candidates found.[/yellow]")
+        return
+
+    table = Table(title=f"Search Results ({len(candidates)} candidates)")
+    table.add_column("Boss ID", style="dim", max_width=20)
+    table.add_column("Name", style="bold")
+    table.add_column("Title")
+    table.add_column("Company")
+    table.add_column("Location")
+    table.add_column("Salary Expect")
+    table.add_column("Experience")
+    table.add_column("Education")
+
+    for c in candidates[:50]:  # Show max 50 in table
+        table.add_row(
+            c.boss_id[:20],
+            c.name,
+            c.title[:30] if c.title else "",
+            c.company[:20] if c.company else "",
+            c.location or "",
+            c.salary_expect or "",
+            c.work_years or "",
+            c.education_level or "",
+        )
+
+    console.print(table)
+
+    if len(candidates) > 50:
+        console.print(f"[dim]...and {len(candidates) - 50} more candidates[/dim]")

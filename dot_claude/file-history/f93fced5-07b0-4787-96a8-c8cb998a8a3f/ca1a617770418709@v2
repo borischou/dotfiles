@@ -1,0 +1,31 @@
+/**
+ * Common utility functions for Maimai Assistant web UI.
+ */
+
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+/**
+ * Poll a task until it completes (fallback when WebSocket is not available).
+ */
+async function pollTask(taskId, onUpdate, intervalMs = 2000, maxAttempts = 300) {
+    for (let i = 0; i < maxAttempts; i++) {
+        try {
+            const res = await fetch(`/api/task/${taskId}`);
+            const data = await res.json();
+            if (onUpdate) onUpdate(data);
+
+            if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+                return data;
+            }
+        } catch (e) {
+            console.error('Poll error:', e);
+        }
+        await new Promise(r => setTimeout(r, intervalMs));
+    }
+    return null;
+}

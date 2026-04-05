@@ -1,0 +1,362 @@
+     1→"""
+     2→Browser action recorder - connects to existing Chrome via CDP
+     3→and records user interactions as replayable Playwright code.
+     4→
+     5→Usage:
+     6→    python3 scripts/recorder.py [--cdp http://localhost:9222] [-o recorded_actions.py]
+     7→
+     8→Press Ctrl+C to stop recording.
+     9→"""
+    10→
+    11→import asyncio
+    12→import json
+    13→import sys
+    14→import signal
+    15→import time
+    16→from datetime import datetime
+    17→from pathlib import Path
+    18→
+    19→# Add project root to path
+    20→sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    21→
+    22→from patchright.async_api import async_playwright
+    23→
+    24→
+    25→# JS snippet injected into the page to capture user interactions
+    26→RECORDER_JS = """
+    27→(() => {
+    28→    if (window.__recorder_installed__) return;
+    29→    window.__recorder_installed__ = true;
+    30→
+    31→    const events = [];
+    32→    const startTime = Date.now();
+    33→
+    34→    function getSelector(el) {
+    35→        // Priority 1: data-testid or id
+    36→        if (el.id) return '#' + CSS.escape(el.id);
+    37→        if (el.dataset && el.dataset.testid) return `[data-testid="${el.dataset.testid}"]`;
+    38→
+    39→        // Priority 2: unique text content for buttons/links
+    40→        const tag = el.tagName.toLowerCase();
+    41→        if (['button', 'a', 'span', 'div', 'p', 'h1', 'h2', 'h3', 'h4', 'li'].includes(tag)) {
+    42→            const text = el.innerText?.trim();
+    43→            if (text && text.length < 50 && text.length > 0) {
+    44→                return `text=${JSON.stringify(text)}`;
+    45→            }
+    46→        }
+    47→
+    48→        // Priority 3: input by placeholder or name
+    49→        if (tag === 'input' || tag === 'textarea') {
+    50→            if (el.placeholder) return `${tag}[placeholder="${el.placeholder}"]`;
+    51→            if (el.name) return `${tag}[name="${el.name}"]`;
+    52→            if (el.type) return `${tag}[type="${el.type}"]`;
+    53→        }
+    54→
+    55→        // Priority 4: CSS path
+    56→        const path = [];
+    57→        let current = el;
+    58→        while (current && current !== document.body) {
+    59→            let segment = current.tagName.toLowerCase();
+    60→            if (current.className && typeof current.className === 'string') {
+    61→                const classes = current.className.trim().split(/\\s+/).filter(c => c.length > 0 && c.length < 30);
+    62→                if (classes.length > 0) {
+    63→                    segment += '.' + classes.slice(0, 2).map(c => CSS.escape(c)).join('.');
+    64→                }
+    65→            }
+    66→            path.unshift(segment);
+    67→            current = current.parentElement;
+    68→            if (path.length >= 4) break;
+    69→        }
+    70→        return path.join(' > ');
+    71→    }
+    72→
+    73→    function emit(type, detail) {
+    74→        const data = {
+    75→            type: type,
+    76→            timestamp: Date.now() - startTime,
+    77→            url: location.href,
+    78→            ...detail
+    79→        };
+    80→        console.log('__RECORDER__:' + JSON.stringify(data));
+    81→    }
+    82→
+    83→    // Click events
+    84→    document.addEventListener('click', (e) => {
+    85→        const el = e.target;
+    86→        const rect = el.getBoundingClientRect();
+    87→        emit('click', {
+    88→            selector: getSelector(el),
+    89→            tag: el.tagName.toLowerCase(),
+    90→            text: (el.innerText || '').trim().substring(0, 80),
+    91→            x: Math.round(e.clientX),
+    92→            y: Math.round(e.clientY),
+    93→            elementX: Math.round(rect.x),
+    94→            elementY: Math.round(rect.y),
+    95→            elementW: Math.round(rect.width),
+    96→            elementH: Math.round(rect.height)
+    97→        });
+    98→    }, true);
+    99→
+   100→    // Input events (debounced)
+   101→    let inputTimers = new Map();
+   102→    document.addEventListener('input', (e) => {
+   103→        const el = e.target;
+   104→        const key = getSelector(el);
+   105→        if (inputTimers.has(key)) clearTimeout(inputTimers.get(key));
+   106→        inputTimers.set(key, setTimeout(() => {
+   107→            emit('input', {
+   108→                selector: key,
+   109→                tag: el.tagName.toLowerCase(),
+   110→                value: el.value,
+   111→                placeholder: el.placeholder || ''
+   112→            });
+   113→            inputTimers.delete(key);
+   114→        }, 500));
+   115→    }, true);
+   116→
+   117→    // Keyboard: Enter and Escape
+   118→    document.addEventListener('keydown', (e) => {
+   119→        if (['Enter', 'Escape', 'Tab'].includes(e.key)) {
+   120→            emit('keydown', {
+   121→                key: e.key,
+   122→                selector: getSelector(e.target)
+   123→            });
+   124→        }
+   125→    }, true);
+   126→
+   127→    // Scroll events (debounced)
+   128→    let scrollTimer = null;
+   129→    window.addEventListener('scroll', () => {
+   130→        if (scrollTimer) clearTimeout(scrollTimer);
+   131→        scrollTimer = setTimeout(() => {
+   132→            emit('scroll', {
+   133→                scrollX: Math.round(window.scrollX),
+   134→                scrollY: Math.round(window.scrollY)
+   135→            });
+   136→        }, 300);
+   137→    }, true);
+   138→
+   139→    // Detect navigation via History API
+   140→    const origPush = history.pushState;
+   141→    const origReplace = history.replaceState;
+   142→    history.pushState = function() {
+   143→        origPush.apply(this, arguments);
+   144→        emit('navigation', { url: location.href, method: 'pushState' });
+   145→    };
+   146→    history.replaceState = function() {
+   147→        origReplace.apply(this, arguments);
+   148→        emit('navigation', { url: location.href, method: 'replaceState' });
+   149→    };
+   150→    window.addEventListener('popstate', () => {
+   151→        emit('navigation', { url: location.href, method: 'popstate' });
+   152→    });
+   153→
+   154→    console.log('__RECORDER__:' + JSON.stringify({type: 'ready', timestamp: 0, url: location.href}));
+   155→})();
+   156→"""
+   157→
+   158→
+   159→class ActionRecorder:
+   160→    def __init__(self, cdp_url="http://localhost:9222", output_file=None):
+   161→        self.cdp_url = cdp_url
+   162→        self.output_file = output_file or f"recorded_{datetime.now().strftime('%Y%m%d_%H%M%S')}.py"
+   163→        self.events = []
+   164→        self.running = True
+   165→        self.page = None
+   166→
+   167→    def _format_event(self, event):
+   168→        """Format a single event for display."""
+   169→        t = event.get("type", "?")
+   170→        ts = event.get("timestamp", 0)
+   171→        sec = ts / 1000
+   172→
+   173→        if t == "click":
+   174→            text = event.get("text", "")[:40]
+   175→            sel = event.get("selector", "")
+   176→            return f"[{sec:6.1f}s] CLICK  {sel}  {f'({text})' if text else ''}"
+   177→        elif t == "input":
+   178→            sel = event.get("selector", "")
+   179→            val = event.get("value", "")[:40]
+   180→            return f"[{sec:6.1f}s] INPUT  {sel}  = \"{val}\""
+   181→        elif t == "keydown":
+   182→            return f"[{sec:6.1f}s] KEY    {event.get('key', '')}"
+   183→        elif t == "scroll":
+   184→            return f"[{sec:6.1f}s] SCROLL y={event.get('scrollY', 0)}"
+   185→        elif t == "navigation":
+   186→            return f"[{sec:6.1f}s] NAV    {event.get('url', '')}"
+   187→        elif t == "page_navigation":
+   188→            return f"[{sec:6.1f}s] PAGE   {event.get('url', '')}"
+   189→        elif t == "ready":
+   190→            return f"[{sec:6.1f}s] READY  Recording on {event.get('url', '')}"
+   191→        return f"[{sec:6.1f}s] {t}"
+   192→
+   193→    def _generate_code(self):
+   194→        """Generate replayable Python code from recorded events."""
+   195→        lines = [
+   196→            '"""Auto-generated by recorder.py"""',
+   197→            "",
+   198→            "import asyncio",
+   199→            "from patchright.async_api import async_playwright",
+   200→            "",
+   201→            "",
+   202→            "async def replay(cdp_url='http://localhost:9222'):",
+   203→            "    p = await async_playwright().start()",
+   204→            "    browser = await p.chromium.connect_over_cdp(cdp_url)",
+   205→            "    context = browser.contexts[0]",
+   206→            "    page = context.pages[0] if context.pages else await context.new_page()",
+   207→            "",
+   208→        ]
+   209→
+   210→        prev_ts = 0
+   211→        for ev in self.events:
+   212→            if ev["type"] in ("ready",):
+   213→                continue
+   214→
+   215→            ts = ev.get("timestamp", 0)
+   216→            delay = ts - prev_ts
+   217→            if delay > 500:
+   218→                lines.append(f"    await asyncio.sleep({delay / 1000:.1f})")
+   219→            prev_ts = ts
+   220→
+   221→            t = ev["type"]
+   222→            if t == "navigation" or t == "page_navigation":
+   223→                url = ev.get("url", "")
+   224→                lines.append(f"    await page.goto({url!r}, wait_until='domcontentloaded')")
+   225→            elif t == "click":
+   226→                sel = ev.get("selector", "")
+   227→                lines.append(f"    await page.locator({sel!r}).click()")
+   228→            elif t == "input":
+   229→                sel = ev.get("selector", "")
+   230→                val = ev.get("value", "")
+   231→                lines.append(f"    await page.locator({sel!r}).fill({val!r})")
+   232→            elif t == "keydown":
+   233→                key = ev.get("key", "")
+   234→                lines.append(f"    await page.keyboard.press({key!r})")
+   235→            elif t == "scroll":
+   236→                sy = ev.get("scrollY", 0)
+   237→                lines.append(f"    await page.evaluate('window.scrollTo(0, {sy})')")
+   238→
+   239→        lines.extend([
+   240→            "",
+   241→            "",
+   242→            "if __name__ == '__main__':",
+   243→            "    asyncio.run(replay())",
+   244→            "",
+   245→        ])
+   246→        return "\n".join(lines)
+   247→
+   248→    async def _on_console(self, msg):
+   249→        """Handle console messages from the injected recorder."""
+   250→        text = msg.text
+   251→        if not text.startswith("__RECORDER__:"):
+   252→            return
+   253→        try:
+   254→            data = json.loads(text[len("__RECORDER__:"):])
+   255→            self.events.append(data)
+   256→            print(self._format_event(data))
+   257→        except json.JSONDecodeError:
+   258→            pass
+   259→
+   260→    async def _inject_recorder(self, page):
+   261→        """Inject the recorder script into a page."""
+   262→        try:
+   263→            await page.evaluate(RECORDER_JS)
+   264→        except Exception as e:
+   265→            print(f"  Warning: could not inject recorder into page: {e}")
+   266→
+   267→    async def run(self):
+   268→        print(f"Connecting to Chrome at {self.cdp_url} ...")
+   269→        async with async_playwright() as p:
+   270→            browser = await p.chromium.connect_over_cdp(self.cdp_url)
+   271→            context = browser.contexts[0]
+   272→
+   273→            # Inject into all existing pages
+   274→            for page in context.pages:
+   275→                page.on("console", self._on_console)
+   276→                page.on("framenavigated", lambda frame, pg=page: asyncio.ensure_future(self._on_frame_navigated(pg, frame)))
+   277→                await self._inject_recorder(page)
+   278→                print(f"  Attached to: {page.url}")
+   279→
+   280→            # Handle new pages (tabs)
+   281→            def on_new_page(page):
+   282→                page.on("console", self._on_console)
+   283→                page.on("framenavigated", lambda frame, pg=page: asyncio.ensure_future(self._on_frame_navigated(pg, frame)))
+   284→                asyncio.ensure_future(self._inject_recorder(page))
+   285→                print(f"  New tab: {page.url}")
+   286→
+   287→            context.on("page", on_new_page)
+   288→
+   289→            print()
+   290→            print("=" * 60)
+   291→            print("  RECORDING — operate in Chrome normally")
+   292→            print("  Press Ctrl+C to stop and save")
+   293→            print("=" * 60)
+   294→            print()
+   295→
+   296→            # Keep running until Ctrl+C
+   297→            try:
+   298→                while self.running:
+   299→                    await asyncio.sleep(0.5)
+   300→            except asyncio.CancelledError:
+   301→                pass
+   302→
+   303→            # Save
+   304→            self._save()
+   305→            await browser.close()
+   306→
+   307→    async def _on_frame_navigated(self, page, frame):
+   308→        """Re-inject recorder after navigation."""
+   309→        if frame == page.main_frame:
+   310→            self.events.append({
+   311→                "type": "page_navigation",
+   312→                "timestamp": int(time.time() * 1000) - (self.events[0]["timestamp"] if self.events else 0),
+   313→                "url": page.url
+   314→            })
+   315→            print(self._format_event(self.events[-1]))
+   316→            await asyncio.sleep(1)  # Wait for page load
+   317→            await self._inject_recorder(page)
+   318→
+   319→    def _save(self):
+   320→        if not self.events:
+   321→            print("\nNo events recorded.")
+   322→            return
+   323→
+   324→        # Save raw events as JSON
+   325→        json_file = self.output_file.replace(".py", ".json")
+   326→        with open(json_file, "w", encoding="utf-8") as f:
+   327→            json.dump(self.events, f, ensure_ascii=False, indent=2)
+   328→        print(f"\nRaw events saved to: {json_file}")
+   329→
+   330→        # Save as Python code
+   331→        code = self._generate_code()
+   332→        with open(self.output_file, "w", encoding="utf-8") as f:
+   333→            f.write(code)
+   334→        print(f"Replay script saved to: {self.output_file}")
+   335→        print(f"Total events: {len(self.events)}")
+   336→
+   337→
+   338→def main():
+   339→    import argparse
+   340→    parser = argparse.ArgumentParser(description="Record browser actions via CDP")
+   341→    parser.add_argument("--cdp", default="http://localhost:9222", help="CDP endpoint")
+   342→    parser.add_argument("-o", "--output", default=None, help="Output file (default: recorded_<timestamp>.py)")
+   343→    args = parser.parse_args()
+   344→
+   345→    recorder = ActionRecorder(cdp_url=args.cdp, output_file=args.output)
+   346→
+   347→    loop = asyncio.new_event_loop()
+   348→
+   349→    def handle_sigint(*_):
+   350→        recorder.running = False
+   351→
+   352→    signal.signal(signal.SIGINT, handle_sigint)
+   353→
+   354→    try:
+   355→        loop.run_until_complete(recorder.run())
+   356→    except KeyboardInterrupt:
+   357→        recorder._save()
+   358→
+   359→
+   360→if __name__ == "__main__":
+   361→    main()
+   362→

@@ -1,0 +1,40 @@
+     1→{% extends "base.html" %}
+     2→{% block title %}设置 — Boss Assistant{% endblock %}
+     3→{% block header %}设置{% endblock %}
+     4→
+     5→{% block content %}
+     6→<section>
+     7→    <h2>配置编辑</h2>
+     8→    <p><small>直接编辑 settings.json 内容。修改后点击保存。</small></p>
+     9→
+    10→    <form method="post" action="/settings">
+    11→        <label for="settings_json">settings.json
+    12→            <textarea id="settings_json" name="settings_json" rows="25" style="width: 100%; font-family: monospace; font-size: 0.85rem;">{{ settings_json }}</textarea>
+    13→        </label>
+    14→        <button type="submit">保存</button>
+    15→    </form>
+    16→</section>
+    17→
+    18→<section>
+    19→    <h2>常用配置说明</h2>
+    20→    <table>
+    21→        <thead>
+    22→            <tr>
+    23→                <th>配置项</th>
+    24→                <th>说明</th>
+    25→            </tr>
+    26→        </thead>
+    27→        <tbody>
+    28→            <tr><td><code>browser.cdp_endpoint</code></td><td>Chrome CDP 连接地址</td></tr>
+    29→            <tr><td><code>rate_limits.*</code></td><td>各操作的频率限制</td></tr>
+    30→            <tr><td><code>delays.*</code></td><td>操作延迟配置（秒）</td></tr>
+    31→            <tr><td><code>web.host</code></td><td>Web 服务监听地址</td></tr>
+    32→            <tr><td><code>web.port</code></td><td>Web 服务端口</td></tr>
+    33→            <tr><td><code>web.chrome_auto_launch</code></td><td>是否自动启动 Chrome</td></tr>
+    34→            <tr><td><code>scoring.jd</code></td><td>职位描述（用于候选人评分）</td></tr>
+    35→            <tr><td><code>scoring.llm.enabled</code></td><td>是否启用 LLM 评分</td></tr>
+    36→        </tbody>
+    37→    </table>
+    38→</section>
+    39→{% endblock %}
+    40→

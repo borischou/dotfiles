@@ -1,0 +1,111 @@
+"""Step-by-step diagnosis matching the exact search code flow."""
+import sys
+import asyncio
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.core.browser import get_browser_manager
+from src.utils.retry import retry_navigation
+
+MAIMAI_SEARCH_URL = "https://maimai.cn/web/search_center"
+
+
+async def main():
+    browser = get_browser_manager()
+    await browser.start()
+    page = browser.page
+    keyword = "前端"
+
+    print(f"\n=== Step 0: Current state ===")
+    print(f"  URL: {page.url}")
+
+    print(f"\n=== Step 1: retry_navigation to {MAIMAI_SEARCH_URL} ===")
+    await retry_navigation(page, MAIMAI_SEARCH_URL, wait_until='domcontentloaded')
+    print(f"  URL after nav: {page.url}")
+    await page.screenshot(path="data/screenshots/diag2_step1_after_nav.png")
+
+    print(f"\n=== Step 2: sleep(1) ===")
+    await asyncio.sleep(1)
+    print(f"  URL: {page.url}")
+
+    print(f"\n=== Step 3: Find search input ===")
+    # List ALL inputs on page
+    all_inputs = await page.evaluate('''() => {
+        const inputs = document.querySelectorAll('input');
+        return Array.from(inputs).map((i, idx) => ({
+            idx: idx,
+            type: i.type,
+            placeholder: i.placeholder,
+            className: i.className.substring(0, 80),
+            id: i.id,
+            visible: i.offsetParent !== null,
+            rect: i.getBoundingClientRect().toJSON()
+        }));
+    }''')
+    for inp in all_inputs:
+        print(f"  Input[{inp['idx']}]: type={inp['type']!r}, placeholder={inp['placeholder']!r}, "
+              f"class={inp['className']!r}, visible={inp['visible']}, "
+              f"rect=({inp['rect']['x']:.0f},{inp['rect']['y']:.0f},{inp['rect']['width']:.0f}x{inp['rect']['height']:.0f})")
+
+    search_input = (
+        await page.query_selector('input[placeholder="搜索"]')
+        or await page.query_selector('input[type="search"]')
+        or await page.query_selector('input[type="text"]')
+    )
+    if search_input:
+        bbox = await search_input.bounding_box()
+        is_visible = await search_input.is_visible()
+        print(f"  Selected input: visible={is_visible}, bbox={bbox}")
+    else:
+        print("  No input found!")
+        await browser.close()
+        return
+
+    print(f"\n=== Step 4: Click + fill + Enter ===")
+    await search_input.click()
+    print(f"  Clicked. URL: {page.url}")
+    await page.screenshot(path="data/screenshots/diag2_step4a_after_click.png")
+    print("  Screenshot: diag2_step4a_after_click.png")
+
+    await search_input.fill(keyword)
+    print(f"  Filled '{keyword}'. URL: {page.url}")
+    await page.screenshot(path="data/screenshots/diag2_step4b_after_fill.png")
+    print("  Screenshot: diag2_step4b_after_fill.png")
+
+    await asyncio.sleep(0.5)
+    await page.keyboard.press('Enter')
+    print(f"  Pressed Enter")
+
+    await asyncio.sleep(2)
+    print(f"  URL after Enter+wait: {page.url}")
+    await page.screenshot(path="data/screenshots/diag2_step4c_after_enter.png")
+    print("  Screenshot: diag2_step4c_after_enter.png")
+
+    print(f"\n=== Step 5: Find and click 人脉 tab ===")
+    renmai_tab = await page.query_selector(':text-is("人脉")')
+    if renmai_tab:
+        is_visible = await renmai_tab.is_visible()
+        bbox = await renmai_tab.bounding_box()
+        print(f"  Found 人脉 tab: visible={is_visible}, bbox={bbox}")
+        await renmai_tab.click()
+        await asyncio.sleep(1)
+        print(f"  Clicked. URL: {page.url}")
+        await page.screenshot(path="data/screenshots/diag2_step5_after_renmai.png")
+        print("  Screenshot: diag2_step5_after_renmai.png")
+    else:
+        print("  人脉 tab NOT FOUND!")
+        # Try other selectors
+        for sel in ['text="人脉"', 'a:has-text("人脉")', '[class*="tab"]:has-text("人脉")']:
+            el = await page.query_selector(sel)
+            print(f"  Trying '{sel}': {'FOUND' if el else 'not found'}")
+
+    print(f"\n=== Step 6: Check contactcard elements ===")
+    cards = await page.query_selector_all('[id^="contactcard_"]')
+    print(f"  contactcard_ elements: {len(cards)}")
+
+    await browser.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Boss Assistant{% endblock %}</title>
+    <!-- Simple.css -->
+    <link rel="stylesheet" href="https://cdn.simplecss.org/simple.min.css">
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/sse.js"></script>
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/search">搜索</a>
+            <a href="/candidates">候选人</a>
+            <a href="/pipeline">Pipeline</a>
+            <a href="/templates">模板</a>
+            <a href="/settings">设置</a>
+            <a href="/status">状态</a>
+        </nav>
+        <h1>{% block header %}Boss Assistant{% endblock %}</h1>
+    </header>
+
+    <main>
+        <!-- Toast container -->
+        <div id="toast-container"></div>
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>Boss Assistant — Boss直聘半自动招聘助手</p>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

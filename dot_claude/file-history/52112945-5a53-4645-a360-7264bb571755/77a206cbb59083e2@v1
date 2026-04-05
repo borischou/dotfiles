@@ -1,0 +1,64 @@
+"""Status and queue endpoints."""
+
+from fastapi import APIRouter, Depends
+
+from src.web.deps import get_queue, get_browser
+from src.web.schemas import QueueStatusResponse, TaskStatusResponse
+from src.web.task_queue import TaskQueue
+
+router = APIRouter()
+
+
+@router.get("/status")
+async def system_status(queue: TaskQueue = Depends(get_queue)):
+    """Get overall system status."""
+    from src.core.browser import get_browser_manager
+    from src.utils.rate_limiter import get_rate_limiter
+
+    browser = get_browser_manager()
+    rate_limiter = get_rate_limiter()
+
+    return {
+        "browser_connected": browser.is_connected,
+        "queue": queue.get_queue_status(),
+        "throttle_factor": rate_limiter._throttle_factor,
+    }
+
+
+@router.get("/queue", response_model=QueueStatusResponse)
+async def queue_status(queue: TaskQueue = Depends(get_queue)):
+    """Get task queue status."""
+    data = queue.get_queue_status()
+    return QueueStatusResponse(**data)
+
+
+@router.get("/task/{task_id}", response_model=TaskStatusResponse)
+async def task_detail(task_id: str, queue: TaskQueue = Depends(get_queue)):
+    """Get details of a specific task."""
+    from fastapi import HTTPException
+
+    task = queue.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    return TaskStatusResponse(
+        task_id=task.task_id,
+        name=task.name,
+        status=task.status,
+        priority=task.priority.name,
+        user=task.user,
+        created_at=task.created_at.isoformat(),
+        started_at=task.started_at.isoformat() if task.started_at else None,
+        completed_at=task.completed_at.isoformat() if task.completed_at else None,
+        error=task.error,
+        result=task.result,
+    )
+
+
+@router.get("/tasks")
+async def recent_tasks(
+    limit: int = 20,
+    queue: TaskQueue = Depends(get_queue),
+):
+    """Get recent tasks."""
+    return queue.get_recent_tasks(limit=limit)

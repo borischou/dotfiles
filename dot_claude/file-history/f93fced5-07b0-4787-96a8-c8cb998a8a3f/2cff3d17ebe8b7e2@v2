@@ -1,0 +1,307 @@
+/**
+ * Pipeline page interaction logic.
+ * Supports dual mode: search-only (no template) and pipeline (with template).
+ */
+
+let pipelineTaskId = null;
+let pipelineWS = null;
+let pipelineCandidates = [];
+
+document.getElementById('pipeline-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+
+    const keywords = form.keywords.value.split('\n').map(s => s.trim()).filter(Boolean);
+    const company = form.company.value.split('\n').map(s => s.trim()).filter(Boolean);
+    const location = form.location ? form.location.value.trim() || null : null;
+    const template = form.template.value;
+    const pages = parseInt(form.pages.value) || 1;
+
+    if (!keywords.length) return alert('Please enter at least one keyword');
+
+    // Hide all result sections
+    document.getElementById('pipeline-progress').hidden = false;
+    document.getElementById('pipeline-confirm').hidden = true;
+    document.getElementById('pipeline-results').hidden = true;
+    document.getElementById('search-results').hidden = true;
+    form.querySelector('button[type="submit"]').disabled = true;
+
+    const isSearchOnly = !template;
+
+    if (isSearchOnly) {
+        // --- Search-only mode ---
+        try {
+            const res = await fetch('/api/search', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({keywords, company, location, pages}),
+            });
+            const data = await res.json();
+            pipelineTaskId = data.task_id;
+            document.getElementById('pipeline-task-id').textContent = data.task_id;
+            document.getElementById('pipeline-status-text').textContent = 'Searching...';
+
+            connectTaskWS(data.task_id, {
+                onEvent(msg) {
+                    document.getElementById('pipeline-status-text').textContent =
+                        `${msg.event}: ${msg.keyword || ''} ${msg.found ? '(' + msg.found + ' found)' : ''}`;
+                },
+                onComplete(msg) {
+                    const candidates = msg.result || [];
+                    showSearchResults(candidates);
+                    document.getElementById('pipeline-progress').hidden = true;
+                    form.querySelector('button[type="submit"]').disabled = false;
+                },
+                onError(msg) {
+                    alert('Search failed: ' + (msg.error || 'Unknown error'));
+                    document.getElementById('pipeline-progress').hidden = true;
+                    form.querySelector('button[type="submit"]').disabled = false;
+                },
+            });
+        } catch (e) {
+            alert('Request failed: ' + e.message);
+            document.getElementById('pipeline-progress').hidden = true;
+            form.querySelector('button[type="submit"]').disabled = false;
+        }
+    } else {
+        // --- Pipeline mode ---
+        const auto_send = form.auto_send.checked;
+
+        // Collect template variables
+        const variables = {};
+        form.querySelectorAll('[name^="var_"]').forEach(input => {
+            const key = input.name.replace('var_', '');
+            if (input.value.trim()) variables[key] = input.value.trim();
+        });
+
+        try {
+            const res = await fetch('/api/pipeline', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({keywords, company, template, pages, variables, auto_send}),
+            });
+            const data = await res.json();
+            pipelineTaskId = data.task_id;
+            document.getElementById('pipeline-task-id').textContent = data.task_id;
+
+            pipelineWS = connectTaskWS(data.task_id, {
+                onEvent(msg) {
+                    handlePipelineEvent(msg);
+                },
+                onComplete(msg) {
+                    showPipelineResults(msg.result);
+                    document.getElementById('pipeline-progress').hidden = true;
+                    form.querySelector('button[type="submit"]').disabled = false;
+                },
+                onError(msg) {
+                    document.getElementById('pipeline-status-text').textContent = 'Failed';
+                    document.getElementById('pipeline-detail').textContent = msg.error || 'Unknown error';
+                    form.querySelector('button[type="submit"]').disabled = false;
+                },
+            });
+
+            pollTask(data.task_id, (task) => {
+                if (task.status === 'completed') {
+                    showPipelineResults(task.result);
+                    document.getElementById('pipeline-progress').hidden = true;
+                    form.querySelector('button[type="submit"]').disabled = false;
+                    if (pipelineWS) pipelineWS.close();
+                }
+            }, 3000);
+
+        } catch (e) {
+            alert('Request failed: ' + e.message);
+            form.querySelector('button[type="submit"]').disabled = false;
+            document.getElementById('pipeline-progress').hidden = true;
+        }
+    }
+});
+
+function handlePipelineEvent(msg) {
+    const statusEl = document.getElementById('pipeline-status-text');
+    const detailEl = document.getElementById('pipeline-detail');
+    const progressBar = document.getElementById('pipeline-progress-bar');
+
+    switch (msg.event) {
+        case 'search_progress':
+            statusEl.textContent = `Searching: ${msg.keyword} (${msg.keyword_index}/${msg.total_keywords})`;
+            break;
+
+        case 'search_keyword_done':
+            detailEl.textContent = `Found ${msg.found} candidates for "${msg.keyword}" (${msg.total_so_far} total)`;
+            break;
+
+        case 'search_complete':
+            statusEl.textContent = 'Search complete';
+            detailEl.textContent = `${msg.candidates.length} candidates found`;
+            break;
+
+        case 'awaiting_confirmation':
+            statusEl.textContent = 'Awaiting your confirmation';
+            document.getElementById('pipeline-progress').hidden = true;
+            showConfirmation(msg.candidates);
+            break;
+
+        case 'sending_started':
+            statusEl.textContent = 'Sending messages...';
+            progressBar.max = msg.total;
+            progressBar.value = 0;
+            document.getElementById('pipeline-progress').hidden = false;
+            document.getElementById('pipeline-confirm').hidden = true;
+            break;
+
+        case 'send_progress':
+            statusEl.textContent = `Sending: ${msg.current} (${msg.sent}/${msg.total})`;
+            progressBar.value = msg.sent + msg.failed;
+            progressBar.max = msg.total;
+            detailEl.textContent = `Sent: ${msg.sent}, Failed: ${msg.failed}`;
+            break;
+
+        case 'completed':
+            showPipelineResults(msg.result);
+            break;
+
+        default:
+            detailEl.textContent = JSON.stringify(msg);
+    }
+}
+
+function showConfirmation(candidates) {
+    pipelineCandidates = candidates;
+    document.getElementById('pipeline-confirm').hidden = false;
+    document.getElementById('confirm-count').textContent = candidates.length;
+
+    const list = document.getElementById('candidate-list');
+    list.innerHTML = candidates.map(c => `
+        <label>
+            <input type="checkbox" value="${c.maimai_id}" checked>
+            <span class="candidate-info">
+                <span class="candidate-name">${escapeHtml(c.name)}</span>
+                <span class="candidate-title">${escapeHtml(c.title)}</span>
+                <span class="candidate-company">${escapeHtml(c.company)}</span>
+            </span>
+        </label>
+    `).join('');
+}
+
+function toggleSelectAll(checked) {
+    document.querySelectorAll('#candidate-list input[type="checkbox"]').forEach(cb => {
+        cb.checked = checked;
+    });
+}
+
+async function confirmCandidates(cancel = false) {
+    if (!pipelineTaskId) return;
+
+    let maimai_ids = [];
+    if (!cancel) {
+        document.querySelectorAll('#candidate-list input[type="checkbox"]:checked').forEach(cb => {
+            maimai_ids.push(cb.value);
+        });
+
+        if (!maimai_ids.length) {
+            return alert('Please select at least one candidate');
+        }
+    }
+
+    try {
+        await fetch(`/api/pipeline/${pipelineTaskId}/confirm`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({maimai_ids}),
+        });
+
+        document.getElementById('pipeline-confirm').hidden = true;
+        if (!cancel) {
+            document.getElementById('pipeline-progress').hidden = false;
+            document.getElementById('pipeline-status-text').textContent = 'Sending messages...';
+        }
+    } catch (e) {
+        alert('Confirm failed: ' + e.message);
+    }
+}
+
+// --- Search-only results ---
+
+function showSearchResults(candidates) {
+    document.getElementById('search-results').hidden = false;
+    document.getElementById('result-count').textContent = candidates.length;
+    const tbody = document.getElementById('results-body');
+    tbody.innerHTML = candidates.map((c, i) => `
+        <tr>
+            <td>${i + 1}</td>
+            <td>${escapeHtml(c.name)}</td>
+            <td>${escapeHtml(c.title)}</td>
+            <td>${escapeHtml(c.company)}</td>
+            <td>${escapeHtml(c.location || '')}</td>
+        </tr>
+    `).join('');
+}
+
+async function exportResults() {
+    const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({format: 'xlsx'}),
+    });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'candidates.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// --- Pipeline results ---
+
+function showPipelineResults(result) {
+    document.getElementById('pipeline-progress').hidden = true;
+    document.getElementById('pipeline-confirm').hidden = true;
+    document.getElementById('pipeline-results').hidden = false;
+
+    const summary = document.getElementById('results-summary');
+
+    if (!result || result.error) {
+        summary.innerHTML = `<p>Error: ${result ? result.error : 'Unknown'}</p>`;
+        return;
+    }
+
+    if (result.dry_run) {
+        summary.innerHTML = `
+            <p>Dry run complete. Found <strong>${result.total}</strong> candidates.</p>
+            <p>No messages were sent.</p>
+        `;
+        return;
+    }
+
+    if (result.message) {
+        summary.innerHTML = `<p>${escapeHtml(result.message)}</p>`;
+        return;
+    }
+
+    summary.innerHTML = `
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="value">${result.total || 0}</div>
+                <div class="label">Total</div>
+            </div>
+            <div class="stat" style="color: #155724">
+                <div class="value">${result.sent || 0}</div>
+                <div class="label">Sent</div>
+            </div>
+            <div class="stat" style="color: #721c24">
+                <div class="value">${result.failed || 0}</div>
+                <div class="label">Failed</div>
+            </div>
+            <div class="stat" style="color: #856404">
+                <div class="value">${result.skipped || 0}</div>
+                <div class="label">Skipped</div>
+            </div>
+            <div class="stat" style="color: #856404">
+                <div class="value">${result.rate_limited || 0}</div>
+                <div class="label">Rate Limited</div>
+            </div>
+        </div>
+    `;
+}

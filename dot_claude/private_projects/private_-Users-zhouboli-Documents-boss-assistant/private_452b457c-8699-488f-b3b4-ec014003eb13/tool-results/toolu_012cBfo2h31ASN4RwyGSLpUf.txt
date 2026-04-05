@@ -1,0 +1,52 @@
+     1→{% extends "base.html" %}
+     2→{% block title %}消息模板 — Boss Assistant{% endblock %}
+     3→{% block header %}消息模板{% endblock %}
+     4→
+     5→{% block content %}
+     6→<section>
+     7→    {% for tmpl in template_list %}
+     8→    <details>
+     9→        <summary>
+    10→            <strong>{{ tmpl.name }}</strong> — {{ tmpl.display_name }}
+    11→            <small>({{ tmpl.description }})</small>
+    12→        </summary>
+    13→
+    14→        <form onsubmit="saveTemplate(event, '{{ tmpl.name }}')">
+    15→            <label for="content-{{ tmpl.name }}">模板内容
+    16→                <textarea id="content-{{ tmpl.name }}" rows="4" style="width: 100%;">{{ tmpl.content }}</textarea>
+    17→            </label>
+    18→
+    19→            <p><small>变量: {{ tmpl.variables|join(", ") if tmpl.variables else "无" }}</small></p>
+    20→
+    21→            <button type="submit">保存</button>
+    22→            <span id="save-status-{{ tmpl.name }}"></span>
+    23→        </form>
+    24→    </details>
+    25→    {% endfor %}
+    26→</section>
+    27→
+    28→{% block scripts %}
+    29→<script>
+    30→function saveTemplate(event, name) {
+    31→    event.preventDefault();
+    32→    const content = document.getElementById("content-" + name).value;
+    33→    const statusEl = document.getElementById("save-status-" + name);
+    34→
+    35→    fetch("/templates/" + name, {
+    36→        method: "PUT",
+    37→        headers: {"Content-Type": "application/json"},
+    38→        body: JSON.stringify({content: content})
+    39→    })
+    40→    .then(r => r.json())
+    41→    .then(data => {
+    42→        statusEl.textContent = "已保存";
+    43→        setTimeout(() => statusEl.textContent = "", 2000);
+    44→    })
+    45→    .catch(err => {
+    46→        statusEl.textContent = "保存失败: " + err;
+    47→    });
+    48→}
+    49→</script>
+    50→{% endblock %}
+    51→{% endblock %}
+    52→

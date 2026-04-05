@@ -1,0 +1,101 @@
+     1→"""Tests for message template rendering."""
+     2→
+     3→import pytest
+     4→from src.modules.message import render_template
+     5→from src.utils.config import Config
+     6→
+     7→
+     8→def test_render_template_simple():
+     9→    """Test rendering a template with variables."""
+    10→    template = {
+    11→        'content': 'Hello {name}, welcome to {company}!',
+    12→        'variables': ['name', 'company']
+    13→    }
+    14→    variables = {'name': '张三', 'company': 'Boss直聘'}
+    15→
+    16→    result = render_template(template, variables)
+    17→    assert result == 'Hello 张三, welcome to Boss直聘!'
+    18→
+    19→
+    20→def test_render_template_no_variables():
+    21→    """Test rendering a template with no variables."""
+    22→    template = {
+    23→        'content': '你好',
+    24→        'variables': []
+    25→    }
+    26→    result = render_template(template, {})
+    27→    assert result == '你好'
+    28→
+    29→
+    30→def test_render_template_multiline():
+    31→    """Test rendering a multiline template."""
+    32→    template = {
+    33→        'content': '{name}您好，\n\n关于{position}职位：\n薪资：{salary}',
+    34→        'variables': ['name', 'position', 'salary']
+    35→    }
+    36→    variables = {'name': '李四', 'position': '前端工程师', 'salary': '30-50K'}
+    37→
+    38→    result = render_template(template, variables)
+    39→    assert '李四' in result
+    40→    assert '前端工程师' in result
+    41→    assert '30-50K' in result
+    42→    assert '\n' in result
+    43→
+    44→
+    45→def test_render_greeting_template():
+    46→    """Test rendering the actual greeting template from config."""
+    47→    config = Config()
+    48→    template = config.get_template('greeting')
+    49→
+    50→    variables = {
+    51→        'name': '张三',
+    52→        'recruiter_name': 'Chelsea',
+    53→        'recruiter_company': 'TestCo',
+    54→        'company': '阿里巴巴',
+    55→        'position': '前端工程师',
+    56→        'target_position': '高级前端工程师',
+    57→        'salary_range': '40-60K',
+    58→    }
+    59→
+    60→    result = render_template(template, variables)
+    61→    assert '张三' in result
+    62→    assert 'Chelsea' in result
+    63→    assert '阿里巴巴' in result
+    64→    assert '40-60K' in result
+    65→
+    66→
+    67→def test_render_hello_template():
+    68→    """Test rendering the hello template (no variables)."""
+    69→    config = Config()
+    70→    template = config.get_template('hello')
+    71→
+    72→    result = render_template(template, {})
+    73→    assert result == '你好'
+    74→
+    75→
+    76→def test_render_template_partial_substitution():
+    77→    """Test that unreplaced variables remain as-is."""
+    78→    template = {
+    79→        'content': 'Hello {name}, your {role} is ready.',
+    80→        'variables': ['name', 'role']
+    81→    }
+    82→    # Only provide one variable
+    83→    variables = {'name': '张三'}
+    84→
+    85→    result = render_template(template, variables)
+    86→    assert '张三' in result
+    87→    assert '{role}' in result  # Unreplaced variable stays
+    88→
+    89→
+    90→def test_render_template_special_characters():
+    91→    """Test rendering with special characters."""
+    92→    template = {
+    93→        'content': '{name} - {title}',
+    94→        'variables': ['name', 'title']
+    95→    }
+    96→    variables = {'name': 'O\'Brien', 'title': 'C++ Developer & Architect'}
+    97→
+    98→    result = render_template(template, variables)
+    99→    assert "O'Brien" in result
+   100→    assert 'C++ Developer & Architect' in result
+   101→

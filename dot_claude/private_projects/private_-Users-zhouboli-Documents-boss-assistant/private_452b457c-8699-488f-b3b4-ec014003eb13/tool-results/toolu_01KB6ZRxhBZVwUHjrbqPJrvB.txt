@@ -1,0 +1,50 @@
+     1→     1→     1→"""Settings routes — view and edit configuration."""
+     2→     2→     2→
+     3→     3→     3→import json
+     4→     4→     4→from pathlib import Path
+     5→     5→     5→
+     6→     6→     6→from fastapi import APIRouter, Request, Form
+     7→     7→     7→from fastapi.responses import HTMLResponse, RedirectResponse
+     8→     8→     8→
+     9→     9→     9→from src.web.app import templates
+    10→    10→    10→from src.utils.config import get_config
+    11→    11→    11→
+    12→    12→    12→router = APIRouter()
+    13→    13→    13→
+    14→    14→    14→
+    15→    15→    15→@router.get("/", response_class=HTMLResponse)
+    16→    16→    16→async def settings_page(request: Request):
+    17→    17→    17→    """Render settings page with current configuration."""
+    18→    18→    18→    config = get_config()
+    19→    19→    19→
+    20→    20→    20→    return templates.TemplateResponse("settings.html", {
+    21→    21→    21→        "request": request,
+    22→    22→    22→        "settings": config._settings,
+    23→    23→    23→        "settings_json": json.dumps(config._settings, ensure_ascii=False, indent=2),
+    24→    24→    24→    })
+    25→    25→    25→
+    26→    26→    26→
+    27→    27→    27→@router.post("/")
+    28→    28→    28→async def save_settings(request: Request, settings_json: str = Form(...)):
+    29→    29→    29→    """Save settings to disk."""
+    30→    30→    30→    config = get_config()
+    31→    31→    31→
+    32→    32→    32→    try:
+    33→    33→    33→        new_settings = json.loads(settings_json)
+    34→    34→    34→    except json.JSONDecodeError as e:
+    35→    35→    35→        return HTMLResponse(
+    36→    36→    36→            f'<p><mark>JSON 格式错误: {e}</mark></p>',
+    37→    37→    37→            status_code=400,
+    38→    38→    38→        )
+    39→    39→    39→
+    40→    40→    40→    # Update in-memory
+    41→    41→    41→    config._settings = new_settings
+    42→    42→    42→
+    43→    43→    43→    # Persist to disk
+    44→    44→    44→    settings_path = Path(config.config_dir) / "settings.json"
+    45→    45→    45→    with open(settings_path, 'w', encoding='utf-8') as f:
+    46→    46→    46→        json.dump(new_settings, f, ensure_ascii=False, indent=2)
+    47→    47→    47→        f.write('\n')
+    48→    48→    48→
+    49→    49→    49→    return RedirectResponse(url="/settings", status_code=303)
+    50→    50→    50→

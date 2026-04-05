@@ -1,0 +1,217 @@
+"""Tests for LLM scorer module."""
+
+import pytest
+from unittest.mock import patch, MagicMock, AsyncMock
+
+from src.utils.llm_scorer import (
+    _build_scoring_prompt,
+    _parse_llm_response,
+    _validate_result,
+    check_ollama_available,
+    llm_score_candidate,
+    llm_score_candidates_batch,
+)
+
+
+# ----------------------------------------------------------------
+# Prompt building tests
+# ----------------------------------------------------------------
+
+class TestPromptBuilding:
+
+    def test_build_prompt_contains_jd_info(self):
+        jd = {
+            "title": "前端工程师",
+            "description": "负责Web前端开发",
+            "required_skills": ["React", "TypeScript"],
+            "preferred_skills": ["Node.js"],
+            "min_experience_years": 3,
+            "preferred_education": "本科",
+        }
+        candidate = {
+            "name": "张三",
+            "title": "高级前端",
+            "company": "字节跳动",
+            "education_level": "硕士",
+            "work_years": "5年",
+            "skills": ["React", "Vue"],
+            "work_experience": [],
+        }
+        prompt = _build_scoring_prompt(candidate, jd)
+        assert "前端工程师" in prompt
+        assert "React" in prompt
+        assert "张三" in prompt
+        assert "字节跳动" in prompt
+        assert "硕士" in prompt
+
+    def test_build_prompt_with_work_experience(self):
+        jd = {"title": "工程师", "required_skills": []}
+        candidate = {
+            "name": "李四",
+            "title": "工程师",
+            "company": "腾讯",
+            "work_experience": [
+                {"company": "百度", "title": "前端开发", "description": "负责搜索页面开发"},
+            ],
+        }
+        prompt = _build_scoring_prompt(candidate, jd)
+        assert "百度" in prompt
+        assert "搜索页面" in prompt
+
+    def test_build_prompt_empty_candidate(self):
+        jd = {"title": "工程师"}
+        candidate = {}
+        prompt = _build_scoring_prompt(candidate, jd)
+        assert "未知" in prompt
+
+
+# ----------------------------------------------------------------
+# JSON parsing tests
+# ----------------------------------------------------------------
+
+class TestJsonParsing:
+
+    def test_parse_direct_json(self):
+        text = '{"score": 85, "explanation": "技能匹配度高"}'
+        result = _parse_llm_response(text)
+        assert result is not None
+        assert result["score"] == 85
+        assert result["explanation"] == "技能匹配度高"
+
+    def test_parse_code_block(self):
+        text = '```json\n{"score": 72, "explanation": "经验不足"}\n```'
+        result = _parse_llm_response(text)
+        assert result is not None
+        assert result["score"] == 72
+
+    def test_parse_embedded_json(self):
+        text = '根据分析，评估结果如下：{"score": 60, "explanation": "基本匹配"} 以上是评估结果。'
+        result = _parse_llm_response(text)
+        assert result is not None
+        assert result["score"] == 60
+
+    def test_parse_regex_fallback(self):
+        text = "score: 55, explanation: '一般匹配'"
+        result = _parse_llm_response(text)
+        assert result is not None
+        assert result["score"] == 55
+
+    def test_parse_invalid(self):
+        assert _parse_llm_response("") is None
+        assert _parse_llm_response(None) is None
+        assert _parse_llm_response("完全无关的文本") is None
+
+    def test_parse_out_of_range_score(self):
+        text = '{"score": 150, "explanation": "超出范围"}'
+        result = _parse_llm_response(text)
+        assert result is None
+
+    def test_validate_result_valid(self):
+        assert _validate_result({"score": 50, "explanation": "ok"}) is not None
+
+    def test_validate_result_invalid(self):
+        assert _validate_result({"score": -1}) is None
+        assert _validate_result({"score": 101}) is None
+        assert _validate_result({}) is None
+
+
+# ----------------------------------------------------------------
+# Ollama availability tests (async)
+# ----------------------------------------------------------------
+
+class TestOllamaAvailability:
+
+    @pytest.mark.asyncio
+    async def test_available(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.utils.llm_scorer.httpx.AsyncClient", return_value=mock_client):
+            assert await check_ollama_available() is True
+
+    @pytest.mark.asyncio
+    async def test_unavailable_error(self):
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = ConnectionError("refused")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.utils.llm_scorer.httpx.AsyncClient", return_value=mock_client):
+            assert await check_ollama_available() is False
+
+    @pytest.mark.asyncio
+    async def test_unavailable_status(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.utils.llm_scorer.httpx.AsyncClient", return_value=mock_client):
+            assert await check_ollama_available() is False
+
+
+# ----------------------------------------------------------------
+# LLM scoring with mock (async)
+# ----------------------------------------------------------------
+
+class TestLLMScoring:
+
+    @pytest.mark.asyncio
+    async def test_score_candidate_success(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "message": {"content": '{"score": 75, "explanation": "技能匹配良好"}'}
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.utils.llm_scorer.httpx.AsyncClient", return_value=mock_client):
+            result = await llm_score_candidate(
+                {"name": "张三", "title": "前端"},
+                {"title": "前端工程师", "required_skills": ["React"]},
+            )
+        assert result is not None
+        assert result["score"] == 75
+
+    @pytest.mark.asyncio
+    async def test_score_candidate_network_error(self):
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = ConnectionError("timeout")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.utils.llm_scorer.httpx.AsyncClient", return_value=mock_client):
+            result = await llm_score_candidate(
+                {"name": "张三"}, {"title": "工程师"},
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("src.utils.llm_scorer.llm_score_candidate", new_callable=AsyncMock)
+    async def test_batch_scoring(self, mock_score):
+        mock_score.side_effect = [
+            {"score": 80, "explanation": "高匹配"},
+            None,
+            {"score": 60, "explanation": "一般匹配"},
+        ]
+        results = await llm_score_candidates_batch(
+            [{"name": "A"}, {"name": "B"}, {"name": "C"}],
+            {"title": "工程师"},
+        )
+        assert len(results) == 3
+        assert results[0]["score"] == 80
+        assert results[1] is None
+        assert results[2]["score"] == 60

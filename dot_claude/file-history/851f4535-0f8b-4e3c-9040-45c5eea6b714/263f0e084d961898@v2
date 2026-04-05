@@ -1,0 +1,124 @@
+"""Candidates and messages listing endpoints — direct DB query, no browser needed."""
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
+
+from src.models.database import Candidate, Message, DatabaseManager
+from src.web.deps import get_db
+from src.web.schemas import CandidateDetailResponse, MessageHistoryResponse
+
+router = APIRouter()
+
+
+@router.get("/candidates")
+async def list_candidates(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: str = Query(None),
+    db: DatabaseManager = Depends(get_db),
+):
+    """List candidates with pagination and optional search filter."""
+    with db.session_scope() as session:
+        query = session.query(Candidate)
+
+        if search:
+            pattern = f"%{search}%"
+            query = query.filter(
+                (Candidate.name.ilike(pattern)) |
+                (Candidate.company.ilike(pattern)) |
+                (Candidate.title.ilike(pattern))
+            )
+
+        total = query.count()
+        candidates = (
+            query.order_by(Candidate.last_updated.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        # Get message counts in batch
+        c_ids = [c.maimai_id for c in candidates]
+        msg_counts = {}
+        if c_ids:
+            rows = (
+                session.query(Message.candidate_maimai_id, func.count(Message.id))
+                .filter(Message.candidate_maimai_id.in_(c_ids))
+                .group_by(Message.candidate_maimai_id)
+                .all()
+            )
+            msg_counts = dict(rows)
+
+        items = []
+        for c in candidates:
+            items.append(CandidateDetailResponse(
+                id=c.id,
+                maimai_id=c.maimai_id,
+                name=c.name,
+                title=c.title,
+                company=c.company,
+                location=c.location,
+                profile_url=c.profile_url,
+                first_seen=c.first_seen.isoformat() if c.first_seen else None,
+                last_updated=c.last_updated.isoformat() if c.last_updated else None,
+                source_search=c.source_search,
+                message_count=msg_counts.get(c.maimai_id, 0),
+            ))
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
+
+@router.get("/messages")
+async def list_messages(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: DatabaseManager = Depends(get_db),
+):
+    """List message history with pagination."""
+    with db.session_scope() as session:
+        total = session.query(Message).count()
+        messages = (
+            session.query(Message)
+            .order_by(Message.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        # Batch fetch candidate names
+        c_ids = list({m.candidate_maimai_id for m in messages if m.candidate_maimai_id})
+        name_map = {}
+        if c_ids:
+            rows = (
+                session.query(Candidate.maimai_id, Candidate.name)
+                .filter(Candidate.maimai_id.in_(c_ids))
+                .all()
+            )
+            name_map = dict(rows)
+
+        items = []
+        for m in messages:
+            items.append(MessageHistoryResponse(
+                id=m.id,
+                candidate_maimai_id=m.candidate_maimai_id or "",
+                candidate_name=name_map.get(m.candidate_maimai_id),
+                template_name=m.template_name,
+                content=m.content,
+                status=m.status or "unknown",
+                sent_at=m.sent_at.isoformat() if m.sent_at else None,
+                created_at=m.created_at.isoformat() if m.created_at else None,
+            ))
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }

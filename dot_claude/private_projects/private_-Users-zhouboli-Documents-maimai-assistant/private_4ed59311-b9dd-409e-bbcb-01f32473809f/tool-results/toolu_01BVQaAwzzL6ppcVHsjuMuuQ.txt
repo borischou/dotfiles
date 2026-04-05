@@ -1,0 +1,65 @@
+     1→# Code Review History
+     2→
+     3→工程审查历史记录，由 code-review-memory skill 自动维护。
+     4→
+     5→---
+     6→
+     7→## Review #1 - 2026-02-13
+     8→
+     9→### 发现的问题
+    10→| 严重程度 | 文件 | 问题描述 | 状态 |
+    11→|---------|------|---------|------|
+    12→| 严重 | src/modules/message.py:226-244 | `_handle_quick_contact` 对同一 page 并发 7 个 `wait_for_selector`，Playwright 不支持并发操作 | 已修复 |
+    13→| 严重 | src/modules/message.py:226-244 | `asyncio.create_task` 创建的任务取消后未 await，可能产生泄漏警告 | 已修复 |
+    14→| 严重 | src/utils/captcha.py:43 | `sys.stdin.readline()` 阻塞事件循环，可能导致 CDP 连接超时 | 已修复 |
+    15→| 中等 | src/modules/search.py:680-715 | `_save_candidates_to_db` N+1 查询，每候选人 2 次 SELECT | 已修复 |
+    16→| 中等 | src/modules/message.py:612-628 | `send_message_batch` 跳过已发消息检查逐条开 DB session | 已修复 |
+    17→| 中等 | src/modules/export.py:129-131 | `_get_candidates_data` 导出时每候选人单独查消息记录 | 已修复 |
+    18→| 中等 | 多文件 | `datetime.utcnow()`（naive）与 `_utcnow()`（aware）混用 | 已修复 |
+    19→| 中等 | src/modules/selector_discovery.py:286 | `apply_discovered_selectors` 验证失败仍返回 True | 已修复 |
+    20→| 中等 | src/modules/message.py↔selector_discovery.py | 循环依赖（延迟 import 绕过，运行时正常） | 待处理 |
+    21→| 中等 | src/modules/message.py:552+1479 | `send_message_batch` 和 enterprise 版约 100 行重复逻辑 | 待处理 |
+    22→| 中等 | src/utils/rate_limiter.py:226 | `min_interval` 全局冷却而非按操作类型 | 已修复 |
+    23→| 中等 | src/utils/validators.py:9-32 | `validate_maimai_id` 调用方未捕获返回值 | 已修复 |
+    24→| 中等 | src/utils/config.py:15 | config_dir 使用相对路径 | 已修复 |
+    25→| 轻微 | src/modules/profile.py:450 | `import re` 在函数内部 | 已修复 |
+    26→| 轻微 | src/modules/message.py:1445,271 | `import sys`、`import traceback` 在函数内部 | 已修复 |
+    27→| 轻微 | src/utils/delays.py:86 | `import datetime` 在函数内部 | 已修复 |
+    28→| 轻微 | src/utils/checkpoint.py:17 | 硬编码路径 `data/.checkpoints` | 已修复 |
+    29→| 轻微 | src/services/pipeline.py:233 | 硬编码路径 `data/reports` | 已修复 |
+    30→| 轻微 | src/models/database.py:12 | `declarative_base()` 使用已弃用的 `sqlalchemy.ext.declarative` | 已修复 |
+    31→| 轻微 | src/modules/search.py:551 | `profile_links = []` 冗余初始化 | 已修复 |
+    32→
+    33→### 修复内容
+    34→- **并发改顺序**: `_handle_quick_contact` 的提交按钮探测从 `asyncio.create_task` 并发改为 `for` 循环顺序探测，每个 selector 1.5s 超时
+    35→- **异步 stdin**: captcha.py 的 `sys.stdin.readline()` 改为 `await loop.run_in_executor(None, sys.stdin.readline)`
+    36→- **N+1 查询优化**: search/message/export 三处改为 `IN (...)` 批量预取后内存查找
+    37→- **datetime 统一**: rate_limiter.py、message.py、checkpoint.py 全部统一为 `datetime.now(timezone.utc)`
+    38→- **返回值修复**: selector_discovery 验证失败现在正确返回 False
+    39→- **validator 返回值**: message.py 和 profile.py 的 `validate_maimai_id` 调用方现在捕获清理后的值
+    40→- **per-type 冷却**: rate_limiter 的 min_interval 检查改为按 action_type 查最后操作时间
+    41→- **config 绝对路径**: Config 类默认从 `__file__` 向上推导项目根目录下的 config/
+    42→- **imports 提升**: re/sys/traceback/datetime 从函数内部移到模块顶层
+    43→- **路径可配置**: checkpoint_dir 和 report_dir 改为从 settings.json 读取
+    44→- **deprecation 修复**: `declarative_base` 改用 `sqlalchemy.orm.declarative_base`
+    45→- **测试修复**: test_validators.py 移除对已删除函数的测试，新增 template_variables 测试
+    46→
+    47→### 死代码清理
+    48→| 文件 | 清理内容 | 类型 |
+    49→|------|---------|------|
+    50→| src/modules/message.py:38 | 移除 `MAIMAI_PROFILE_URL` 常量（profile.py 有同名在用） | 未使用常量 |
+    51→| src/utils/rate_limiter.py:35 | 移除 `_error_timestamps` 及相关代码（从未被填充） | 死代码管道 |
+    52→| src/modules/message.py:437 | 空 except 块添加 `logger.debug` 避免隐藏 "等待回应" 检测失败 | 空异常处理 |
+    53→| tests/test_validators.py | 移除引用已删除函数的测试（validate_page_number/validate_url/sanitize_text） | 过时测试 |
+    54→
+    55→### 测试结果
+    56→- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+    57→- 修复前 1 error（test_validators 导入已删除函数），修复后全部通过
+    58→
+    59→### 复盘
+    60→- **做得好的**: N+1 查询的批量优化模式可复用；datetime 统一有效避免了 naive/aware 混用陷阱
+    61→- **待改进的**: `send_message_batch` 和 `send_message_batch_enterprise` 仍有约 100 行重复代码，应提取为带回调的通用批量编排函数；循环依赖（message↔selector_discovery）虽可运行但架构上需解耦
+    62→- **遗留项**: 批量发送重复代码未重构（涉及面广，需独立 PR）；循环依赖未解耦（deferred import 当前可工作，重构优先级低）
+    63→
+    64→---
+    65→

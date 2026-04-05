@@ -1,0 +1,1030 @@
+     1→"""Pipeline service for search-and-message orchestration.
+     2→
+     3→Extracted from CLI layer to separate business logic from argument parsing.
+     4→Supports three paths: search_center (Path A), enterprise (Path B), talent_bank (Path C).
+     5→"""
+     6→
+     7→from datetime import datetime
+     8→from enum import Enum
+     9→from pathlib import Path
+    10→from typing import Dict, List, Optional, Set, Tuple
+    11→
+    12→from rich.console import Console
+    13→from rich.table import Table
+    14→
+    15→from src.core.browser import BrowserManager
+    16→from src.core.session import get_session_manager
+    17→from src.modules.auth import ensure_logged_in, check_login_status
+    18→from src.modules.message import (
+    19→    send_message_batch,
+    20→    send_message_batch_enterprise,
+    21→    send_message_batch_talent_bank,
+    22→    fetch_contact_quota,
+    23→)
+    24→from src.modules.search import (
+    25→    search_candidates,
+    26→    search_candidates_enterprise,
+    27→    search_candidates_talent_bank,
+    28→    CandidateBasic,
+    29→)
+    30→from src.utils.checkpoint import CheckpointManager
+    31→from src.utils.config import get_config
+    32→from src.utils.scoring import sort_candidates_by_score
+    33→
+    34→console = Console()
+    35→
+    36→
+    37→def _auto_backup_database() -> None:
+    38→    """自动备份数据库（Pipeline 完成后调用）"""
+    39→    try:
+    40→        import sys
+    41→        from pathlib import Path
+    42→
+    43→        # Import backup function
+    44→        sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    45→        from scripts.backup_data import backup_database
+    46→
+    47→        success, backup_path = backup_database(silent=True)
+    48→        if success:
+    49→            console.print(f"[dim]数据库已自动备份: {Path(backup_path).name}[/dim]")
+    50→    except Exception as e:
+    51→        # Backup failure should not crash pipeline
+    52→        from loguru import logger
+    53→
+    54→        logger.warning(f"Auto backup failed: {e}")
+    55→
+    56→
+    57→class SearchMode(str, Enum):
+    58→    """Search mode for pipeline dispatch."""
+    59→
+    60→    SEARCH_CENTER = "search_center"
+    61→    ENTERPRISE = "enterprise"
+    62→    TALENT_BANK = "talent_bank"
+    63→
+    64→
+    65→def _candidates_to_dicts(candidates: List[CandidateBasic]) -> List[dict]:
+    66→    """Convert CandidateBasic objects to dicts for message batch functions."""
+    67→    return [
+    68→        {
+    69→            "maimai_id": c.maimai_id,
+    70→            "name": c.name,
+    71→            "company": c.company,
+    72→            "title": c.title,
+    73→            "profile_url": c.profile_url,
+    74→        }
+    75→        for c in candidates
+    76→    ]
+    77→
+    78→
+    79→async def search_all_keywords(
+    80→    browser: BrowserManager,
+    81→    keywords: Tuple[str, ...],
+    82→    company: Tuple[str, ...],
+    83→    location: Optional[str],
+    84→    max_pages: int,
+    85→    start_page: int = 1,
+    86→) -> Tuple[List[CandidateBasic], Set[str]]:
+    87→    """Iterate keywords, deduplicate, return combined results.
+    88→
+    89→    Args:
+    90→        browser: BrowserManager instance
+    91→        keywords: Keyword strings to search
+    92→        company: Company filter strings
+    93→        location: Location filter or None
+    94→        max_pages: Pages per keyword
+    95→        start_page: First page number
+    96→
+    97→    Returns:
+    98→        (deduplicated candidates list, set of seen IDs)
+    99→    """
+   100→    all_candidates: List[CandidateBasic] = []
+   101→    seen_ids: Set[str] = set()
+   102→
+   103→    for idx, kw in enumerate(keywords):
+   104→        console.print(f"\n[bold blue][{idx+1}/{len(keywords)}] Searching: {kw}[/bold blue]")
+   105→
+   106→        candidates = await search_candidates(
+   107→            keywords=kw,
+   108→            company=company,
+   109→            location=location,
+   110→            pages=max_pages,
+   111→            start_page=start_page,
+   112→            browser=browser,
+   113→        )
+   114→
+   115→        new_count = 0
+   116→        for c in candidates:
+   117→            if c.maimai_id not in seen_ids:
+   118→                seen_ids.add(c.maimai_id)
+   119→                all_candidates.append(c)
+   120→                new_count += 1
+   121→
+   122→        console.print(f"  Found {len(candidates)} candidates, {new_count} new (deduplicated)")
+   123→
+   124→    return all_candidates, seen_ids
+   125→
+   126→
+   127→async def search_all_keywords_enterprise(
+   128→    browser: BrowserManager,
+   129→    keywords: Tuple[str, ...],
+   130→    company: Tuple[str, ...],
+   131→    max_pages: int,
+   132→    keep_last_tab_open: bool = False,
+   133→) -> Tuple[List[CandidateBasic], Set[str]]:
+   134→    """Iterate keywords via enterprise path, deduplicate, return combined results.
+   135→
+   136→    Args:
+   137→        browser: BrowserManager instance
+   138→        keywords: Keyword strings to search
+   139→        company: Company filter strings
+   140→        max_pages: Number of scroll-pages to extract per keyword
+   141→        keep_last_tab_open: Keep the last enterprise tab open for inline messaging
+   142→
+   143→    Returns:
+   144→        (deduplicated candidates list, set of seen IDs)
+   145→    """
+   146→    all_candidates: List[CandidateBasic] = []
+   147→    seen_ids: Set[str] = set()
+   148→
+   149→    for idx, kw in enumerate(keywords):
+   150→        console.print(f"\n[bold blue][{idx+1}/{len(keywords)}] Enterprise search: {kw}[/bold blue]")
+   151→
+   152→        is_last = idx == len(keywords) - 1
+   153→        candidates = await search_candidates_enterprise(
+   154→            keywords=kw,
+   155→            company=company,
+   156→            pages=max_pages,
+   157→            browser=browser,
+   158→            keep_tab_open=keep_last_tab_open and is_last,
+   159→        )
+   160→
+   161→        new_count = 0
+   162→        for c in candidates:
+   163→            if c.maimai_id not in seen_ids:
+   164→                seen_ids.add(c.maimai_id)
+   165→                all_candidates.append(c)
+   166→                new_count += 1
+   167→
+   168→        console.print(f"  Found {len(candidates)} candidates, {new_count} new (deduplicated)")
+   169→
+   170→    return all_candidates, seen_ids
+   171→
+   172→
+   173→async def search_all_keywords_talent_bank(
+   174→    browser: BrowserManager,
+   175→    keywords: Tuple[str, ...],
+   176→    company: Tuple[str, ...],
+   177→    max_pages: int,
+   178→    min_years: Optional[int] = None,
+   179→) -> Tuple[List[CandidateBasic], Set[str]]:
+   180→    """Iterate keywords via talent bank path, deduplicate, return combined results.
+   181→
+   182→    Talent bank navigates the current tab in-place (unlike enterprise which
+   183→    opens a new tab), so no tab lifecycle management is needed.
+   184→
+   185→    Args:
+   186→        browser: BrowserManager instance
+   187→        keywords: Keyword strings to search
+   188→        company: Company filter strings
+   189→        max_pages: Number of scroll-pages to extract per keyword
+   190→
+   191→    Returns:
+   192→        (deduplicated candidates list, set of seen IDs)
+   193→    """
+   194→    all_candidates: List[CandidateBasic] = []
+   195→    seen_ids: Set[str] = set()
+   196→
+   197→    for idx, kw in enumerate(keywords):
+   198→        console.print(
+   199→            f"\n[bold blue][{idx+1}/{len(keywords)}] Talent bank search: {kw}[/bold blue]"
+   200→        )
+   201→
+   202→        candidates = await search_candidates_talent_bank(
+   203→            keywords=kw,
+   204→            company=company,
+   205→            pages=max_pages,
+   206→            browser=browser,
+   207→            min_years=min_years if idx == 0 else None,  # Set filter once on first keyword
+   208→        )
+   209→
+   210→        new_count = 0
+   211→        for c in candidates:
+   212→            if c.maimai_id not in seen_ids:
+   213→                seen_ids.add(c.maimai_id)
+   214→                all_candidates.append(c)
+   215→                new_count += 1
+   216→
+   217→        console.print(f"  Found {len(candidates)} candidates, {new_count} new (deduplicated)")
+   218→
+   219→    return all_candidates, seen_ids
+   220→
+   221→
+   222→async def send_batch(
+   223→    candidates: List[CandidateBasic],
+   224→    template: str,
+   225→    variables: Dict[str, str],
+   226→    search_keywords: List[str],
+   227→    browser: BrowserManager,
+   228→    skip_messaged: bool,
+   229→    interactive: bool = False,
+   230→    skip_confirmation: bool = False,
+   231→    mode: "SearchMode" = None,
+   232→    exchange_phone: bool = False,
+   233→    exchange_wechat: bool = False,
+   234→) -> dict:
+   235→    """Send messages to a batch of candidates, sorted by score.
+   236→
+   237→    Dispatches to the appropriate message module function based on mode.
+   238→
+   239→    Args:
+   240→        candidates: List of CandidateBasic objects
+   241→        template: Template name
+   242→        variables: Template variables
+   243→        search_keywords: Original search keywords (for scoring)
+   244→        browser: BrowserManager instance
+   245→        skip_messaged: Whether to skip already-messaged candidates
+   246→        interactive: Enable interactive selector discovery (Path A only)
+   247→        skip_confirmation: Skip interactive confirmation prompt
+   248→        mode: Search mode — determines which send path to use
+   249→        exchange_phone: Click "交换电话" in IM tab (Path C only)
+   250→        exchange_wechat: Click "交换微信" in IM tab (Path C only)
+   251→
+   252→    Returns:
+   253→        Results dict with total/sent/failed/skipped/rate_limited counts
+   254→    """
+   255→    if mode is None:
+   256→        mode = SearchMode.SEARCH_CENTER
+   257→
+   258→    sorted_candidates = sort_candidates_by_score(candidates, search_keywords=search_keywords)
+   259→    dicts = _candidates_to_dicts(sorted_candidates)
+   260→
+   261→    if mode == SearchMode.ENTERPRISE:
+   262→        return await send_message_batch_enterprise(
+   263→            page=browser.page,
+   264→            candidates=dicts,
+   265→            template_name=template,
+   266→            common_variables=variables,
+   267→            browser=browser,
+   268→            skip_messaged=skip_messaged,
+   269→            skip_confirmation=skip_confirmation,
+   270→        )
+   271→    elif mode == SearchMode.TALENT_BANK:
+   272→        return await send_message_batch_talent_bank(
+   273→            page=browser.page,
+   274→            candidates=dicts,
+   275→            template_name=template,
+   276→            common_variables=variables,
+   277→            browser=browser,
+   278→            skip_messaged=skip_messaged,
+   279→            skip_confirmation=skip_confirmation,
+   280→            exchange_phone=exchange_phone,
+   281→            exchange_wechat=exchange_wechat,
+   282→        )
+   283→    else:
+   284→        return await send_message_batch(
+   285→            candidates=dicts,
+   286→            template_name=template,
+   287→            common_variables=variables,
+   288→            browser=browser,
+   289→            skip_messaged=skip_messaged,
+   290→            interactive=interactive,
+   291→            skip_confirmation=skip_confirmation,
+   292→        )
+   293→
+   294→
+   295→def generate_pipeline_report(
+   296→    candidates: List[CandidateBasic],
+   297→    results: dict,
+   298→    keywords: Tuple[str, ...],
+   299→    template: str,
+   300→    mode: SearchMode,
+   301→) -> str:
+   302→    """Generate an Excel report for a pipeline run.
+   303→
+   304→    Args:
+   305→        candidates: All candidates from search
+   306→        results: Send results dict (total/sent/failed/skipped/rate_limited/details)
+   307→        keywords: Search keywords used
+   308→        template: Template name used
+   309→        mode: Search mode (search_center or enterprise)
+   310→
+   311→    Returns:
+   312→        Path to the generated report file
+   313→    """
+   314→    from openpyxl import Workbook
+   315→    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+   316→    from loguru import logger
+   317→
+   318→    timestamp = datetime.now()
+   319→    config = get_config()
+   320→    report_dir = Path(config.get("data.report_dir", "data/reports"))
+   321→    report_dir.mkdir(parents=True, exist_ok=True)
+   322→    report_path = report_dir / f"pipeline_{timestamp.strftime('%Y%m%d_%H%M%S')}.xlsx"
+   323→
+   324→    wb = Workbook()
+   325→
+   326→    # --- Sheet 1: Overview ---
+   327→    ws_overview = wb.active
+   328→    ws_overview.title = "概览"
+   329→
+   330→    header_font = Font(bold=True, color="FFFFFF")
+   331→    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+   332→    border = Border(
+   333→        left=Side(style="thin"),
+   334→        right=Side(style="thin"),
+   335→        top=Side(style="thin"),
+   336→        bottom=Side(style="thin"),
+   337→    )
+   338→
+   339→    overview_rows = [
+   340→        ("执行时间", timestamp.strftime("%Y-%m-%d %H:%M:%S")),
+   341→        ("搜索关键词", ", ".join(keywords)),
+   342→        ("消息模板", template),
+   343→        ("搜索模式", mode.value),
+   344→        ("搜索结果数", results["total"]),
+   345→        ("发送总数", results["sent"] + results["failed"]),
+   346→        ("成功", results["sent"]),
+   347→        ("失败", results["failed"]),
+   348→        ("跳过(已沟通)", results["skipped"]),
+   349→        ("限流", results["rate_limited"]),
+   350→    ]
+   351→
+   352→    for r_idx, (key, value) in enumerate(overview_rows, 1):
+   353→        cell_key = ws_overview.cell(row=r_idx, column=1, value=key)
+   354→        cell_val = ws_overview.cell(row=r_idx, column=2, value=value)
+   355→        cell_key.font = Font(bold=True)
+   356→        for cell in (cell_key, cell_val):
+   357→            cell.border = border
+   358→            cell.alignment = Alignment(vertical="center")
+   359→
+   360→    ws_overview.column_dimensions["A"].width = 18
+   361→    ws_overview.column_dimensions["B"].width = 40
+   362→
+   363→    # --- Sheet 2: Candidate Details ---
+   364→    ws_details = wb.create_sheet(title="候选人详情")
+   365→
+   366→    columns = ["序号", "姓名", "职位", "公司", "地区", "脉脉ID", "沟通状态", "发送内容", "失败原因"]
+   367→    for c_idx, col_name in enumerate(columns, 1):
+   368→        cell = ws_details.cell(row=1, column=c_idx, value=col_name)
+   369→        cell.font = header_font
+   370→        cell.fill = header_fill
+   371→        cell.alignment = Alignment(horizontal="center", vertical="center")
+   372→        cell.border = border
+   373→
+   374→    # Build a lookup from maimai_id -> detail
+   375→    details_by_id: Dict[str, dict] = {}
+   376→    for detail in results.get("details", []):
+   377→        details_by_id[detail["maimai_id"]] = detail
+   378→
+   379→    status_map = {
+   380→        "sent": "已发送",
+   381→        "failed": "失败",
+   382→        "skipped": "跳过",
+   383→        "rate_limited": "限流",
+   384→    }
+   385→
+   386→    for r_idx, c in enumerate(candidates, 1):
+   387→        detail = details_by_id.get(c.maimai_id, {})
+   388→        raw_status = detail.get("status", "not_attempted")
+   389→        status_label = status_map.get(raw_status, "未处理")
+   390→        reason = detail.get("reason", "")
+   391→
+   392→        content = detail.get("content", "")
+   393→        row_data = [
+   394→            r_idx,
+   395→            c.name,
+   396→            c.title,
+   397→            c.company,
+   398→            c.location or "",
+   399→            c.maimai_id,
+   400→            status_label,
+   401→            content,
+   402→            reason,
+   403→        ]
+   404→        for c_idx, value in enumerate(row_data, 1):
+   405→            cell = ws_details.cell(row=r_idx + 1, column=c_idx, value=value)
+   406→            cell.border = border
+   407→            cell.alignment = Alignment(vertical="center", wrap_text=True)
+   408→
+   409→    detail_widths = {"A": 6, "B": 12, "C": 25, "D": 20, "E": 12, "F": 18, "G": 12, "H": 40, "I": 30}
+   410→    for col, width in detail_widths.items():
+   411→        ws_details.column_dimensions[col].width = width
+   412→
+   413→    ws_details.freeze_panes = "A2"
+   414→    ws_details.auto_filter.ref = ws_details.dimensions
+   415→
+   416→    wb.save(str(report_path))
+   417→    logger.info(f"Pipeline report saved to: {report_path}")
+   418→    console.print(f"[green]Pipeline report saved to: {report_path}[/green]")
+   419→    return str(report_path)
+   420→
+   421→
+   422→def save_run_history(
+   423→    keywords: Tuple[str, ...],
+   424→    template: str,
+   425→    mode: SearchMode,
+   426→    results: dict,
+   427→    dry_run: bool,
+   428→    report_path: Optional[str] = None,
+   429→) -> None:
+   430→    """Append a pipeline run record to JSON and regenerate Markdown summary.
+   431→
+   432→    Produces two files under data/:
+   433→    - run_history.json: machine-readable array of all runs
+   434→    - run_history.md: human-readable Markdown table
+   435→    """
+   436→    import json
+   437→    from loguru import logger
+   438→
+   439→    data_dir = Path("data")
+   440→    data_dir.mkdir(parents=True, exist_ok=True)
+   441→    json_path = data_dir / "run_history.json"
+   442→    md_path = data_dir / "run_history.md"
+   443→
+   444→    # Read existing records
+   445→    records: List[dict] = []
+   446→    if json_path.exists():
+   447→        try:
+   448→            records = json.loads(json_path.read_text(encoding="utf-8"))
+   449→        except (json.JSONDecodeError, IOError):
+   450→            logger.warning("Failed to read run_history.json, starting fresh")
+   451→
+   452→    # Build new record
+   453→    timestamp = datetime.now()
+   454→    record = {
+   455→        "timestamp": timestamp.isoformat(timespec="seconds"),
+   456→        "keywords": list(keywords),
+   457→        "template": template,
+   458→        "mode": mode.value if isinstance(mode, SearchMode) else mode,
+   459→        "dry_run": dry_run,
+   460→        "total": results.get("total", 0),
+   461→        "sent": results.get("sent", 0),
+   462→        "failed": results.get("failed", 0),
+   463→        "skipped": results.get("skipped", 0),
+   464→        "rate_limited": results.get("rate_limited", 0),
+   465→        "report_file": Path(report_path).name if report_path else None,
+   466→    }
+   467→    records.append(record)
+   468→
+   469→    # Write JSON
+   470→    json_path.write_text(json.dumps(records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+   471→
+   472→    # Regenerate Markdown from full history
+   473→    lines = [
+   474→        "# Pipeline 运行历史",
+   475→        "",
+   476→        "| 时间 | 关键词 | 模板 | 模式 | 搜索数 | 发送 | 失败 | 跳过 | 限流 | 报告 |",
+   477→        "|------|--------|------|------|--------|------|------|------|------|------|",
+   478→    ]
+   479→    for r in records:
+   480→        ts = r["timestamp"][:16].replace("T", " ")
+   481→        kws = ", ".join(r["keywords"])
+   482→        tpl = r["template"]
+   483→        m = r["mode"]
+   484→        total = str(r["total"])
+   485→        if r.get("dry_run"):
+   486→            sent = failed = skipped = rate_limited = "-"
+   487→        else:
+   488→            sent = str(r["sent"])
+   489→            failed = str(r["failed"])
+   490→            skipped = str(r["skipped"])
+   491→            rate_limited = str(r["rate_limited"])
+   492→        report = r.get("report_file") or "-"
+   493→        lines.append(
+   494→            f"| {ts} | {kws} | {tpl} | {m} | {total} | {sent} | {failed} | {skipped} | {rate_limited} | {report} |"
+   495→        )
+   496→
+   497→    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+   498→    logger.info(f"Run history updated: {json_path}")
+   499→    console.print(f"[dim]运行历史已更新: {md_path}[/dim]")
+   500→
+   501→
+   502→def display_candidates_table(candidates: List[CandidateBasic], title: str) -> None:
+   503→    """Display a Rich table of candidates."""
+   504→    table = Table(title=f"{title} ({len(candidates)} candidates)")
+   505→    table.add_column("#", style="dim", justify="right")
+   506→    table.add_column("Name", style="cyan")
+   507→    table.add_column("Title", style="green")
+   508→    table.add_column("Company", style="yellow")
+   509→    table.add_column("Location", style="blue")
+   510→    has_scores = any(getattr(c, "score", None) is not None for c in candidates[:1])
+   511→    if has_scores:
+   512→        table.add_column("Score", style="magenta", justify="right")
+   513→    table.add_column("ID", style="dim")
+   514→
+   515→    for i, c in enumerate(candidates[:50], 1):
+   516→        row = [str(i), c.name, c.title, c.company, c.location or ""]
+   517→        if has_scores:
+   518→            row.append(str(getattr(c, "score", "")))
+   519→        row.append(c.maimai_id)
+   520→        table.add_row(*row)
+   521→
+   522→    console.print(table)
+   523→
+   524→    if len(candidates) > 50:
+   525→        console.print(f"[dim]... and {len(candidates) - 50} more[/dim]")
+   526→
+   527→
+   528→def display_send_results(
+   529→    results: dict, title: str = "Send Results", quota: Optional[dict] = None
+   530→) -> None:
+   531→    """Display send results summary table."""
+   532→    console.print()
+   533→    result_table = Table(title=title)
+   534→    result_table.add_column("Metric", style="bold")
+   535→    result_table.add_column("Count", justify="right")
+   536→
+   537→    result_table.add_row("Total candidates", str(results["total"]))
+   538→    result_table.add_row("Sent", f"[green]{results['sent']}[/green]")
+   539→    result_table.add_row("Failed", f"[red]{results['failed']}[/red]")
+   540→    result_table.add_row("Skipped (already messaged)", f"[yellow]{results['skipped']}[/yellow]")
+   541→    result_table.add_row("Rate limited", f"[yellow]{results['rate_limited']}[/yellow]")
+   542→    if quota:
+   543→        result_table.add_row("联系券剩余", f"[cyan]{quota.get('uh_left', '?')}[/cyan]")
+   544→
+   545→    console.print(result_table)
+   546→
+   547→
+   548→async def run_pipeline_default(
+   549→    browser: BrowserManager,
+   550→    keywords: Tuple[str, ...],
+   551→    company: Tuple[str, ...],
+   552→    location: Optional[str],
+   553→    max_pages: int,
+   554→    template: str,
+   555→    variables: Dict[str, str],
+   556→    dry_run: bool,
+   557→    skip_messaged: bool,
+   558→    interactive: bool = False,
+   559→    mode: SearchMode = SearchMode.SEARCH_CENTER,
+   560→    skip_confirmation: bool = False,
+   561→    exchange_phone: bool = False,
+   562→    exchange_wechat: bool = False,
+   563→    min_years: Optional[int] = None,
+   564→) -> None:
+   565→    """Pipeline: search all pages first, then send messages.
+   566→
+   567→    Saves a checkpoint after search completes so that message sending
+   568→    can be resumed if interrupted.
+   569→    """
+   570→    checkpoint = CheckpointManager()
+   571→
+   572→    # Talent bank: search + send per keyword (page changes between keywords)
+   573→    if mode == SearchMode.TALENT_BANK and not dry_run:
+   574→        all_candidates: List[CandidateBasic] = []
+   575→        seen_ids: Set[str] = set()
+   576→        combined_results = {
+   577→            "total": 0,
+   578→            "sent": 0,
+   579→            "failed": 0,
+   580→            "skipped": 0,
+   581→            "rate_limited": 0,
+   582→            "details": [],
+   583→        }
+   584→
+   585→        for idx, kw in enumerate(keywords):
+   586→            console.print(f"\n[bold blue][{idx+1}/{len(keywords)}] Talent bank: {kw}[/bold blue]")
+   587→            kw_candidates = await search_candidates_talent_bank(
+   588→                keywords=kw,
+   589→                company=company,
+   590→                pages=max_pages,
+   591→                browser=browser,
+   592→                min_years=min_years if idx == 0 else None,
+   593→            )
+   594→            # Deduplicate
+   595→            new_candidates = []
+   596→            for c in kw_candidates:
+   597→                if c.maimai_id not in seen_ids:
+   598→                    seen_ids.add(c.maimai_id)
+   599→                    new_candidates.append(c)
+   600→            all_candidates.extend(new_candidates)
+   601→            console.print(f"  Found {len(new_candidates)} new candidates (deduplicated)")
+   602→
+   603→            if not new_candidates:
+   604→                continue
+   605→
+   606→            display_candidates_table(new_candidates, f"Keyword: {kw}")
+   607→
+   608→            # Send messages immediately while page shows these results
+   609→            kw_results = await send_batch(
+   610→                new_candidates,
+   611→                template,
+   612→                variables,
+   613→                [kw],
+   614→                browser,
+   615→                skip_messaged,
+   616→                skip_confirmation=skip_confirmation,
+   617→                mode=SearchMode.TALENT_BANK,
+   618→                exchange_phone=exchange_phone,
+   619→                exchange_wechat=exchange_wechat,
+   620→            )
+   621→            for key in ("total", "sent", "failed", "skipped", "rate_limited"):
+   622→                combined_results[key] += kw_results.get(key, 0)
+   623→            combined_results["details"].extend(kw_results.get("details", []))
+   624→
+   625→        if not all_candidates:
+   626→            console.print("[yellow]No candidates found for any keyword.[/yellow]")
+   627→            return
+   628→
+   629→        quota = await fetch_contact_quota(browser)
+   630→        display_send_results(combined_results, quota=quota)
+   631→        report_path = generate_pipeline_report(
+   632→            all_candidates, combined_results, keywords, template, mode
+   633→        )
+   634→        save_run_history(
+   635→            keywords, template, mode, combined_results, dry_run=False, report_path=report_path
+   636→        )
+   637→        checkpoint.delete()
+   638→        console.print("[dim]Checkpoint cleared (pipeline complete)[/dim]")
+   639→        _auto_backup_database()
+   640→        return
+   641→
+   642→    if mode == SearchMode.ENTERPRISE:
+   643→        # Keep enterprise tab open for inline messaging (unless dry_run)
+   644→        all_candidates, seen_ids = await search_all_keywords_enterprise(
+   645→            browser,
+   646→            keywords,
+   647→            company,
+   648→            max_pages,
+   649→            keep_last_tab_open=not dry_run,
+   650→        )
+   651→    elif mode == SearchMode.TALENT_BANK:
+   652→        all_candidates, seen_ids = await search_all_keywords_talent_bank(
+   653→            browser,
+   654→            keywords,
+   655→            company,
+   656→            max_pages,
+   657→            min_years=min_years,
+   658→        )
+   659→    else:
+   660→        all_candidates, seen_ids = await search_all_keywords(
+   661→            browser,
+   662→            keywords,
+   663→            company,
+   664→            location,
+   665→            max_pages,
+   666→        )
+   667→
+   668→    if not all_candidates:
+   669→        console.print("[yellow]No candidates found for any keyword.[/yellow]")
+   670→        return
+   671→
+   672→    # Save checkpoint after search (batch_pages=0 marks non-batch mode)
+   673→    _save_checkpoint(
+   674→        checkpoint,
+   675→        keywords,
+   676→        template,
+   677→        variables,
+   678→        company,
+   679→        location,
+   680→        max_pages,
+   681→        0,
+   682→        skip_messaged,
+   683→        interactive,
+   684→        max_pages,
+   685→        [],
+   686→        seen_ids,
+   687→        {"total": 0, "sent": 0, "failed": 0, "skipped": 0, "rate_limited": 0},
+   688→        mode=mode.value,
+   689→        dry_run=dry_run,
+   690→        exchange_phone=exchange_phone,
+   691→        exchange_wechat=exchange_wechat,
+   692→        min_years=min_years,
+   693→    )
+   694→
+   695→    display_candidates_table(all_candidates, "Pipeline Results")
+   696→
+   697→    if dry_run:
+   698→        console.print(
+   699→            f"\n[cyan][Dry Run] {len(all_candidates)} candidates found. No messages sent.[/cyan]"
+   700→        )
+   701→        save_run_history(
+   702→            keywords,
+   703→            template,
+   704→            mode,
+   705→            {"total": len(all_candidates), "sent": 0, "failed": 0, "skipped": 0, "rate_limited": 0},
+   706→            dry_run=True,
+   707→        )
+   708→        checkpoint.delete()
+   709→        return
+   710→
+   711→    results = await send_batch(
+   712→        all_candidates,
+   713→        template,
+   714→        variables,
+   715→        list(keywords),
+   716→        browser,
+   717→        skip_messaged,
+   718→        interactive,
+   719→        skip_confirmation=skip_confirmation,
+   720→        mode=mode,
+   721→    )
+   722→
+   723→    # Fetch final quota for summary display
+   724→    quota = await fetch_contact_quota(browser)
+   725→    display_send_results(results, quota=quota)
+   726→    report_path = generate_pipeline_report(all_candidates, results, keywords, template, mode)
+   727→    save_run_history(keywords, template, mode, results, dry_run=False, report_path=report_path)
+   728→
+   729→    # Clean up checkpoint on successful completion
+   730→    checkpoint.delete()
+   731→    console.print("[dim]Checkpoint cleared (pipeline complete)[/dim]")
+   732→
+   733→    # Auto backup database after successful pipeline
+   734→    _auto_backup_database()
+   735→
+   736→
+   737→async def run_pipeline_batched(
+   738→    browser: BrowserManager,
+   739→    keywords: Tuple[str, ...],
+   740→    company: Tuple[str, ...],
+   741→    location: Optional[str],
+   742→    max_pages: int,
+   743→    batch_pages: int,
+   744→    template: str,
+   745→    variables: Dict[str, str],
+   746→    dry_run: bool,
+   747→    skip_messaged: bool,
+   748→    interactive: bool = False,
+   749→    resume_ckpt=None,
+   750→    mode: SearchMode = SearchMode.SEARCH_CENTER,
+   751→    skip_confirmation: bool = False,
+   752→    exchange_phone: bool = False,
+   753→    exchange_wechat: bool = False,
+   754→    min_years: Optional[int] = None,
+   755→) -> None:
+   756→    """Batched pipeline: search N pages, send messages, repeat."""
+   757→    # Restore state from checkpoint or start fresh
+   758→    if resume_ckpt:
+   759→        # On resume, only treat sent_ids as truly "seen" (skip-worthy).
+   760→        # Candidates that were found but not sent should be retried.
+   761→        sent_ids = list(resume_ckpt.sent_ids)
+   762→        seen_ids = set(sent_ids)  # only skip candidates already successfully sent
+   763→        total_results = resume_ckpt.total_results or {
+   764→            "total": 0,
+   765→            "sent": 0,
+   766→            "failed": 0,
+   767→            "skipped": 0,
+   768→            "rate_limited": 0,
+   769→        }
+   770→        start_from_page = resume_ckpt.completed_pages + 1
+   771→        console.print(
+   772→            f"[cyan]Resuming from page {start_from_page} (sent: {len(sent_ids)}, retrying unsent)[/cyan]"
+   773→        )
+   774→        checkpoint = resume_ckpt
+   775→    else:
+   776→        seen_ids = set()
+   777→        sent_ids = []
+   778→        total_results = {"total": 0, "sent": 0, "failed": 0, "skipped": 0, "rate_limited": 0}
+   779→        start_from_page = 1
+   780→        checkpoint = CheckpointManager()
+   781→
+   782→    all_candidates: List[CandidateBasic] = []
+   783→    all_details: List[dict] = []
+   784→    batch_num = 0
+   785→    consecutive_empty_batches = 0
+   786→
+   787→    batch_start = start_from_page
+   788→    while batch_start <= max_pages:
+   789→        batch_page_count = min(batch_pages, max_pages - batch_start + 1)
+   790→        batch_num += 1
+   791→        batch_end = batch_start + batch_page_count - 1
+   792→
+   793→        console.print(
+   794→            f"\n[bold magenta]━━━ Batch {batch_num}: Pages {batch_start}-{batch_end} ━━━[/bold magenta]"
+   795→        )
+   796→
+   797→        if mode == SearchMode.ENTERPRISE:
+   798→            batch_candidates, _ = await search_all_keywords_enterprise(
+   799→                browser,
+   800→                keywords,
+   801→                company,
+   802→                batch_page_count,
+   803→                keep_last_tab_open=not dry_run,
+   804→            )
+   805→        elif mode == SearchMode.TALENT_BANK:
+   806→            batch_candidates, _ = await search_all_keywords_talent_bank(
+   807→                browser,
+   808→                keywords,
+   809→                company,
+   810→                batch_page_count,
+   811→                min_years=min_years if batch_num == 1 else None,
+   812→            )
+   813→        else:
+   814→            batch_candidates, _ = await search_all_keywords(
+   815→                browser,
+   816→                keywords,
+   817→                company,
+   818→                location,
+   819→                batch_page_count,
+   820→                start_page=batch_start,
+   821→            )
+   822→        # Filter out globally seen IDs
+   823→        batch_candidates = [c for c in batch_candidates if c.maimai_id not in seen_ids]
+   824→        seen_ids.update(c.maimai_id for c in batch_candidates)
+   825→        all_candidates.extend(batch_candidates)
+   826→
+   827→        if not batch_candidates:
+   828→            consecutive_empty_batches += 1
+   829→            console.print(f"[yellow]No new candidates in batch {batch_num}.[/yellow]")
+   830→
+   831→            if consecutive_empty_batches >= 2:
+   832→                console.print(
+   833→                    "[red]Multiple consecutive empty batches detected. Verifying login status...[/red]"
+   834→                )
+   835→                if not await check_login_status(browser.page):
+   836→                    console.print(
+   837→                        "[red]Session expired! Clearing session and re-authenticating...[/red]"
+   838→                    )
+   839→                    session_manager = get_session_manager()
+   840→                    await session_manager.clear()
+   841→                    await ensure_logged_in(browser)
+   842→                    consecutive_empty_batches = 0
+   843→                    console.print("[green]Re-authenticated. Retrying current batch...[/green]")
+   844→                    batch_num -= 1
+   845→                    continue
+   846→                else:
+   847→                    console.print(
+   848→                        "[yellow]Session appears valid. Possibly no more results for these keywords.[/yellow]"
+   849→                    )
+   850→
+   851→            _save_checkpoint(
+   852→                checkpoint,
+   853→                keywords,
+   854→                template,
+   855→                variables,
+   856→                company,
+   857→                location,
+   858→                max_pages,
+   859→                batch_pages,
+   860→                skip_messaged,
+   861→                interactive,
+   862→                batch_end,
+   863→                sent_ids,
+   864→                seen_ids,
+   865→                total_results,
+   866→                mode=mode.value,
+   867→                dry_run=dry_run,
+   868→                exchange_phone=exchange_phone,
+   869→                exchange_wechat=exchange_wechat,
+   870→                min_years=min_years,
+   871→            )
+   872→            batch_start += batch_pages
+   873→            continue
+   874→        else:
+   875→            consecutive_empty_batches = 0
+   876→
+   877→        display_candidates_table(batch_candidates, f"Batch {batch_num} Results")
+   878→
+   879→        if dry_run:
+   880→            console.print(
+   881→                f"\n[cyan][Dry Run] Batch {batch_num}: {len(batch_candidates)} candidates found. No messages sent.[/cyan]"
+   882→            )
+   883→            _save_checkpoint(
+   884→                checkpoint,
+   885→                keywords,
+   886→                template,
+   887→                variables,
+   888→                company,
+   889→                location,
+   890→                max_pages,
+   891→                batch_pages,
+   892→                skip_messaged,
+   893→                interactive,
+   894→                batch_end,
+   895→                sent_ids,
+   896→                seen_ids,
+   897→                total_results,
+   898→                mode=mode.value,
+   899→                dry_run=dry_run,
+   900→                exchange_phone=exchange_phone,
+   901→                exchange_wechat=exchange_wechat,
+   902→                min_years=min_years,
+   903→            )
+   904→            batch_start += batch_pages
+   905→            continue
+   906→
+   907→        results = await send_batch(
+   908→            batch_candidates,
+   909→            template,
+   910→            variables,
+   911→            list(keywords),
+   912→            browser,
+   913→            skip_messaged,
+   914→            interactive,
+   915→            skip_confirmation=skip_confirmation,
+   916→            mode=mode,
+   917→            exchange_phone=exchange_phone,
+   918→            exchange_wechat=exchange_wechat,
+   919→        )
+   920→        batch_quota = await fetch_contact_quota(browser)
+   921→        display_send_results(results, title=f"Batch {batch_num} Send Results", quota=batch_quota)
+   922→
+   923→        all_details.extend(results.get("details", []))
+   924→        for detail in results.get("details", []):
+   925→            if detail.get("status") == "sent":
+   926→                sent_ids.append(detail["maimai_id"])
+   927→
+   928→        for key in total_results:
+   929→            total_results[key] += results[key]
+   930→
+   931→        _save_checkpoint(
+   932→            checkpoint,
+   933→            keywords,
+   934→            template,
+   935→            variables,
+   936→            company,
+   937→            location,
+   938→            max_pages,
+   939→            batch_pages,
+   940→            skip_messaged,
+   941→            interactive,
+   942→            batch_end,
+   943→            sent_ids,
+   944→            seen_ids,
+   945→            total_results,
+   946→            mode=mode.value,
+   947→            dry_run=dry_run,
+   948→            exchange_phone=exchange_phone,
+   949→            exchange_wechat=exchange_wechat,
+   950→            min_years=min_years,
+   951→        )
+   952→        console.print(f"[dim]Checkpoint saved (page {batch_end})[/dim]")
+   953→
+   954→        batch_start += batch_pages
+   955→
+   956→    # Final summary
+   957→    console.print(f"\n[bold magenta]━━━ Pipeline Complete ━━━[/bold magenta]")
+   958→    console.print(f"Total unique candidates found: {len(seen_ids)}")
+   959→    report_path = None
+   960→    if not dry_run and total_results["total"] > 0:
+   961→        final_quota = await fetch_contact_quota(browser)
+   962→        display_send_results(total_results, title="Overall Send Results", quota=final_quota)
+   963→        total_results_with_details = {**total_results, "details": all_details}
+   964→        report_path = generate_pipeline_report(
+   965→            all_candidates, total_results_with_details, keywords, template, mode
+   966→        )
+   967→
+   968→    history_results = (
+   969→        total_results
+   970→        if not dry_run
+   971→        else {
+   972→            "total": len(seen_ids),
+   973→            "sent": 0,
+   974→            "failed": 0,
+   975→            "skipped": 0,
+   976→            "rate_limited": 0,
+   977→        }
+   978→    )
+   979→    save_run_history(keywords, template, mode, history_results, dry_run, report_path)
+   980→
+   981→    checkpoint.delete()
+   982→    console.print("[dim]Checkpoint cleared (pipeline complete)[/dim]")
+   983→
+   984→    # Auto backup database after successful batched pipeline
+   985→    _auto_backup_database()
+   986→
+   987→
+   988→def _save_checkpoint(
+   989→    checkpoint,
+   990→    keywords,
+   991→    template,
+   992→    variables,
+   993→    company,
+   994→    location,
+   995→    max_pages,
+   996→    batch_pages,
+   997→    skip_messaged,
+   998→    interactive,
+   999→    completed_pages,
+  1000→    sent_ids,
+  1001→    seen_ids,
+  1002→    total_results,
+  1003→    mode: str = "search_center",
+  1004→    dry_run: bool = False,
+  1005→    exchange_phone: bool = False,
+  1006→    exchange_wechat: bool = False,
+  1007→    min_years: int = None,
+  1008→) -> None:
+  1009→    """Save pipeline checkpoint (DRY helper)."""
+  1010→    checkpoint.save(
+  1011→        keywords=keywords,
+  1012→        template=template,
+  1013→        variables=variables,
+  1014→        company=company,
+  1015→        location=location,
+  1016→        max_pages=max_pages,
+  1017→        batch_pages=batch_pages,
+  1018→        skip_messaged=skip_messaged,
+  1019→        interactive=interactive,
+  1020→        completed_pages=completed_pages,
+  1021→        sent_ids=sent_ids,
+  1022→        seen_ids=list(seen_ids),
+  1023→        total_results=total_results,
+  1024→        mode=mode,
+  1025→        dry_run=dry_run,
+  1026→        exchange_phone=exchange_phone,
+  1027→        exchange_wechat=exchange_wechat,
+  1028→        min_years=min_years,
+  1029→    )
+  1030→

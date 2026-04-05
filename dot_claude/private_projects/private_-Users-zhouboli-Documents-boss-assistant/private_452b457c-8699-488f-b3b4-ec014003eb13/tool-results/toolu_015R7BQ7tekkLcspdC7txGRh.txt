@@ -1,0 +1,619 @@
+     1→"""Candidate scoring for priority-based messaging.
+     2→
+     3→Two-layer architecture:
+     4→1. Rule engine: seniority, company tier, education, experience, jieba skill matching,
+     5→   keyword relevance, R&D bonus — weighted and normalized to 100.
+     6→2. Optional LLM scoring via Ollama (integrated in pipeline).
+     7→
+     8→When no scoring config is present in settings.json, behavior is backward-compatible
+     9→with the original simple scoring.
+    10→"""
+    11→
+    12→import re
+    13→from typing import Any, Dict, List, Optional
+    14→
+    15→from loguru import logger
+    16→
+    17→# ---------------------------------------------------------------------------
+    18→# Try importing jieba; fall back to substring matching if unavailable
+    19→# ---------------------------------------------------------------------------
+    20→try:
+    21→    import jieba  # type: ignore
+    22→
+    23→    _HAS_JIEBA = True
+    24→except ImportError:
+    25→    _HAS_JIEBA = False
+    26→    logger.debug("jieba not installed, skill matching will use substring fallback")
+    27→
+    28→# ---------------------------------------------------------------------------
+    29→# Constants
+    30→# ---------------------------------------------------------------------------
+    31→
+    32→SENIORITY_SCORES: Dict[str, int] = {
+    33→    "CTO": 50, "CEO": 40, "COO": 35, "VP": 40,
+    34→    "首席": 45, "总裁": 40, "副总裁": 40,
+    35→    "总监": 35, "技术总监": 40,
+    36→    "技术负责人": 35, "负责人": 30, "Tech Lead": 35,
+    37→    "架构师": 35, "专家": 30, "staff": 30, "Staff": 30,
+    38→    "principal": 35, "Principal": 35,
+    39→    "资深": 25, "高级": 20, "Senior": 20, "senior": 20,
+    40→    "经理": 15, "主管": 15, "lead": 15, "Lead": 15,
+    41→    "中级": 10,
+    42→    "初级": 5, "Junior": 5, "junior": 5,
+    43→    "助理": 3, "实习": 1,
+    44→}
+    45→
+    46→TIER1_COMPANIES = {
+    47→    "字节跳动", "ByteDance", "腾讯", "Tencent", "阿里巴巴", "阿里", "Alibaba",
+    48→    "百度", "Baidu", "美团", "Meituan", "京东", "JD", "拼多多", "PDD",
+    49→    "华为", "Huawei", "小米", "Xiaomi", "网易", "NetEase", "快手", "Kwai",
+    50→    "蚂蚁集团", "蚂蚁金服", "滴滴", "DiDi",
+    51→    "Google", "谷歌", "Microsoft", "微软", "Apple", "苹果",
+    52→    "Amazon", "亚马逊", "Meta", "Facebook",
+    53→    "Netflix", "Uber", "OpenAI", "Anthropic",
+    54→}
+    55→
+    56→TIER2_COMPANIES = {
+    57→    "携程", "Trip.com", "B站", "bilibili", "哔哩哔哩",
+    58→    "知乎", "Zhihu", "小红书", "得物", "SHEIN",
+    59→    "商汤", "旷视", "依图", "寒武纪", "地平线",
+    60→    "理想汽车", "蔚来", "小鹏", "大疆", "DJI",
+    61→    "米哈游", "miHoYo", "莉莉丝", "叠纸",
+    62→    "360", "新浪", "微博", "搜狐", "爱奇艺",
+    63→    "OPPO", "vivo", "一加", "联想", "Lenovo",
+    64→    "SAP", "Oracle", "IBM", "Adobe", "Salesforce",
+    65→    "Stripe", "Airbnb", "Spotify", "Twitter", "X",
+    66→}
+    67→
+    68→EDUCATION_SCORES: Dict[str, int] = {
+    69→    "博士": 100,
+    70→    "硕士": 80,
+    71→    "本科": 60,
+    72→    "大专": 40,
+    73→    "中专": 20,
+    74→    "高中": 10,
+    75→}
+    76→
+    77→# Default weights (used when no config present)
+    78→_DEFAULT_WEIGHTS: Dict[str, float] = {
+    79→    "seniority": 15,
+    80→    "company_tier": 15,
+    81→    "education": 10,
+    82→    "experience": 15,
+    83→    "skill_match": 25,
+    84→    "keyword_relevance": 10,
+    85→    "rd_bonus": 5,
+    86→    "llm_score": 5,
+    87→}
+    88→
+    89→# ---------------------------------------------------------------------------
+    90→# Config helpers (lazy-loaded, cached)
+    91→# ---------------------------------------------------------------------------
+    92→_cached_jd_config: Optional[Dict[str, Any]] = None
+    93→_cached_weights: Optional[Dict[str, float]] = None
+    94→
+    95→
+    96→def _get_jd_config() -> Optional[Dict[str, Any]]:
+    97→    """Load JD config from settings.json, cached after first call."""
+    98→    global _cached_jd_config
+    99→    if _cached_jd_config is not None:
+   100→        return _cached_jd_config
+   101→    try:
+   102→        from src.utils.config import get_config
+   103→        cfg = get_config()
+   104→        jd = cfg.get("scoring.jd")
+   105→        if jd:
+   106→            _cached_jd_config = jd
+   107→            return _cached_jd_config
+   108→    except Exception:
+   109→        pass
+   110→    return None
+   111→
+   112→
+   113→def _get_weights() -> Dict[str, float]:
+   114→    """Load scoring weights from settings.json, cached after first call."""
+   115→    global _cached_weights
+   116→    if _cached_weights is not None:
+   117→        return _cached_weights
+   118→    try:
+   119→        from src.utils.config import get_config
+   120→        cfg = get_config()
+   121→        w = cfg.get("scoring.weights")
+   122→        if w and isinstance(w, dict):
+   123→            _cached_weights = w
+   124→            return _cached_weights
+   125→    except Exception:
+   126→        pass
+   127→    _cached_weights = _DEFAULT_WEIGHTS
+   128→    return _cached_weights
+   129→
+   130→
+   131→def reset_scoring_cache():
+   132→    """Reset cached config (useful for testing)."""
+   133→    global _cached_jd_config, _cached_weights
+   134→    _cached_jd_config = None
+   135→    _cached_weights = None
+   136→
+   137→
+   138→# ---------------------------------------------------------------------------
+   139→# Individual scoring factors (all return 0.0 – 1.0)
+   140→# ---------------------------------------------------------------------------
+   141→
+   142→def _score_seniority(title: str) -> float:
+   143→    """Score based on job title seniority. Returns 0.0-1.0."""
+   144→    if not title:
+   145→        return 0.0
+   146→    title_lower = title.lower()
+   147→    best = 0
+   148→    for keyword, points in SENIORITY_SCORES.items():
+   149→        if keyword.lower() in title_lower or keyword in title:
+   150→            best = max(best, points)
+   151→    # Max seniority score is 50 (CTO)
+   152→    return min(best / 50.0, 1.0)
+   153→
+   154→
+   155→def _score_company(company: str) -> float:
+   156→    """Score based on company tier. Returns 0.0-1.0."""
+   157→    if not company:
+   158→        return 0.0
+   159→    company_lower = company.lower()
+   160→    for t1 in TIER1_COMPANIES:
+   161→        t1_lower = t1.lower()
+   162→        if len(t1_lower) >= 2 and len(company_lower) >= 2:
+   163→            if (t1_lower == company_lower
+   164→                    or (len(t1_lower) >= 3 and t1_lower in company_lower)
+   165→                    or (len(company_lower) >= 3 and company_lower in t1_lower)):
+   166→                return 1.0
+   167→    for t2 in TIER2_COMPANIES:
+   168→        t2_lower = t2.lower()
+   169→        if len(t2_lower) >= 2 and len(company_lower) >= 2:
+   170→            if (t2_lower == company_lower
+   171→                    or (len(t2_lower) >= 3 and t2_lower in company_lower)
+   172→                    or (len(company_lower) >= 3 and company_lower in t2_lower)):
+   173→                return 0.67
+   174→    return 0.0
+   175→
+   176→
+   177→def _score_education(education_level: Optional[str], preferred: Optional[str] = None) -> float:
+   178→    """Score based on education level. Returns 0.0-1.0."""
+   179→    if not education_level:
+   180→        return 0.0
+   181→    # Find the candidate's education rank
+   182→    candidate_score = 0
+   183→    for edu, points in EDUCATION_SCORES.items():
+   184→        if edu in education_level:
+   185→            candidate_score = points
+   186→            break
+   187→    if candidate_score == 0:
+   188→        return 0.0
+   189→    # If preferred education specified, score relative to it
+   190→    if preferred:
+   191→        preferred_score = EDUCATION_SCORES.get(preferred, 60)
+   192→        if candidate_score >= preferred_score:
+   193→            return 1.0
+   194→        else:
+   195→            return candidate_score / preferred_score
+   196→    # Without preference, just normalize
+   197→    return candidate_score / 100.0
+   198→
+   199→
+   200→def _parse_experience_years(work_years: Optional[str]) -> Optional[int]:
+   201→    """Parse Chinese experience strings like '5年', '3-5年', '10年以上' → int."""
+   202→    if not work_years:
+   203→        return None
+   204→    # Try "X-Y年" pattern → take the higher number
+   205→    m = re.search(r"(\d+)\s*[-–~]\s*(\d+)", work_years)
+   206→    if m:
+   207→        return int(m.group(2))
+   208→    # Try single number "X年"
+   209→    m = re.search(r"(\d+)", work_years)
+   210→    if m:
+   211→        return int(m.group(1))
+   212→    return None
+   213→
+   214→
+   215→def _score_experience(work_years: Optional[str], min_years: Optional[int] = None) -> float:
+   216→    """Score based on experience years. Returns 0.0-1.0."""
+   217→    years = _parse_experience_years(work_years)
+   218→    if years is None:
+   219→        return 0.0
+   220→    if min_years is None or min_years <= 0:
+   221→        # Without min requirement, just normalize (cap at 15 years)
+   222→        return min(years / 15.0, 1.0)
+   223→    if years >= min_years:
+   224→        # Meet or exceed — bonus for exceeding, capped at 1.0
+   225→        return min(1.0, 0.8 + 0.2 * min(years / (min_years * 2), 1.0))
+   226→    else:
+   227→        # Below minimum
+   228→        return years / min_years
+   229→
+   230→
+   231→def _build_candidate_text(
+   232→    title: str = "",
+   233→    company: str = "",
+   234→    skills: Optional[List[str]] = None,
+   235→    work_experience: Optional[List[Dict]] = None,
+   236→    basic_info: Optional[Dict] = None,
+   237→) -> str:
+   238→    """Concatenate all available candidate text for skill matching."""
+   239→    parts = []
+   240→    if title:
+   241→        parts.append(title)
+   242→    if company:
+   243→        parts.append(company)
+   244→    if skills:
+   245→        parts.append(" ".join(skills))
+   246→    if work_experience:
+   247→        for exp in work_experience:
+   248→            if isinstance(exp, dict):
+   249→                parts.append(exp.get("company", ""))
+   250→                parts.append(exp.get("title", ""))
+   251→                parts.append(exp.get("description", ""))
+   252→    if basic_info and isinstance(basic_info, dict):
+   253→        for v in basic_info.values():
+   254→            if isinstance(v, str):
+   255→                parts.append(v)
+   256→    return " ".join(parts)
+   257→
+   258→
+   259→def _tokenize(text: str) -> set:
+   260→    """Tokenize text using jieba or fallback to whitespace/punctuation splitting."""
+   261→    if not text:
+   262→        return set()
+   263→    if _HAS_JIEBA:
+   264→        return set(w.lower() for w in jieba.cut(text) if len(w.strip()) > 0)
+   265→    # Fallback: split on whitespace + punctuation, return lowered tokens
+   266→    tokens = re.split(r"[\s,，;；、/|]+", text.lower())
+   267→    return set(t for t in tokens if t)
+   268→
+   269→
+   270→def _score_skills_jieba(
+   271→    candidate_text: str,
+   272→    candidate_skills: Optional[List[str]],
+   273→    required_skills: Optional[List[str]] = None,
+   274→    preferred_skills: Optional[List[str]] = None,
+   275→) -> float:
+   276→    """Score skill match using jieba tokenization. Returns 0.0-1.0."""
+   277→    if not required_skills and not preferred_skills:
+   278→        return 0.0
+   279→
+   280→    # Build candidate token set
+   281→    tokens = _tokenize(candidate_text)
+   282→    if candidate_skills:
+   283→        for s in candidate_skills:
+   284→            tokens.update(_tokenize(s))
+   285→
+   286→    def _match_skill(skill: str, token_set: set) -> bool:
+   287→        skill_lower = skill.lower()
+   288→        # Exact token match
+   289→        if skill_lower in token_set:
+   290→            return True
+   291→        # Substring match in original text
+   292→        if skill_lower in candidate_text.lower():
+   293→            return True
+   294→        # Tokenized skill match
+   295→        skill_tokens = _tokenize(skill)
+   296→        if skill_tokens and skill_tokens.issubset(token_set):
+   297→            return True
+   298→        return False
+   299→
+   300→    score = 0.0
+   301→    total_weight = 0.0
+   302→
+   303→    if required_skills:
+   304→        required_weight = 0.7
+   305→        matched = sum(1 for s in required_skills if _match_skill(s, tokens))
+   306→        score += required_weight * (matched / len(required_skills))
+   307→        total_weight += required_weight
+   308→
+   309→    if preferred_skills:
+   310→        preferred_weight = 0.3
+   311→        matched = sum(1 for s in preferred_skills if _match_skill(s, tokens))
+   312→        score += preferred_weight * (matched / len(preferred_skills))
+   313→        total_weight += preferred_weight
+   314→
+   315→    if total_weight > 0:
+   316→        return score / total_weight
+   317→
+   318→    return 0.0
+   319→
+   320→
+   321→def _score_keyword_relevance(title: str, company: str, search_keywords: Optional[List[str]]) -> float:
+   322→    """Score keyword relevance. Returns 0.0-1.0."""
+   323→    if not search_keywords or not title:
+   324→        return 0.0
+   325→    title_lower = title.lower()
+   326→    company_lower = (company or "").lower()
+   327→    points = 0
+   328→    for kw in search_keywords:
+   329→        kw_lower = kw.lower()
+   330→        if kw_lower in title_lower:
+   331→            points += 10
+   332→        elif kw_lower in company_lower:
+   333→            points += 5
+   334→    return min(points / 20.0, 1.0)
+   335→
+   336→
+   337→def _score_rd_bonus(title: str) -> float:
+   338→    """R&D role bonus. Returns 0.0 or 1.0."""
+   339→    if not title:
+   340→        return 0.0
+   341→    rd_patterns = [
+   342→        r"工程师", r"开发", r"架构", r"算法", r"研发",
+   343→        r"engineer", r"developer", r"architect",
+   344→    ]
+   345→    for pattern in rd_patterns:
+   346→        if re.search(pattern, title, re.IGNORECASE):
+   347→            return 1.0
+   348→    return 0.0
+   349→
+   350→
+   351→# ---------------------------------------------------------------------------
+   352→# Main scoring function
+   353→# ---------------------------------------------------------------------------
+   354→
+   355→_UNSET = object()
+   356→
+   357→
+   358→def score_candidate(
+   359→    name: str,
+   360→    title: str,
+   361→    company: str,
+   362→    search_keywords: Optional[List[str]] = None,
+   363→    *,
+   364→    education_level: Optional[str] = None,
+   365→    work_years: Optional[str] = None,
+   366→    skills: Optional[List[str]] = None,
+   367→    work_experience: Optional[List[Dict]] = None,
+   368→    basic_info: Optional[Dict] = None,
+   369→    jd_config: Any = _UNSET,
+   370→    weights: Optional[Dict[str, float]] = None,
+   371→) -> int:
+   372→    """Score a candidate with multi-factor weighted scoring.
+   373→
+   374→    Without keyword-only args, behavior is backward-compatible with the
+   375→    original implementation: seniority + company tier + keyword + rd_bonus
+   376→    scored on the original absolute scale.
+   377→    """
+   378→    # Determine if we should use enhanced scoring
+   379→    has_enhanced_info = any([education_level, work_years, skills, work_experience, basic_info])
+   380→
+   381→    if jd_config is _UNSET:
+   382→        # Only auto-load JD config when enhanced candidate data is available
+   383→        jd = _get_jd_config() if has_enhanced_info else None
+   384→    else:
+   385→        jd = jd_config
+   386→
+   387→    if jd is None and not has_enhanced_info:
+   388→        # Legacy mode: original absolute scoring
+   389→        return _legacy_score(name, title, company, search_keywords)
+   390→
+   391→    # Enhanced mode: weighted factor scoring
+   392→    w = weights if weights is not None else _get_weights()
+   393→    total_weight = sum(v for k, v in w.items() if k != "llm_score")
+   394→    if total_weight <= 0:
+   395→        total_weight = 1.0
+   396→
+   397→    # Compute each factor (0.0-1.0)
+   398→    seniority = _score_seniority(title)
+   399→    company_tier = _score_company(company)
+   400→    education = _score_education(
+   401→        education_level,
+   402→        jd.get("preferred_education") if jd else None,
+   403→    )
+   404→    experience = _score_experience(
+   405→        work_years,
+   406→        jd.get("min_experience_years") if jd else None,
+   407→    )
+   408→
+   409→    # Skill matching
+   410→    candidate_text = _build_candidate_text(title, company, skills, work_experience, basic_info)
+   411→    skill_match = _score_skills_jieba(
+   412→        candidate_text,
+   413→        skills,
+   414→        jd.get("required_skills") if jd else None,
+   415→        jd.get("preferred_skills") if jd else None,
+   416→    )
+   417→
+   418→    keyword_rel = _score_keyword_relevance(title, company, search_keywords)
+   419→    rd_bonus = _score_rd_bonus(title)
+   420→
+   421→    # Weighted sum (exclude llm_score from rule engine)
+   422→    factors = {
+   423→        "seniority": seniority,
+   424→        "company_tier": company_tier,
+   425→        "education": education,
+   426→        "experience": experience,
+   427→        "skill_match": skill_match,
+   428→        "keyword_relevance": keyword_rel,
+   429→        "rd_bonus": rd_bonus,
+   430→    }
+   431→
+   432→    weighted_sum = 0.0
+   433→    for factor_name, factor_value in factors.items():
+   434→        factor_weight = w.get(factor_name, 0)
+   435→        weighted_sum += factor_value * factor_weight
+   436→
+   437→    # Normalize to 0-100 scale
+   438→    score = int(round(weighted_sum / total_weight * 100))
+   439→    return max(0, min(score, 100))
+   440→
+   441→
+   442→def _legacy_score(
+   443→    _name: str,
+   444→    title: str,
+   445→    company: str,
+   446→    search_keywords: Optional[List[str]],
+   447→) -> int:
+   448→    """Original scoring logic for backward compatibility."""
+   449→    score = 0
+   450→
+   451→    title_lower = title.lower() if title else ""
+   452→    best_seniority = 0
+   453→    for keyword, points in SENIORITY_SCORES.items():
+   454→        if keyword.lower() in title_lower or keyword in title:
+   455→            best_seniority = max(best_seniority, points)
+   456→    score += best_seniority
+   457→
+   458→    if company:
+   459→        company_lower = company.lower()
+   460→        company_matched = False
+   461→        for t1 in TIER1_COMPANIES:
+   462→            t1_lower = t1.lower()
+   463→            if len(t1_lower) >= 2 and len(company_lower) >= 2:
+   464→                if (t1_lower == company_lower
+   465→                        or (len(t1_lower) >= 3 and t1_lower in company_lower)
+   466→                        or (len(company_lower) >= 3 and company_lower in t1_lower)):
+   467→                    score += 30
+   468→                    company_matched = True
+   469→                    break
+   470→        if not company_matched:
+   471→            for t2 in TIER2_COMPANIES:
+   472→                t2_lower = t2.lower()
+   473→                if len(t2_lower) >= 2 and len(company_lower) >= 2:
+   474→                    if (t2_lower == company_lower
+   475→                            or (len(t2_lower) >= 3 and t2_lower in company_lower)
+   476→                            or (len(company_lower) >= 3 and company_lower in t2_lower)):
+   477→                        score += 20
+   478→                        break
+   479→
+   480→    if search_keywords and title:
+   481→        keyword_score = 0
+   482→        for kw in search_keywords:
+   483→            kw_lower = kw.lower()
+   484→            if kw_lower in title_lower:
+   485→                keyword_score += 10
+   486→            elif kw_lower in (company or "").lower():
+   487→                keyword_score += 5
+   488→        score += min(keyword_score, 20)
+   489→
+   490→    rd_bonus_patterns = [
+   491→        r"工程师", r"开发", r"架构", r"算法", r"研发",
+   492→        r"engineer", r"developer", r"architect",
+   493→    ]
+   494→    for pattern in rd_bonus_patterns:
+   495→        if re.search(pattern, title, re.IGNORECASE):
+   496→            score += 5
+   497→            break
+   498→
+   499→    return score
+   500→
+   501→
+   502→# ---------------------------------------------------------------------------
+   503→# Batch sorting
+   504→# ---------------------------------------------------------------------------
+   505→
+   506→def sort_candidates_by_score(
+   507→    candidates: list,
+   508→    search_keywords: Optional[List[str]] = None,
+   509→    *,
+   510→    enrich_from_db: bool = True,
+   511→) -> list:
+   512→    """Sort candidates by score descending.
+   513→
+   514→    When enrich_from_db=True, batch-queries the DB for detailed profile data
+   515→    (skills, work_experience, etc.) to enable deep scoring. Falls back to
+   516→    basic scoring when DB data is unavailable.
+   517→    """
+   518→    # Batch load enrichment data from DB
+   519→    enrichment: Dict[str, Dict[str, Any]] = {}
+   520→    if enrich_from_db:
+   521→        enrichment = _batch_load_enrichment(candidates)
+   522→
+   523→    scored = []
+   524→    for c in candidates:
+   525→        if isinstance(c, dict):
+   526→            name = c.get("name", "")
+   527→            title = c.get("title", "")
+   528→            company = c.get("company", "")
+   529→            boss_id = c.get("boss_id", "")
+   530→        else:
+   531→            name = getattr(c, "name", "")
+   532→            title = getattr(c, "title", "")
+   533→            company = getattr(c, "company", "")
+   534→            boss_id = getattr(c, "boss_id", "")
+   535→
+   536→        # Get enrichment data if available
+   537→        extra = enrichment.get(boss_id, {})
+   538→
+   539→        # Use enrichment data or fall back to candidate object attributes
+   540→        education_level = extra.get("education_level") or (
+   541→            c.get("education_level") if isinstance(c, dict) else getattr(c, "education_level", None)
+   542→        )
+   543→        work_years = extra.get("work_years") or (
+   544→            c.get("work_years") if isinstance(c, dict) else getattr(c, "work_years", None)
+   545→        )
+   546→        skills_data = extra.get("skills") or (
+   547→            c.get("skills") if isinstance(c, dict) else getattr(c, "skills", None)
+   548→        )
+   549→        work_exp = extra.get("work_experience") or (
+   550→            c.get("work_experience") if isinstance(c, dict) else getattr(c, "work_experience", None)
+   551→        )
+   552→        basic_info = extra.get("basic_info") or (
+   553→            c.get("basic_info") if isinstance(c, dict) else getattr(c, "basic_info", None)
+   554→        )
+   555→
+   556→        s = score_candidate(
+   557→            name, title, company, search_keywords,
+   558→            education_level=education_level,
+   559→            work_years=work_years,
+   560→            skills=skills_data if isinstance(skills_data, list) else None,
+   561→            work_experience=work_exp if isinstance(work_exp, list) else None,
+   562→            basic_info=basic_info if isinstance(basic_info, dict) else None,
+   563→        )
+   564→
+   565→        if isinstance(c, dict):
+   566→            c["_score"] = s
+   567→        else:
+   568→            c._score = s
+   569→
+   570→        scored.append((s, c))
+   571→
+   572→    scored.sort(key=lambda x: x[0], reverse=True)
+   573→
+   574→    result = [item[1] for item in scored]
+   575→
+   576→    if result:
+   577→        top = scored[0][0]
+   578→        bottom = scored[-1][0]
+   579→        logger.info(f"Candidates scored: top={top}, bottom={bottom}, count={len(result)}")
+   580→
+   581→    return result
+   582→
+   583→
+   584→def _batch_load_enrichment(candidates: list) -> Dict[str, Dict[str, Any]]:
+   585→    """Batch-load candidate details from DB."""
+   586→    enrichment: Dict[str, Dict[str, Any]] = {}
+   587→    boss_ids = []
+   588→    for c in candidates:
+   589→        bid = c.get("boss_id", "") if isinstance(c, dict) else getattr(c, "boss_id", "")
+   590→        if bid:
+   591→            boss_ids.append(bid)
+   592→
+   593→    if not boss_ids:
+   594→        return enrichment
+   595→
+   596→    try:
+   597→        from src.models.database import get_db_manager, Candidate
+   598→        db = get_db_manager()
+   599→        chunk_size = 500
+   600→        with db.session_scope() as session:
+   601→            for i in range(0, len(boss_ids), chunk_size):
+   602→                chunk = boss_ids[i:i + chunk_size]
+   603→                rows = session.query(Candidate).filter(
+   604→                    Candidate.boss_id.in_(chunk)
+   605→                ).all()
+   606→                for row in rows:
+   607→                    enrichment[row.boss_id] = {
+   608→                        "education_level": row.education_level,
+   609→                        "work_years": row.work_years,
+   610→                        "skills": row.skills,
+   611→                        "work_experience": row.work_experience,
+   612→                        "basic_info": row.basic_info,
+   613→                    }
+   614→        logger.debug(f"Enriched {len(enrichment)}/{len(boss_ids)} candidates from DB")
+   615→    except Exception as e:
+   616→        logger.debug(f"DB enrichment skipped: {e}")
+   617→
+   618→    return enrichment
+   619→

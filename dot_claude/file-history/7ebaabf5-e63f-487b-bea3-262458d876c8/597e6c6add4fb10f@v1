@@ -1,0 +1,335 @@
+"""CLI interface for Boss Assistant.
+
+Provides Click-based commands for Boss直聘 recruitment automation:
+- login: Verify Boss直聘 login status
+- search: Search for candidates
+- profile: Extract candidate profile details
+- message: Send templated messages
+- pipeline: Full search → score → send pipeline
+- export: Export candidate data
+- templates: List message templates
+- status: View rate limit quota
+- logout: Clear session
+"""
+
+import sys
+import asyncio
+import click
+from rich.console import Console
+from rich.table import Table
+
+console = Console()
+
+
+def run_async(coro):
+    """Run an async coroutine from synchronous Click context."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+@click.group()
+@click.option('--cdp', default=None, help='CDP endpoint (default: http://127.0.0.1:9222)')
+@click.pass_context
+def cli(ctx, cdp):
+    """Boss Assistant - Boss直聘半自动招聘助手"""
+    ctx.ensure_object(dict)
+    ctx.obj['cdp'] = cdp
+
+
+@cli.command()
+@click.pass_context
+def login(ctx):
+    """Verify Boss直聘 login status and wait for manual login if needed."""
+    from src.core.browser import get_browser_manager
+    from src.modules.auth import login as do_login
+
+    browser = get_browser_manager()
+    if ctx.obj.get('cdp'):
+        browser.set_cdp_endpoint(ctx.obj['cdp'])
+
+    try:
+        result = run_async(do_login(browser))
+        if not result:
+            sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    finally:
+        run_async(browser.close())
+
+
+@cli.command()
+@click.option('-k', '--keywords', required=True, multiple=True, help='Search keywords (can specify multiple)')
+@click.option('-l', '--location', default=None, help='Location filter (e.g., 北京)')
+@click.option('-p', '--pages', default=1, type=int, help='Scroll rounds to load more results (default: 1)')
+@click.option('--experience', default=None, help='Experience filter (e.g., 3-5年)')
+@click.option('--education', default=None, help='Education filter (e.g., 本科)')
+@click.option('--salary', default=None, help='Salary filter (e.g., 20-40K)')
+@click.option('-e', '--export-file', default=None, help='Export results to file')
+@click.pass_context
+def search(ctx, keywords, location, pages, experience, education, salary, export_file):
+    """Search for candidates on Boss直聘. Uses infinite scroll to load results."""
+    from src.core.browser import get_browser_manager
+    from src.modules.auth import ensure_logged_in
+    from src.modules.search import search_candidates
+
+    browser = get_browser_manager()
+    if ctx.obj.get('cdp'):
+        browser.set_cdp_endpoint(ctx.obj['cdp'])
+
+    try:
+        run_async(ensure_logged_in(browser))
+
+        candidates = run_async(search_candidates(
+            keywords=list(keywords),
+            location=location,
+            max_pages=pages,
+            experience=experience,
+            education=education,
+            salary=salary,
+            browser=browser,
+        ))
+
+        console.print(f"\n[bold]Total candidates found: {len(candidates)}[/bold]")
+
+        if export_file and candidates:
+            from src.modules.export import export_candidates
+            export_candidates(output_path=export_file)
+            console.print(f"[green]Results exported to: {export_file}[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    finally:
+        run_async(browser.close())
+
+
+@cli.command()
+@click.argument('boss_id')
+@click.pass_context
+def profile(ctx, boss_id):
+    """Extract detailed profile for a candidate."""
+    from src.core.browser import get_browser_manager
+    from src.modules.auth import ensure_logged_in
+    from src.modules.profile import extract_profile
+
+    browser = get_browser_manager()
+    if ctx.obj.get('cdp'):
+        browser.set_cdp_endpoint(ctx.obj['cdp'])
+
+    try:
+        run_async(ensure_logged_in(browser))
+        run_async(extract_profile(boss_id=boss_id, browser=browser))
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    finally:
+        run_async(browser.close())
+
+
+@cli.command()
+@click.argument('boss_id')
+@click.option('-t', '--template', required=True, help='Message template name')
+@click.option('-v', '--variable', multiple=True, help='Template variable (key=value)')
+@click.option('--preview', is_flag=True, help='Preview message without sending')
+@click.pass_context
+def message(ctx, boss_id, template, variable, preview):
+    """Send a message to a candidate."""
+    from src.core.browser import get_browser_manager
+    from src.modules.auth import ensure_logged_in
+    from src.modules.message import send_message
+
+    browser = get_browser_manager()
+    if ctx.obj.get('cdp'):
+        browser.set_cdp_endpoint(ctx.obj['cdp'])
+
+    # Parse variables
+    variables = {}
+    for v in variable:
+        if '=' in v:
+            key, value = v.split('=', 1)
+            variables[key.strip()] = value.strip()
+
+    try:
+        run_async(ensure_logged_in(browser))
+        run_async(send_message(
+            boss_id=boss_id,
+            template_name=template,
+            variables=variables,
+            preview_only=preview,
+            browser=browser,
+        ))
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    finally:
+        run_async(browser.close())
+
+
+@cli.command()
+@click.option('-k', '--keywords', required=True, multiple=True, help='Search keywords')
+@click.option('-t', '--template', required=True, help='Message template name')
+@click.option('-v', '--variable', multiple=True, help='Template variable (key=value)')
+@click.option('-l', '--location', default=None, help='Location filter')
+@click.option('-p', '--pages', default=3, type=int, help='Scroll rounds per keyword (default: 3)')
+@click.option('--batch-pages', default=0, type=int, help='Send after every N pages (0=all at end)')
+@click.option('--experience', default=None, help='Experience filter')
+@click.option('--education', default=None, help='Education filter')
+@click.option('--salary', default=None, help='Salary filter')
+@click.option('--interactive/--no-interactive', default=True, help='Confirm each message')
+@click.option('--skip-messaged/--no-skip-messaged', default=True, help='Skip already messaged')
+@click.option('--dry-run', is_flag=True, help='Simulate without sending')
+@click.option('--resume', is_flag=True, help='Resume from last checkpoint')
+@click.pass_context
+def pipeline(ctx, keywords, template, variable, location, pages, batch_pages,
+             experience, education, salary, interactive, skip_messaged, dry_run, resume):
+    """Run full pipeline: search → score → send messages."""
+    from src.core.browser import get_browser_manager
+    from src.modules.auth import ensure_logged_in
+    from src.services.pipeline import run_pipeline
+
+    browser = get_browser_manager()
+    if ctx.obj.get('cdp'):
+        browser.set_cdp_endpoint(ctx.obj['cdp'])
+
+    # Parse variables
+    variables = {}
+    for v in variable:
+        if '=' in v:
+            key, value = v.split('=', 1)
+            variables[key.strip()] = value.strip()
+
+    try:
+        run_async(ensure_logged_in(browser))
+        run_async(run_pipeline(
+            keywords=keywords,
+            template_name=template,
+            variables=variables,
+            location=location,
+            max_pages=pages,
+            batch_pages=batch_pages,
+            experience=experience,
+            education=education,
+            salary=salary,
+            interactive=interactive,
+            skip_messaged=skip_messaged,
+            dry_run=dry_run,
+            resume=resume,
+            browser=browser,
+        ))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Pipeline interrupted. Progress saved to checkpoint.[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    finally:
+        run_async(browser.close())
+
+
+@cli.command()
+@click.option('-o', '--output', default=None, help='Output file path')
+@click.option('-f', '--format', 'fmt', type=click.Choice(['excel', 'csv']), default='excel', help='Export format')
+@click.option('--no-messages', is_flag=True, help='Exclude message history')
+def export(output, fmt, no_messages):
+    """Export candidate data to Excel or CSV."""
+    from src.modules.export import export_candidates
+
+    try:
+        path = export_candidates(
+            format=fmt,
+            output_path=output,
+            include_messages=not no_messages,
+        )
+        if path:
+            console.print(f"[green]Export complete: {path}[/green]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+def templates():
+    """List available message templates."""
+    from src.utils.config import get_config
+
+    config = get_config()
+    template_names = config.list_templates()
+
+    table = Table(title="Message Templates")
+    table.add_column("Name", style="bold")
+    table.add_column("Description")
+    table.add_column("Variables")
+
+    for name in template_names:
+        tmpl = config.get_template(name)
+        desc = tmpl.get('name', '') + ' - ' + tmpl.get('description', '')
+        vars_list = ', '.join(tmpl.get('variables', []))
+        table.add_row(name, desc, vars_list or "(none)")
+
+    console.print(table)
+
+
+@cli.command()
+def status():
+    """View rate limit quota status."""
+    from src.utils.rate_limiter import get_rate_limiter
+
+    rate_limiter = get_rate_limiter()
+
+    table = Table(title="Rate Limit Status")
+    table.add_column("Action")
+    table.add_column("Hourly Used")
+    table.add_column("Hourly Limit")
+    table.add_column("Hourly Remaining")
+    table.add_column("Daily Used")
+    table.add_column("Daily Limit")
+    table.add_column("Daily Remaining")
+
+    for action_type in ['search', 'view_profile', 'send_message']:
+        quota = rate_limiter.get_quota_status(action_type)
+        h = quota['hourly']
+        d = quota['daily']
+
+        table.add_row(
+            action_type,
+            str(h['used']),
+            str(h['limit']),
+            str(h['remaining']),
+            str(d['used']),
+            str(d['limit']),
+            str(d['remaining']),
+        )
+
+    console.print(table)
+
+    throttle = rate_limiter.throttle_factor
+    if throttle < 1.0:
+        console.print(f"\n[yellow]Adaptive throttle active: {throttle:.1f}x[/yellow]")
+    else:
+        console.print(f"\n[green]Throttle: normal (1.0x)[/green]")
+
+
+@cli.command()
+def logout():
+    """Clear saved session."""
+    from src.core.session import get_session_manager
+
+    session_mgr = get_session_manager()
+
+    if session_mgr.has_saved_session():
+        run_async(session_mgr.clear())
+        console.print("[green]Session cleared.[/green]")
+    else:
+        console.print("[dim]No saved session found.[/dim]")
+
+
+def main():
+    """Entry point for the CLI."""
+    cli(obj={})
+
+
+if __name__ == '__main__':
+    main()

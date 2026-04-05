@@ -1,0 +1,304 @@
+     1→"""Profile extraction module for Maimai.
+     2→
+     3→Extracts detailed candidate information from profile pages
+     4→including education, work experience, and skills.
+     5→"""
+     6→
+     7→import re
+     8→from dataclasses import dataclass, asdict, field
+     9→from typing import List, Optional, Dict, Any
+    10→
+    11→from patchright.async_api import Page
+    12→from loguru import logger
+    13→from rich.console import Console
+    14→from rich.panel import Panel
+    15→
+    16→from src.core.browser import BrowserManager, get_browser_manager
+    17→from src.core.anti_detection import human_scroll
+    18→from src.modules.auth import ensure_logged_in
+    19→from src.utils.config import get_config
+    20→from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+    21→from src.utils.delays import async_random_delay
+    22→from src.utils.retry import retry_navigation
+    23→from src.utils.validators import validate_maimai_id
+    24→from src.models.database import Candidate, get_db_manager
+    25→from src.exceptions.errors import ExtractionError
+    26→
+    27→console = Console()
+    28→
+    29→# Maimai profile URL template
+    30→MAIMAI_PROFILE_URL = "https://maimai.cn/contact/detail/{maimai_id}"
+    31→
+    32→
+    33→@dataclass
+    34→class Education:
+    35→    """Education history entry."""
+    36→    school: str
+    37→    degree: Optional[str] = None
+    38→    major: Optional[str] = None
+    39→    start_year: Optional[str] = None
+    40→    end_year: Optional[str] = None
+    41→
+    42→
+    43→@dataclass
+    44→class WorkExperience:
+    45→    """Work experience entry."""
+    46→    company: str
+    47→    title: str
+    48→    start_date: Optional[str] = None
+    49→    end_date: Optional[str] = None
+    50→    description: Optional[str] = None
+    51→
+    52→
+    53→@dataclass
+    54→class CandidateDetail:
+    55→    """Detailed candidate profile information."""
+    56→    maimai_id: str
+    57→    name: str
+    58→    title: str
+    59→    company: str
+    60→    location: Optional[str] = None
+    61→    profile_url: Optional[str] = None
+    62→    experience_years: Optional[str] = None
+    63→    education: List[Education] = field(default_factory=list)
+    64→    work_experience: List[WorkExperience] = field(default_factory=list)
+    65→    skills: List[str] = field(default_factory=list)
+    66→    basic_info: Dict[str, Any] = field(default_factory=dict)
+    67→
+    68→
+    69→async def extract_profile(
+    70→    maimai_id: str,
+    71→    browser: Optional[BrowserManager] = None
+    72→) -> CandidateDetail:
+    73→    """
+    74→    Extract detailed profile for a candidate.
+    75→
+    76→    Args:
+    77→        maimai_id: Maimai user ID
+    78→        browser: Browser manager instance
+    79→
+    80→    Returns:
+    81→        CandidateDetail with full profile information
+    82→
+    83→    Raises:
+    84→        RateLimitExceededError: If rate limit exceeded
+    85→        ExtractionError: If profile extraction fails
+    86→    """
+    87→    # Validate and clean input
+    88→    maimai_id = validate_maimai_id(maimai_id)
+    89→
+    90→    if browser is None:
+    91→        browser = get_browser_manager()
+    92→
+    93→    config = get_config()
+    94→    rate_limiter = get_rate_limiter()
+    95→    db_manager = get_db_manager()
+    96→
+    97→    # Ensure logged in
+    98→    await ensure_logged_in(browser)
+    99→
+   100→    # Check rate limit (waits through min-interval)
+   101→    await async_check_rate_limit('view_profile')
+   102→
+   103→    console.print(f"[cyan]Extracting profile for ID: {maimai_id}...[/cyan]")
+   104→
+   105→    try:
+   106→        page = browser.page
+   107→        profile_url = MAIMAI_PROFILE_URL.format(maimai_id=maimai_id)
+   108→
+   109→        # Navigate to profile
+   110→        await retry_navigation(page, profile_url, wait_until='domcontentloaded')
+   111→
+   112→        # Wait for page load
+   113→        await async_random_delay('page_load')
+   114→
+   115→        # Simulate human behavior - scroll to load content
+   116→        await human_scroll(page, 'down', distance=400)
+   117→        await async_random_delay('action')
+   118→
+   119→        # Extract profile data
+   120→        profile = await _extract_profile_data(page, maimai_id, profile_url, config)
+   121→
+   122→        # Log the action
+   123→        rate_limiter.log_action('view_profile', {
+   124→            'maimai_id': maimai_id,
+   125→            'name': profile.name
+   126→        })
+   127→
+   128→        # Update database
+   129→        _update_candidate_in_db(db_manager, profile)
+   130→
+   131→        # Display summary
+   132→        _display_profile_summary(profile)
+   133→
+   134→        return profile
+   135→
+   136→    except Exception as e:
+   137→        logger.error(f"Error extracting profile: {e}")
+   138→        await browser.screenshot(f"profile_error_{maimai_id}")
+   139→        raise ExtractionError(f"Failed to extract profile for {maimai_id}: {e}")
+   140→
+   141→
+   142→async def _extract_profile_data(
+   143→    page: Page,
+   144→    maimai_id: str,
+   145→    profile_url: str,
+   146→    config
+   147→) -> CandidateDetail:
+   148→    """
+   149→    Extract all profile data from page.
+   150→
+   151→    Args:
+   152→        page: Playwright page instance
+   153→        maimai_id: Candidate's Maimai ID
+   154→        profile_url: Profile URL
+   155→        config: Config instance
+   156→
+   157→    Returns:
+   158→        CandidateDetail object
+   159→    """
+   160→    # Extract basic info
+   161→    name = await _extract_text(page, [
+   162→        config.get_selector('profile.name'),
+   163→        'h1[class*="name"]',
+   164→        '.profile-name',
+   165→        'h1',
+   166→    ])
+   167→
+   168→    title = await _extract_text(page, [
+   169→        config.get_selector('profile.title'),
+   170→        '[class*="current-title"]',
+   171→        '[class*="position"]',
+   172→        '.job-title',
+   173→    ])
+   174→
+   175→    company = await _extract_text(page, [
+   176→        config.get_selector('profile.company'),
+   177→        '[class*="current-company"]',
+   178→        '[class*="company-name"]',
+   179→        '.company',
+   180→    ])
+   181→
+   182→    location = await _extract_text(page, [
+   183→        config.get_selector('profile.location'),
+   184→        '[class*="location"]',
+   185→        '[class*="city"]',
+   186→    ])
+   187→
+   188→    experience_years = await _extract_text(page, [
+   189→        config.get_selector('profile.experience_years'),
+   190→        '[class*="experience"]',
+   191→        '[class*="years"]',
+   192→    ])
+   193→
+   194→    # Extract education
+   195→    education = await _extract_education(page, config)
+   196→
+   197→    # Extract work experience
+   198→    work_experience = await _extract_work_experience(page, config)
+   199→
+   200→    # Extract skills
+   201→    skills = await _extract_skills(page, config)
+   202→
+   203→    # Build basic info dict
+   204→    basic_info = {
+   205→        'experience_years': experience_years,
+   206→    }
+   207→
+   208→    return CandidateDetail(
+   209→        maimai_id=maimai_id,
+   210→        name=name or "Unknown",
+   211→        title=title or "",
+   212→        company=company or "",
+   213→        location=location,
+   214→        profile_url=profile_url,
+   215→        experience_years=experience_years,
+   216→        education=education,
+   217→        work_experience=work_experience,
+   218→        skills=skills,
+   219→        basic_info=basic_info
+   220→    )
+   221→
+   222→
+   223→async def _extract_text(parent, selectors: List[str]) -> Optional[str]:
+   224→    """
+   225→    Try multiple selectors to extract text content from a parent (Page or Element).
+   226→
+   227→    Args:
+   228→        parent: Playwright Page or ElementHandle to query within
+   229→        selectors: List of selectors to try
+   230→
+   231→    Returns:
+   232→        Extracted text or None
+   233→    """
+   234→    for selector in selectors:
+   235→        try:
+   236→            elem = await parent.query_selector(selector)
+   237→            if elem:
+   238→                text = await elem.inner_text()
+   239→                text = text.strip()
+   240→                if text:
+   241→                    return text
+   242→        except Exception:
+   243→            continue
+   244→    return None
+   245→
+   246→
+   247→async def _find_section(page: Page, section_selectors: List[str]) -> Optional[Any]:
+   248→    """Find a section element on page using multiple selectors.
+   249→
+   250→    Args:
+   251→        page: Playwright page instance
+   252→        section_selectors: List of CSS selectors to try
+   253→
+   254→    Returns:
+   255→        Found element or None
+   256→    """
+   257→    for selector in section_selectors:
+   258→        try:
+   259→            section = await page.query_selector(selector)
+   260→            if section:
+   261→                return section
+   262→        except Exception:
+   263→            continue
+   264→    return None
+   265→
+   266→
+   267→async def _find_items(section, item_selectors: List[str]) -> list:
+   268→    """Find items within a section using multiple selectors.
+   269→
+   270→    Args:
+   271→        section: Parent element to query within
+   272→        item_selectors: List of CSS selectors to try
+   273→
+   274→    Returns:
+   275→        List of found elements (may be empty)
+   276→    """
+   277→    for selector in item_selectors:
+   278→        items = await section.query_selector_all(selector)
+   279→        if items:
+   280→            return items
+   281→    return []
+   282→
+   283→
+   284→async def _extract_education(page: Page, config) -> List[Education]:
+   285→    """Extract education history from profile."""
+   286→    education_list = []
+   287→
+   288→    try:
+   289→        section = await _find_section(page, [
+   290→            config.get_selector('profile.education_section'),
+   291→            '[class*="education"]',
+   292→            '[class*="edu-section"]',
+   293→            '#education',
+   294→        ])
+   295→        if not section:
+   296→            logger.debug("Education section not found")
+   297→            return education_list
+   298→
+   299→        items = await _find_items(section, [
+   300→            config.get_selector('profile.education_item'),
+
+<system-reminder>
+Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+</system-reminder>

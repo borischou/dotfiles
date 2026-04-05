@@ -1,0 +1,367 @@
+/**
+ * Pipeline page interaction logic.
+ * Supports dual mode: search-only (no template) and pipeline (with template).
+ */
+
+let pipelineTaskId = null;
+let pipelineWS = null;
+let pipelineCandidates = [];
+
+// --- Log helper ---
+
+function clearLog() {
+    const log = document.getElementById('pipeline-log');
+    if (log) log.innerHTML = '';
+}
+
+function appendLog(text, level = 'info') {
+    const log = document.getElementById('pipeline-log');
+    if (!log) return;
+    const time = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `<span class="log-time">${time}</span><span class="log-${level}">${escapeHtml(text)}</span>`;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+}
+
+// --- Form submission ---
+
+document.getElementById('pipeline-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+
+    const keywords = form.keywords.value.split('\n').map(s => s.trim()).filter(Boolean);
+    const company = form.company.value.split('\n').map(s => s.trim()).filter(Boolean);
+    const location = form.location ? form.location.value.trim() || null : null;
+    const template = form.template.value;
+    const pages = parseInt(form.pages.value) || 1;
+
+    if (!keywords.length) return alert('Please enter at least one keyword');
+
+    // Hide all result sections, reset log
+    document.getElementById('pipeline-progress').hidden = false;
+    document.getElementById('pipeline-confirm').hidden = true;
+    document.getElementById('pipeline-results').hidden = true;
+    document.getElementById('search-results').hidden = true;
+    document.getElementById('pipeline-progress-bar').value = 0;
+    form.querySelector('button[type="submit"]').disabled = true;
+    clearLog();
+
+    const isSearchOnly = !template;
+
+    if (isSearchOnly) {
+        // --- Search-only mode ---
+        appendLog(`Starting search: ${keywords.join(', ')} | pages=${pages}`);
+        try {
+            const res = await safeFetch('/api/search', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({keywords, company, location, pages}),
+            });
+            const data = await res.json();
+            pipelineTaskId = data.task_id;
+            document.getElementById('pipeline-task-id').textContent = data.task_id;
+            document.getElementById('pipeline-status-text').textContent = 'Searching...';
+            appendLog(`Task queued: ${data.task_id}`);
+
+            connectTaskWS(data.task_id, {
+                onEvent(msg) {
+                    document.getElementById('pipeline-status-text').textContent =
+                        `${msg.event}: ${msg.keyword || ''} ${msg.found ? '(' + msg.found + ' found)' : ''}`;
+                    if (msg.event === 'search_keyword_done') {
+                        appendLog(`"${msg.keyword}" — found ${msg.found} candidates (total: ${msg.total_so_far})`, 'ok');
+                    } else if (msg.keyword) {
+                        appendLog(`Searching: ${msg.keyword}`);
+                    }
+                },
+                onComplete(msg) {
+                    const candidates = msg.result || [];
+                    appendLog(`Search complete — ${candidates.length} candidates found`, 'ok');
+                    showSearchResults(candidates);
+                    document.getElementById('pipeline-progress').hidden = true;
+                    form.querySelector('button[type="submit"]').disabled = false;
+                },
+                onError(msg) {
+                    const err = msg.error || 'Unknown error';
+                    appendLog(`Search failed: ${err}`, 'err');
+                    document.getElementById('pipeline-status-text').textContent = 'Failed';
+                    form.querySelector('button[type="submit"]').disabled = false;
+                },
+            });
+        } catch (e) {
+            appendLog(`Request failed: ${e.message}`, 'err');
+            document.getElementById('pipeline-progress').hidden = true;
+            form.querySelector('button[type="submit"]').disabled = false;
+        }
+    } else {
+        // --- Pipeline mode ---
+        const auto_send = form.auto_send.checked;
+
+        // Collect template variables
+        const variables = {};
+        form.querySelectorAll('[name^="var_"]').forEach(input => {
+            const key = input.name.replace('var_', '');
+            if (input.value.trim()) variables[key] = input.value.trim();
+        });
+
+        appendLog(`Starting pipeline: ${keywords.join(', ')} | template=${template} | auto_send=${auto_send}`);
+
+        try {
+            const res = await safeFetch('/api/pipeline', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({keywords, company, location, template, pages, variables, auto_send}),
+            });
+            const data = await res.json();
+            pipelineTaskId = data.task_id;
+            document.getElementById('pipeline-task-id').textContent = data.task_id;
+            appendLog(`Task queued: ${data.task_id}`);
+
+            pipelineWS = connectTaskWS(data.task_id, {
+                onEvent(msg) {
+                    handlePipelineEvent(msg);
+                },
+                onComplete(msg) {
+                    appendLog('Pipeline completed', 'ok');
+                    showPipelineResults(msg.result);
+                    document.getElementById('pipeline-progress').hidden = true;
+                    form.querySelector('button[type="submit"]').disabled = false;
+                },
+                onError(msg) {
+                    const err = msg.error || 'Unknown error';
+                    appendLog(`Pipeline failed: ${err}`, 'err');
+                    document.getElementById('pipeline-status-text').textContent = 'Failed';
+                    document.getElementById('pipeline-detail').textContent = err;
+                    form.querySelector('button[type="submit"]').disabled = false;
+                },
+            });
+
+            pollTask(data.task_id, (task) => {
+                if (task.status === 'completed') {
+                    showPipelineResults(task.result);
+                    document.getElementById('pipeline-progress').hidden = true;
+                    form.querySelector('button[type="submit"]').disabled = false;
+                    if (pipelineWS) pipelineWS.close();
+                }
+            }, 3000);
+
+        } catch (e) {
+            appendLog(`Request failed: ${e.message}`, 'err');
+            form.querySelector('button[type="submit"]').disabled = false;
+            document.getElementById('pipeline-progress').hidden = true;
+        }
+    }
+});
+
+function handlePipelineEvent(msg) {
+    const statusEl = document.getElementById('pipeline-status-text');
+    const detailEl = document.getElementById('pipeline-detail');
+    const progressBar = document.getElementById('pipeline-progress-bar');
+
+    switch (msg.event) {
+        case 'search_progress':
+            statusEl.textContent = `Searching: ${msg.keyword} (${msg.keyword_index}/${msg.total_keywords})`;
+            appendLog(`Searching keyword ${msg.keyword_index}/${msg.total_keywords}: "${msg.keyword}"`);
+            break;
+
+        case 'search_keyword_done':
+            detailEl.textContent = `Found ${msg.found} candidates for "${msg.keyword}" (${msg.total_so_far} total)`;
+            appendLog(`"${msg.keyword}" — found ${msg.found} (total: ${msg.total_so_far})`, 'ok');
+            break;
+
+        case 'search_complete':
+            statusEl.textContent = 'Search complete';
+            detailEl.textContent = `${msg.candidates.length} candidates found`;
+            appendLog(`Search phase done — ${msg.candidates.length} candidates`, 'ok');
+            break;
+
+        case 'awaiting_confirmation':
+            statusEl.textContent = 'Awaiting your confirmation';
+            appendLog(`Waiting for confirmation — ${msg.candidates.length} candidates to review`, 'warn');
+            document.getElementById('pipeline-progress').hidden = true;
+            showConfirmation(msg.candidates);
+            break;
+
+        case 'sending_started':
+            statusEl.textContent = 'Sending messages...';
+            progressBar.max = msg.total;
+            progressBar.value = 0;
+            document.getElementById('pipeline-progress').hidden = false;
+            document.getElementById('pipeline-confirm').hidden = true;
+            appendLog(`Sending messages to ${msg.total} candidates...`);
+            break;
+
+        case 'send_progress':
+            statusEl.textContent = `Sending: ${msg.current} (${msg.sent}/${msg.total})`;
+            progressBar.value = msg.sent + msg.failed;
+            progressBar.max = msg.total;
+            detailEl.textContent = `Sent: ${msg.sent}, Failed: ${msg.failed}`;
+            if (msg.status === 'sent') {
+                appendLog(`Sent to ${msg.current}`, 'ok');
+            } else if (msg.status === 'failed') {
+                appendLog(`Failed: ${msg.current} — ${msg.error || 'unknown'}`, 'err');
+            } else if (msg.status === 'skipped') {
+                appendLog(`Skipped: ${msg.current}`, 'warn');
+            } else {
+                appendLog(`${msg.current} (${msg.sent}/${msg.total})`);
+            }
+            break;
+
+        case 'completed':
+            appendLog('Pipeline completed', 'ok');
+            showPipelineResults(msg.result);
+            break;
+
+        default:
+            appendLog(`${msg.event}: ${JSON.stringify(msg)}`);
+    }
+}
+
+function showConfirmation(candidates) {
+    pipelineCandidates = candidates;
+    document.getElementById('pipeline-confirm').hidden = false;
+    document.getElementById('confirm-count').textContent = candidates.length;
+
+    const list = document.getElementById('candidate-list');
+    list.innerHTML = candidates.map(c => `
+        <label>
+            <input type="checkbox" value="${escapeHtml(c.maimai_id)}" checked>
+            <span class="candidate-info">
+                <span class="candidate-name">${escapeHtml(c.name)}</span>
+                <span class="candidate-title">${escapeHtml(c.title)}</span>
+                <span class="candidate-company">${escapeHtml(c.company)}</span>
+            </span>
+        </label>
+    `).join('');
+}
+
+function toggleSelectAll(checked) {
+    document.querySelectorAll('#candidate-list input[type="checkbox"]').forEach(cb => {
+        cb.checked = checked;
+    });
+}
+
+async function confirmCandidates(cancel = false) {
+    if (!pipelineTaskId) return;
+
+    let maimai_ids = [];
+    if (!cancel) {
+        document.querySelectorAll('#candidate-list input[type="checkbox"]:checked').forEach(cb => {
+            maimai_ids.push(cb.value);
+        });
+
+        if (!maimai_ids.length) {
+            return alert('Please select at least one candidate');
+        }
+    }
+
+    try {
+        await safeFetch(`/api/pipeline/${pipelineTaskId}/confirm`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({maimai_ids}),
+        });
+
+        document.getElementById('pipeline-confirm').hidden = true;
+        if (!cancel) {
+            document.getElementById('pipeline-progress').hidden = false;
+            document.getElementById('pipeline-status-text').textContent = 'Sending messages...';
+            appendLog(`Confirmed ${maimai_ids.length} candidates, sending...`);
+        } else {
+            appendLog('Cancelled by user', 'warn');
+        }
+    } catch (e) {
+        appendLog(`Confirm failed: ${e.message}`, 'err');
+        alert('Confirm failed: ' + e.message);
+    }
+}
+
+// --- Search-only results ---
+
+function showSearchResults(candidates) {
+    document.getElementById('search-results').hidden = false;
+    document.getElementById('result-count').textContent = candidates.length;
+    const tbody = document.getElementById('results-body');
+    tbody.innerHTML = candidates.map((c, i) => `
+        <tr>
+            <td>${i + 1}</td>
+            <td>${escapeHtml(c.name)}</td>
+            <td>${escapeHtml(c.title)}</td>
+            <td>${escapeHtml(c.company)}</td>
+            <td>${escapeHtml(c.location || '')}</td>
+        </tr>
+    `).join('');
+}
+
+async function exportResults() {
+    try {
+        const res = await safeFetch('/api/export', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({format: 'xlsx'}),
+        });
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'candidates.xlsx';
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('Export failed: ' + e.message);
+    }
+}
+
+// --- Pipeline results ---
+
+function showPipelineResults(result) {
+    document.getElementById('pipeline-progress').hidden = true;
+    document.getElementById('pipeline-confirm').hidden = true;
+    document.getElementById('pipeline-results').hidden = false;
+
+    const summary = document.getElementById('results-summary');
+
+    if (!result || result.error) {
+        summary.innerHTML = `<p>Error: ${escapeHtml(result ? result.error : 'Unknown')}</p>`;
+        return;
+    }
+
+    if (result.dry_run) {
+        summary.innerHTML = `
+            <p>Dry run complete. Found <strong>${result.total}</strong> candidates.</p>
+            <p>No messages were sent.</p>
+        `;
+        return;
+    }
+
+    if (result.message) {
+        summary.innerHTML = `<p>${escapeHtml(result.message)}</p>`;
+        return;
+    }
+
+    summary.innerHTML = `
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="value">${result.total || 0}</div>
+                <div class="label">Total</div>
+            </div>
+            <div class="stat" style="color: #155724">
+                <div class="value">${result.sent || 0}</div>
+                <div class="label">Sent</div>
+            </div>
+            <div class="stat" style="color: #721c24">
+                <div class="value">${result.failed || 0}</div>
+                <div class="label">Failed</div>
+            </div>
+            <div class="stat" style="color: #856404">
+                <div class="value">${result.skipped || 0}</div>
+                <div class="label">Skipped</div>
+            </div>
+            <div class="stat" style="color: #856404">
+                <div class="value">${result.rate_limited || 0}</div>
+                <div class="label">Rate Limited</div>
+            </div>
+        </div>
+    `;
+}

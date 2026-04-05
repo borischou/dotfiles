@@ -1,0 +1,128 @@
+"""Message send endpoints — single and batch."""
+
+from fastapi import APIRouter, Depends
+
+from src.web.deps import get_queue, get_broadcaster
+from src.web.schemas import MessageSendRequest, MessageBatchRequest, TaskResponse
+from src.web.task_queue import BrowserTask, TaskPriority, TaskQueue
+from src.web.progress import Broadcaster, set_progress_callback
+
+router = APIRouter()
+
+
+@router.post("/message", response_model=TaskResponse)
+async def send_message(
+    req: MessageSendRequest,
+    queue: TaskQueue = Depends(get_queue),
+    broadcaster: Broadcaster = Depends(get_broadcaster),
+):
+    """Send a single message (queued)."""
+
+    async def _run():
+        from src.core.browser import get_browser_manager
+        from src.modules.message import send_message as _send_message
+        from src.modules.auth import ensure_logged_in
+
+        browser = get_browser_manager()
+        await browser.start()
+        await ensure_logged_in(browser)
+
+        success = await _send_message(
+            maimai_id=req.maimai_id,
+            template_name=req.template,
+            variables=req.variables,
+            browser=browser,
+            skip_confirmation=True,
+        )
+        return {"success": success, "maimai_id": req.maimai_id}
+
+    task = BrowserTask(
+        name=f"message:{req.maimai_id}",
+        coroutine_factory=_run,
+        priority=TaskPriority.NORMAL,
+    )
+
+    cb = broadcaster.make_progress_callback(task.task_id)
+    original_factory = task.coroutine_factory
+
+    async def _wrapped():
+        token = set_progress_callback(cb)
+        try:
+            return await original_factory()
+        finally:
+            set_progress_callback(None)
+
+    task.coroutine_factory = _wrapped
+    await queue.submit(task)
+
+    return TaskResponse(task_id=task.task_id, status="queued", position=queue.queue_size)
+
+
+@router.post("/message/batch", response_model=TaskResponse)
+async def send_message_batch(
+    req: MessageBatchRequest,
+    queue: TaskQueue = Depends(get_queue),
+    broadcaster: Broadcaster = Depends(get_broadcaster),
+):
+    """Batch send messages to multiple candidates (queued)."""
+
+    async def _run():
+        from src.core.browser import get_browser_manager
+        from src.modules.message import send_message_batch as _batch_send
+        from src.modules.auth import ensure_logged_in
+        from src.models.database import Candidate, get_db_manager
+
+        browser = get_browser_manager()
+        await browser.start()
+        await ensure_logged_in(browser)
+
+        # Look up candidate info from DB
+        db = get_db_manager()
+        candidates = []
+        with db.session_scope() as session:
+            for mid in req.maimai_ids:
+                c = session.query(Candidate).filter_by(maimai_id=mid).first()
+                if c:
+                    candidates.append({
+                        "maimai_id": c.maimai_id,
+                        "name": c.name or "Unknown",
+                        "company": c.company or "",
+                        "title": c.title or "",
+                        "profile_url": c.profile_url or "",
+                    })
+                else:
+                    candidates.append({
+                        "maimai_id": mid,
+                        "name": "Unknown",
+                        "company": "",
+                        "title": "",
+                    })
+
+        return await _batch_send(
+            candidates=candidates,
+            template_name=req.template,
+            common_variables=req.variables,
+            browser=browser,
+            skip_confirmation=True,
+        )
+
+    task = BrowserTask(
+        name=f"message_batch:{len(req.maimai_ids)}",
+        coroutine_factory=_run,
+        priority=TaskPriority.NORMAL,
+    )
+
+    cb = broadcaster.make_progress_callback(task.task_id)
+    original_factory = task.coroutine_factory
+
+    async def _wrapped():
+        token = set_progress_callback(cb)
+        try:
+            return await original_factory()
+        finally:
+            set_progress_callback(None)
+
+    task.coroutine_factory = _wrapped
+    await queue.submit(task)
+
+    return TaskResponse(task_id=task.task_id, status="queued", position=queue.queue_size)

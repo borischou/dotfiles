@@ -1,0 +1,102 @@
+     1→     1→     1→"""Configuration loader and manager."""
+     2→     2→     2→
+     3→     3→     3→import json
+     4→     4→     4→from pathlib import Path
+     5→     5→     5→from typing import Any, Dict
+     6→     6→     6→
+     7→     7→     7→from loguru import logger
+     8→     8→     8→
+     9→     9→     9→from src.exceptions.errors import ConfigurationError
+    10→    10→    10→
+    11→    11→    11→
+    12→    12→    12→class Config:
+    13→    13→    13→    """Configuration manager for Boss Assistant."""
+    14→    14→    14→
+    15→    15→    15→    def __init__(self, config_dir: str = None):
+    16→    16→    16→        if config_dir is None:
+    17→    17→    17→            # Use project root (where this source file lives) to find config/
+    18→    18→    18→            config_dir = str(Path(__file__).resolve().parent.parent.parent / "config")
+    19→    19→    19→        self.config_dir = Path(config_dir)
+    20→    20→    20→        self._settings: Dict[str, Any] = {}
+    21→    21→    21→        self._selectors: Dict[str, Any] = {}
+    22→    22→    22→        self._message_templates: Dict[str, Any] = {}
+    23→    23→    23→
+    24→    24→    24→        self._load_all()
+    25→    25→    25→
+    26→    26→    26→    def _load_json(self, filename: str) -> Dict[str, Any]:
+    27→    27→    27→        filepath = self.config_dir / filename
+    28→    28→    28→        try:
+    29→    29→    29→            with open(filepath, 'r', encoding='utf-8') as f:
+    30→    30→    30→                return json.load(f)
+    31→    31→    31→        except FileNotFoundError:
+    32→    32→    32→            raise ConfigurationError(f"Configuration file not found: {filepath}")
+    33→    33→    33→        except json.JSONDecodeError as e:
+    34→    34→    34→            raise ConfigurationError(f"Invalid JSON in {filepath}: {e}")
+    35→    35→    35→
+    36→    36→    36→    def _load_all(self):
+    37→    37→    37→        logger.info("Loading configuration files...")
+    38→    38→    38→        self._settings = self._load_json("settings.json")
+    39→    39→    39→        self._selectors = self._load_json("selectors.json")
+    40→    40→    40→        self._message_templates = self._load_json("message_templates.json")
+    41→    41→    41→        logger.info("Configuration loaded successfully")
+    42→    42→    42→
+    43→    43→    43→    _MISSING = object()
+    44→    44→    44→
+    45→    45→    45→    def get(self, key: str, default: Any = None) -> Any:
+    46→    46→    46→        """Get setting by dot-notation key.
+    47→    47→    47→
+    48→    48→    48→        Distinguishes between a key not found and a key explicitly set to null.
+    49→    49→    49→        """
+    50→    50→    50→        keys = key.split('.')
+    51→    51→    51→        value = self._settings
+    52→    52→    52→
+    53→    53→    53→        for k in keys:
+    54→    54→    54→            if isinstance(value, dict):
+    55→    55→    55→                value = value.get(k, self._MISSING)
+    56→    56→    56→                if value is self._MISSING:
+    57→    57→    57→                    return default
+    58→    58→    58→            else:
+    59→    59→    59→                return default
+    60→    60→    60→
+    61→    61→    61→        return value
+    62→    62→    62→
+    63→    63→    63→    def get_selector(self, selector_path: str) -> str:
+    64→    64→    64→        """Get selector by dot-notation path."""
+    65→    65→    65→        keys = selector_path.split('.')
+    66→    66→    66→        value = self._selectors.get('selectors', {})
+    67→    67→    67→
+    68→    68→    68→        for k in keys:
+    69→    69→    69→            if isinstance(value, dict):
+    70→    70→    70→                value = value.get(k)
+    71→    71→    71→                if value is None:
+    72→    72→    72→                    raise ConfigurationError(f"Selector not found: {selector_path}")
+    73→    73→    73→            else:
+    74→    74→    74→                raise ConfigurationError(f"Invalid selector path: {selector_path}")
+    75→    75→    75→
+    76→    76→    76→        return value
+    77→    77→    77→
+    78→    78→    78→    def get_template(self, template_name: str) -> Dict[str, Any]:
+    79→    79→    79→        template = self._message_templates.get(template_name)
+    80→    80→    80→        if template is None:
+    81→    81→    81→            raise ConfigurationError(f"Message template not found: {template_name}")
+    82→    82→    82→        return template
+    83→    83→    83→
+    84→    84→    84→    def list_templates(self) -> list:
+    85→    85→    85→        return list(self._message_templates.keys())
+    86→    86→    86→
+    87→    87→    87→
+    88→    88→    88→_config_instance = None
+    89→    89→    89→
+    90→    90→    90→
+    91→    91→    91→def get_config() -> Config:
+    92→    92→    92→    global _config_instance
+    93→    93→    93→    if _config_instance is None:
+    94→    94→    94→        _config_instance = Config()
+    95→    95→    95→    return _config_instance
+    96→    96→    96→
+    97→    97→    97→
+    98→    98→    98→def reset_config() -> None:
+    99→    99→    99→    """Reset global config instance (for testing)."""
+   100→   100→   100→    global _config_instance
+   101→   101→   101→    _config_instance = None
+   102→   102→   102→

@@ -1,0 +1,141 @@
+"""Background task manager for Pipeline execution.
+
+Manages asyncio tasks for long-running pipeline operations.
+Only one pipeline can run at a time (browser is shared resource).
+"""
+
+import asyncio
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, Optional
+
+from loguru import logger
+
+from src.utils.progress import set_progress_callback, reset_progress_callback
+
+
+class TaskManager:
+    """Manages background pipeline tasks.
+
+    - Only one pipeline runs at a time (browser lock)
+    - Cancel support via asyncio.Event
+    - SSE progress streaming via asyncio.Queue per task
+    """
+
+    def __init__(self):
+        self._current_task: Optional[asyncio.Task] = None
+        self._current_task_id: Optional[str] = None
+        self._cancel_event: Optional[asyncio.Event] = None
+        self._progress_queues: Dict[str, asyncio.Queue] = {}
+        self._lock = asyncio.Lock()
+
+    @property
+    def is_busy(self) -> bool:
+        """Check if a pipeline task is currently running."""
+        return self._current_task is not None and not self._current_task.done()
+
+    @property
+    def current_task_id(self) -> Optional[str]:
+        return self._current_task_id if self.is_busy else None
+
+    def is_cancelled(self) -> bool:
+        """Check if the current task has been cancelled."""
+        return self._cancel_event is not None and self._cancel_event.is_set()
+
+    async def start_task(self, coro_factory: Callable, **kwargs) -> str:
+        """Start a new pipeline task.
+
+        Args:
+            coro_factory: Async callable that takes (task_id, cancel_event, **kwargs).
+                          Progress callback is injected via ContextVar automatically.
+
+        Returns:
+            task_id
+
+        Raises:
+            RuntimeError: If a task is already running
+        """
+        async with self._lock:
+            if self.is_busy:
+                raise RuntimeError("A pipeline is already running")
+
+            task_id = str(uuid.uuid4())[:8]
+            self._cancel_event = asyncio.Event()
+            self._progress_queues[task_id] = asyncio.Queue()
+
+            async def _run():
+                token = set_progress_callback(self._make_progress_callback(task_id))
+                try:
+                    await coro_factory(
+                        task_id=task_id,
+                        cancel_event=self._cancel_event,
+                        **kwargs,
+                    )
+                except asyncio.CancelledError:
+                    await self._send_progress(task_id, "pipeline_cancelled", {})
+                except Exception as e:
+                    logger.error(f"Pipeline task {task_id} failed: {e}")
+                    await self._send_progress(task_id, "error", {"message": str(e)})
+                finally:
+                    reset_progress_callback(token)
+                    await self._send_progress(task_id, "done", {})
+
+            self._current_task = asyncio.create_task(_run())
+            self._current_task_id = task_id
+            logger.info(f"Started pipeline task {task_id}")
+            return task_id
+
+    def _make_progress_callback(self, task_id: str) -> Callable:
+        """Create a progress callback bound to a task."""
+        async def callback(event: str, data: Dict[str, Any] = None):
+            await self._send_progress(task_id, event, data or {})
+        return callback
+
+    async def _send_progress(self, task_id: str, event: str, data: Dict[str, Any]) -> None:
+        """Send a progress event to the task's queue."""
+        queue = self._progress_queues.get(task_id)
+        if queue:
+            await queue.put({"event": event, "data": data})
+
+    async def subscribe_progress(self, task_id: str):
+        """Async generator yielding progress events for a task.
+
+        Used by SSE endpoint.
+        """
+        queue = self._progress_queues.get(task_id)
+        if not queue:
+            yield {"event": "error", "data": {"message": "Task not found"}}
+            return
+
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=30)
+                yield msg
+                if msg["event"] == "done":
+                    break
+            except asyncio.TimeoutError:
+                # Send keepalive
+                yield {"event": "keepalive", "data": {}}
+
+    async def cancel(self) -> bool:
+        """Cancel the current running task."""
+        if not self.is_busy:
+            return False
+
+        self._cancel_event.set()
+        logger.info(f"Cancel requested for task {self._current_task_id}")
+        return True
+
+    async def cancel_all(self) -> None:
+        """Cancel all running tasks (used during shutdown)."""
+        if self.is_busy:
+            self._cancel_event.set()
+            self._current_task.cancel()
+            try:
+                await self._current_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    def cleanup_task(self, task_id: str) -> None:
+        """Remove progress queue for a finished task."""
+        self._progress_queues.pop(task_id, None)

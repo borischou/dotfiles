@@ -1,0 +1,57 @@
+"""Shared captcha detection utility.
+
+Detects captcha elements on page and pauses for manual resolution.
+Used by auth and search modules.
+"""
+
+import asyncio
+import sys
+
+from patchright.async_api import Page
+from loguru import logger
+from rich.console import Console
+
+from src.exceptions.errors import CaptchaBlockedError
+
+console = Console()
+
+CAPTCHA_SELECTORS = [
+    '[class*="captcha"]',
+    '[class*="verify"]',
+    '[id*="captcha"]',
+    '[class*="slider"]',
+    '[class*="geetest"]',
+    'iframe[src*="captcha"]',
+]
+
+
+async def check_captcha(page: Page, report_to_rate_limiter: bool = False) -> None:
+    """Detect captcha elements on page and pause for manual resolution.
+
+    Args:
+        page: Playwright page instance
+        report_to_rate_limiter: If True, report captcha to adaptive rate limiter
+    """
+    for selector in CAPTCHA_SELECTORS:
+        try:
+            elem = await page.query_selector(selector)
+            if elem and await elem.is_visible():
+                if report_to_rate_limiter:
+                    from src.utils.rate_limiter import get_rate_limiter
+                    rate_limiter = get_rate_limiter()
+                    rate_limiter.report_captcha()
+
+                # Raise specific error with helpful message
+                error = CaptchaBlockedError()
+                console.print(f"[bold red]{error}[/bold red]")
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, sys.stdin.readline)
+                await page.wait_for_timeout(2000)
+                return
+        except Exception as e:
+            # Log non-trivial errors (e.g. broken CDP connection) instead of
+            # silently swallowing them; timeouts are expected and stay quiet.
+            err_msg = str(e).lower()
+            if 'timeout' not in err_msg:
+                logger.debug(f"Captcha selector '{selector}' check error: {e}")
+            continue

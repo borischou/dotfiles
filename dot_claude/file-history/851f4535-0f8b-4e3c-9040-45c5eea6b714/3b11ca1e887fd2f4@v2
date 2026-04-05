@@ -1,0 +1,97 @@
+"""Export endpoint — generates file and returns download."""
+
+import io
+from datetime import datetime
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+
+from src.models.database import Candidate, DatabaseManager
+from src.web.deps import get_db
+from src.web.schemas import ExportRequest
+
+router = APIRouter()
+
+
+@router.post("/export")
+async def export_candidates(
+    req: ExportRequest,
+    db: DatabaseManager = Depends(get_db),
+):
+    """Export candidates to Excel or CSV format."""
+    with db.session_scope() as session:
+        query = session.query(Candidate)
+        if req.search_keyword:
+            pattern = f"%{req.search_keyword}%"
+            query = query.filter(
+                (Candidate.source_search.ilike(pattern)) |
+                (Candidate.name.ilike(pattern))
+            )
+        candidates = query.order_by(Candidate.last_updated.desc()).all()
+
+        # Build data rows (while session is open)
+        rows = []
+        for c in candidates:
+            rows.append({
+                "maimai_id": c.maimai_id,
+                "name": c.name or "",
+                "title": c.title or "",
+                "company": c.company or "",
+                "location": c.location or "",
+                "profile_url": c.profile_url or "",
+                "source_search": c.source_search or "",
+                "first_seen": c.first_seen.isoformat() if c.first_seen else "",
+            })
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if req.format == "csv":
+        import csv
+        output = io.StringIO()
+        if rows:
+            writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows(rows)
+        content = output.getvalue().encode("utf-8-sig")
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=candidates_{timestamp}.csv"},
+        )
+    else:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Candidates"
+
+        headers = ["脉脉ID", "姓名", "职位", "公司", "地区", "Profile URL", "搜索来源", "首次发现"]
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center")
+
+        for row_idx, row in enumerate(rows, 2):
+            for col_idx, key in enumerate(row.keys(), 1):
+                ws.cell(row=row_idx, column=col_idx, value=row[key])
+
+        widths = [15, 12, 25, 20, 10, 40, 20, 20]
+        for i, w in enumerate(widths):
+            ws.column_dimensions[chr(65 + i)].width = w
+
+        ws.freeze_panes = "A2"
+
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        return StreamingResponse(
+            buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=candidates_{timestamp}.xlsx"},
+        )

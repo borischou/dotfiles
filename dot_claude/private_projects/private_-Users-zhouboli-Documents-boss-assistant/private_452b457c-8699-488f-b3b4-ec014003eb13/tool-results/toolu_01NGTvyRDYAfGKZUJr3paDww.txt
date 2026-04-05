@@ -1,0 +1,70 @@
+     1→"""Pytest configuration and fixtures."""
+     2→
+     3→import pytest
+     4→import sys
+     5→from pathlib import Path
+     6→
+     7→# Add src to path
+     8→sys.path.insert(0, str(Path(__file__).parent.parent))
+     9→
+    10→from src.models.database import Base, DatabaseManager
+    11→from sqlalchemy import create_engine
+    12→from sqlalchemy.orm import sessionmaker
+    13→
+    14→
+    15→@pytest.fixture(scope='session')
+    16→def test_db():
+    17→    """Create a test database."""
+    18→    engine = create_engine('sqlite:///:memory:')
+    19→    Base.metadata.create_all(engine)
+    20→    Session = sessionmaker(bind=engine)
+    21→    yield Session
+    22→    Base.metadata.drop_all(engine)
+    23→
+    24→
+    25→@pytest.fixture
+    26→def db_session(test_db):
+    27→    """Provide a database session for a test."""
+    28→    session = test_db()
+    29→    yield session
+    30→    session.rollback()
+    31→    session.close()
+    32→
+    33→
+    34→@pytest.fixture
+    35→def sample_candidate_data():
+    36→    """Sample candidate data for testing."""
+    37→    return {
+    38→        'boss_id': 'zp_abc123def456',
+    39→        'name': '张三',
+    40→        'title': '高级前端工程师',
+    41→        'company': '阿里巴巴',
+    42→        'location': '杭州',
+    43→        'salary_expect': '30-50K',
+    44→        'work_years': '5年',
+    45→        'education_level': '本科',
+    46→        'profile_url': 'https://www.zhipin.com/web/geek/abc123def456',
+    47→        'basic_info': {
+    48→            'work_years': '5年',
+    49→            'education': '本科',
+    50→            'age': '28岁'
+    51→        },
+    52→        'education': [
+    53→            {
+    54→                'school': '浙江大学',
+    55→                'degree': '本科',
+    56→                'major': '计算机科学',
+    57→                'period': '2015-09 至 2019-06'
+    58→            }
+    59→        ],
+    60→        'work_experience': [
+    61→            {
+    62→                'company': '阿里巴巴',
+    63→                'title': '高级前端工程师',
+    64→                'period': '2021-07 至 今',
+    65→                'description': '负责前端架构设计'
+    66→            }
+    67→        ],
+    68→        'skills': ['React', 'Vue', 'TypeScript', 'Node.js']
+    69→    }
+    70→

@@ -1,0 +1,319 @@
+     1→"""Tests for candidate scoring module."""
+     2→
+     3→import pytest
+     4→from src.utils.scoring import (
+     5→    score_candidate,
+     6→    sort_candidates_by_score,
+     7→    _score_seniority,
+     8→    _score_company,
+     9→    _score_education,
+    10→    _parse_experience_years,
+    11→    _score_experience,
+    12→    _score_skills_jieba,
+    13→    _score_keyword_relevance,
+    14→    _score_rd_bonus,
+    15→    _build_candidate_text,
+    16→    reset_scoring_cache,
+    17→    EDUCATION_SCORES,
+    18→)
+    19→
+    20→
+    21→# ----------------------------------------------------------------
+    22→# Backward compatibility tests (original behavior without JD config)
+    23→# ----------------------------------------------------------------
+    24→
+    25→class TestLegacyScoring:
+    26→    """Tests that verify the original scoring behavior is preserved."""
+    27→
+    28→    def setup_method(self):
+    29→        reset_scoring_cache()
+    30→
+    31→    def test_score_cto(self):
+    32→        """CTO should get high seniority score."""
+    33→        score = score_candidate("张三", "CTO", "SomeCompany")
+    34→        assert score >= 50
+    35→
+    36→    def test_score_senior_engineer(self):
+    37→        """Senior engineer should get moderate score."""
+    38→        score = score_candidate("李四", "高级前端工程师", "SomeCompany")
+    39→        # 高级 (20) + 工程师 bonus (5) = 25
+    40→        assert score >= 25
+    41→
+    42→    def test_score_junior(self):
+    43→        """Junior should get low seniority score."""
+    44→        score = score_candidate("王五", "初级开发工程师", "SomeCompany")
+    45→        assert score < 20
+    46→
+    47→    def test_score_tier1_company(self):
+    48→        """Tier 1 company should add 30 points."""
+    49→        score_tier1 = score_candidate("张三", "工程师", "字节跳动")
+    50→        score_unknown = score_candidate("张三", "工程师", "小公司")
+    51→        assert score_tier1 - score_unknown == 30
+    52→
+    53→    def test_score_tier2_company(self):
+    54→        """Tier 2 company should add 20 points."""
+    55→        score_tier2 = score_candidate("张三", "工程师", "bilibili")
+    56→        score_unknown = score_candidate("张三", "工程师", "小公司")
+    57→        assert score_tier2 - score_unknown == 20
+    58→
+    59→    def test_score_keyword_match(self):
+    60→        """Keyword match in title should increase score."""
+    61→        score_match = score_candidate("张三", "前端工程师", "Company", search_keywords=["前端"])
+    62→        score_no_match = score_candidate("张三", "后端工程师", "Company", search_keywords=["前端"])
+    63→        assert score_match > score_no_match
+    64→
+    65→    def test_sort_candidates(self):
+    66→        """Candidates should be sorted by score descending."""
+    67→        candidates = [
+    68→            {"name": "A", "title": "初级开发", "company": "小公司"},
+    69→            {"name": "B", "title": "CTO", "company": "字节跳动"},
+    70→            {"name": "C", "title": "高级工程师", "company": "阿里巴巴"},
+    71→        ]
+    72→        sorted_list = sort_candidates_by_score(candidates, search_keywords=["工程师"], enrich_from_db=False)
+    73→        assert sorted_list[0]["name"] == "B"
+    74→        assert sorted_list[-1]["name"] == "A"
+    75→
+    76→    def test_sort_candidates_with_dataclass(self):
+    77→        """Sort should work with objects that have name/title/company attributes."""
+    78→        class MockCandidate:
+    79→            def __init__(self, name, title, company):
+    80→                self.name = name
+    81→                self.title = title
+    82→                self.company = company
+    83→        candidates = [
+    84→            MockCandidate("A", "实习生", ""),
+    85→            MockCandidate("B", "架构师", "腾讯"),
+    86→        ]
+    87→        sorted_list = sort_candidates_by_score(candidates, enrich_from_db=False)
+    88→        assert sorted_list[0].name == "B"
+    89→
+    90→    def test_score_empty_fields(self):
+    91→        """Scoring should handle empty/None fields gracefully."""
+    92→        score = score_candidate("", "", "")
+    93→        assert score == 0
+    94→        score = score_candidate("张三", "", "")
+    95→        assert score == 0
+    96→
+    97→
+    98→# ----------------------------------------------------------------
+    99→# Education scoring tests
+   100→# ----------------------------------------------------------------
+   101→
+   102→class TestEducationScoring:
+   103→
+   104→    def test_education_scores_constant(self):
+   105→        assert EDUCATION_SCORES["博士"] == 100
+   106→        assert EDUCATION_SCORES["本科"] == 60
+   107→        assert EDUCATION_SCORES["大专"] == 40
+   108→
+   109→    def test_score_education_basic(self):
+   110→        assert _score_education("硕士") == 0.8
+   111→        assert _score_education("本科") == 0.6
+   112→        assert _score_education("大专") == 0.4
+   113→
+   114→    def test_score_education_with_preference(self):
+   115→        # Meets or exceeds preference
+   116→        assert _score_education("硕士", preferred="本科") == 1.0
+   117→        assert _score_education("本科", preferred="本科") == 1.0
+   118→        # Below preference
+   119→        score = _score_education("大专", preferred="本科")
+   120→        assert 0.0 < score < 1.0
+   121→
+   122→    def test_score_education_empty(self):
+   123→        assert _score_education(None) == 0.0
+   124→        assert _score_education("") == 0.0
+   125→
+   126→    def test_score_education_substring(self):
+   127→        """Education level embedded in longer string."""
+   128→        assert _score_education("本科（统招）") == 0.6
+   129→
+   130→
+   131→# ----------------------------------------------------------------
+   132→# Experience parsing tests
+   133→# ----------------------------------------------------------------
+   134→
+   135→class TestExperienceParsing:
+   136→
+   137→    def test_parse_single_year(self):
+   138→        assert _parse_experience_years("5年") == 5
+   139→        assert _parse_experience_years("10年") == 10
+   140→
+   141→    def test_parse_range(self):
+   142→        assert _parse_experience_years("3-5年") == 5
+   143→        assert _parse_experience_years("5~10年") == 10
+   144→
+   145→    def test_parse_with_suffix(self):
+   146→        assert _parse_experience_years("10年以上") == 10
+   147→
+   148→    def test_parse_none(self):
+   149→        assert _parse_experience_years(None) is None
+   150→        assert _parse_experience_years("") is None
+   151→        assert _parse_experience_years("应届") is None
+   152→
+   153→    def test_score_experience_meets_min(self):
+   154→        score = _score_experience("5年", min_years=3)
+   155→        assert score >= 0.8
+   156→
+   157→    def test_score_experience_below_min(self):
+   158→        score = _score_experience("2年", min_years=5)
+   159→        assert 0.0 < score < 0.8
+   160→
+   161→    def test_score_experience_no_min(self):
+   162→        score = _score_experience("10年")
+   163→        assert score > 0.0
+   164→
+   165→
+   166→# ----------------------------------------------------------------
+   167→# Skill matching tests
+   168→# ----------------------------------------------------------------
+   169→
+   170→class TestSkillMatching:
+   171→
+   172→    def test_required_skills_full_match(self):
+   173→        text = "高级前端工程师 精通 React Vue TypeScript JavaScript"
+   174→        score = _score_skills_jieba(
+   175→            text, ["React", "Vue", "TypeScript", "JavaScript"],
+   176→            required_skills=["React", "Vue", "TypeScript", "JavaScript"],
+   177→        )
+   178→        assert score >= 0.9
+   179→
+   180→    def test_required_skills_partial_match(self):
+   181→        text = "React 工程师"
+   182→        score = _score_skills_jieba(
+   183→            text, ["React"],
+   184→            required_skills=["React", "Vue", "TypeScript", "JavaScript"],
+   185→        )
+   186→        assert 0.0 < score < 0.9
+   187→
+   188→    def test_no_match(self):
+   189→        text = "Java后端工程师"
+   190→        score = _score_skills_jieba(
+   191→            text, ["Java"],
+   192→            required_skills=["React", "Vue"],
+   193→        )
+   194→        assert score < 0.5
+   195→
+   196→    def test_preferred_skills_boost(self):
+   197→        text = "React TypeScript Node.js 微前端"
+   198→        score_with_pref = _score_skills_jieba(
+   199→            text, ["React", "TypeScript", "Node.js"],
+   200→            required_skills=["React", "TypeScript"],
+   201→            preferred_skills=["Node.js", "微前端"],
+   202→        )
+   203→        score_without_pref = _score_skills_jieba(
+   204→            text, ["React", "TypeScript"],
+   205→            required_skills=["React", "TypeScript"],
+   206→            preferred_skills=["Rust", "Go"],
+   207→        )
+   208→        assert score_with_pref > score_without_pref
+   209→
+   210→    def test_empty_skills(self):
+   211→        assert _score_skills_jieba("", None) == 0.0
+   212→        assert _score_skills_jieba("text", None, required_skills=None) == 0.0
+   213→
+   214→
+   215→# ----------------------------------------------------------------
+   216→# Individual factor tests
+   217→# ----------------------------------------------------------------
+   218→
+   219→class TestIndividualFactors:
+   220→
+   221→    def test_seniority_factor(self):
+   222→        assert _score_seniority("CTO") == 1.0
+   223→        assert _score_seniority("高级工程师") == pytest.approx(20 / 50.0)
+   224→        assert _score_seniority("") == 0.0
+   225→
+   226→    def test_company_factor(self):
+   227→        assert _score_company("字节跳动") == 1.0
+   228→        assert _score_company("bilibili") == pytest.approx(0.67)
+   229→        assert _score_company("小公司") == 0.0
+   230→
+   231→    def test_keyword_relevance_factor(self):
+   232→        assert _score_keyword_relevance("前端工程师", "Company", ["前端"]) == pytest.approx(0.5)
+   233→        assert _score_keyword_relevance("", "", ["前端"]) == 0.0
+   234→
+   235→    def test_rd_bonus_factor(self):
+   236→        assert _score_rd_bonus("前端工程师") == 1.0
+   237→        assert _score_rd_bonus("产品经理") == 0.0
+   238→
+   239→    def test_build_candidate_text(self):
+   240→        text = _build_candidate_text(
+   241→            title="前端工程师",
+   242→            company="字节跳动",
+   243→            skills=["React", "Vue"],
+   244→        )
+   245→        assert "前端工程师" in text
+   246→        assert "React" in text
+   247→
+   248→
+   249→# ----------------------------------------------------------------
+   250→# Enhanced scoring (with JD config)
+   251→# ----------------------------------------------------------------
+   252→
+   253→class TestEnhancedScoring:
+   254→
+   255→    def setup_method(self):
+   256→        reset_scoring_cache()
+   257→
+   258→    def test_enhanced_score_with_jd(self):
+   259→        """Enhanced scoring with explicit JD config."""
+   260→        jd = {
+   261→            "title": "前端工程师",
+   262→            "required_skills": ["React", "TypeScript"],
+   263→            "preferred_skills": ["Node.js"],
+   264→            "min_experience_years": 3,
+   265→            "preferred_education": "本科",
+   266→        }
+   267→        weights = {
+   268→            "seniority": 15,
+   269→            "company_tier": 15,
+   270→            "education": 10,
+   271→            "experience": 15,
+   272→            "skill_match": 25,
+   273→            "keyword_relevance": 10,
+   274→            "rd_bonus": 5,
+   275→            "llm_score": 5,
+   276→        }
+   277→        score = score_candidate(
+   278→            "张三", "高级前端工程师", "字节跳动",
+   279→            search_keywords=["前端"],
+   280→            education_level="硕士",
+   281→            work_years="5年",
+   282→            skills=["React", "TypeScript", "Vue", "Node.js"],
+   283→            jd_config=jd,
+   284→            weights=weights,
+   285→        )
+   286→        # Should be a high score
+   287→        assert score >= 60
+   288→        assert score <= 100
+   289→
+   290→    def test_enhanced_vs_legacy_different_range(self):
+   291→        """Enhanced scoring returns 0-100, legacy can exceed 100."""
+   292→        jd = {
+   293→            "required_skills": ["React"],
+   294→            "min_experience_years": 3,
+   295→            "preferred_education": "本科",
+   296→        }
+   297→        weights = {
+   298→            "seniority": 20, "company_tier": 20, "education": 10,
+   299→            "experience": 15, "skill_match": 20, "keyword_relevance": 10,
+   300→            "rd_bonus": 5,
+   301→        }
+   302→        score = score_candidate(
+   303→            "张三", "CTO", "字节跳动",
+   304→            education_level="博士",
+   305→            work_years="15年",
+   306→            skills=["React"],
+   307→            jd_config=jd,
+   308→            weights=weights,
+   309→        )
+   310→        assert 0 <= score <= 100
+   311→
+   312→    def test_no_enhanced_info_uses_legacy(self):
+   313→        """Without enhanced info and no JD config, use legacy scoring."""
+   314→        reset_scoring_cache()
+   315→        # Explicitly pass None for jd_config to force legacy
+   316→        score = score_candidate("张三", "CTO", "字节跳动", jd_config=None)
+   317→        # Legacy: CTO (50) + Tier1 (30) = 80
+   318→        assert score == 80
+   319→

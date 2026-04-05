@@ -1,0 +1,997 @@
+=== Navigating to https://maimai.cn/bizmember/uh_chat_pc?u2=39980776&from=pc_web_search&fr=profile ===
+Page loaded.
+
+=== Step 1: Monkeypatching fetch & XMLHttpRequest ===
+Monkeypatching done.
+
+=== Step 2: Setting React state (message + push_type) ===
+{
+  "success": true,
+  "oldState": {
+    "ucard2": {
+      "id": 39980776,
+      "name": "浩然",
+      "py": "hao4浩ran2然",
+      "avatar": "https://i9.taou.com/maimai/p/22075/5544_104_42wv7Hi0a4ajruhv-a160",
+      "line1": "我爱我家Flutter开发工程师",
+      "line3": "我爱我家Flutter开发工程师(北京)",
+      "line4": "房产建筑 | 其它, 影响力: 806",
+      "rank": 113,
+      "compos": "我爱我家Flutter开发工程师",
+      "loc": "北京",
+      "pub": 0,
+      "short_compos": "我爱我家Flutter开发工程师",
+      "judge": 0,
+      "position_judge": 0,
+      "vip_level": 1,
+      "vip_status": 0,
+      "vip_score": 57,
+      "company": "我爱我家",
+      "career": "我爱我家Flutter开发工程师",
+      "gender": 1,
+      "position": "Flutter开发工程师",
+      "short_career": "我爱我家Flutter开发工程师",
+      "mmid": "39980776",
+      "status": 1,
+      "utype": 1,
+      "in_app": 1,
+      "figure": 220755544,
+      "profession": 9,
+      "major": 255,
+      "province": "北京",
+      "city": "北京",
+      "qp": 2.1,
+      "identity_type": 1,
+      "headline": "自我介绍",
+      "cmf": 28,
+      "dist": 1,
+      "sr": 40,
+      "is_addr": false,
+      "cmf_no6": 0,
+      "cmf_lv3": 0,
+      "d1type": 16,
+      "mem_id": 0,
+      "mem_st": 0,
+      "mem_raw_st": 0,
+      "former": 0,
+      "cid": 7867,
+      "web_cid": "uejVKMDQ",
+      "custom_title": null,
+      "ouid": 2417169507,
+      "trackable_token": "mwpKvqk_S8V6qEm2MIhESjIZmIyeeX_0qXqhhN3bLKgS67Oh7Kfhta0GpGzD7GFO",
+      "encode_mmid": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1IjozOTk4MDc3NiwibGV2ZWwiOjEsInQiOiJjdHQifQ.dKfDA7Yi6WRI25DX9athrucdHKekpJCeY1s_gH67A1I",
+      "lv": 1,
+      "line2": "初识好友(LV1)",
+      "job_line": "初识好友(LV1)",
+      "emobile": "",
+      "user_pfmj": {
+        "src_type": 3,
+        "profession1": "030110",
+        "pf_name1": "房地产中介",
+        "pf_path1": "03,030110",
+        "major1": "0101",
+        "mj_name1": "研发",
+        "lv3_code": "01#02#03",
+        "lv3_name": "移动开发",
+        "rec_lv3_code": "01#02#03",
+        "rec_lv3_name": "移动开发"
+      },
+      "cmf1": "",
+      "cmf2": "",
+      "oline2": "",
+      "remark_name": "",
+      "remark_name_py": "",
+      "original_rank": 806.064208984375,
+      "co": false,
+      "exco": false,
+      "sh": false,
+      "prof": false,
+      "hp": false,
+      "one_sentence": ""
+    },
+    "my_card": {
+      "id": 5156741,
+      "name": "周博立",
+      "py": "zhou1周bo2博li4立",
+      "avatar": "https://i9.taou.com/maimai/p/2153/9896_5_62lhdYdU7zya7y-a160",
+      "line1": "京东零售直播技术客户端负责人",
+      "line3": "京东零售直播技术客户端负责人(北京)",
+      "line4": "IT互联网 | 研发, 影响力: 938",
+      "rank": 219,
+      "compos": "京东零售直播技术客户端负责人",
+      "loc": "北京",
+      "pub": 0,
+      "short_compos": "京东零售直播技术客户端负责人",
+      "judge": 1,
+      "position_judge": 0,
+      "vip_level": 3,
+      "vip_status": 0,
+      "vip_score": 864,
+      "company": "京东",
+      "career": "京东零售直播技术客户端负责人",
+      "gender": 1,
+      "position": "零售直播技术客户端负责人",
+      "short_career": "京东零售直播技术客户端负责人",
+      "mmid": "5156741",
+      "status": 1,
+      "utype": 1,
+      "in_app": 1,
+      "figure": 21539896,
+      "profession": 0,
+      "major": 0,
+      "province": "北京",
+      "city": "朝阳区",
+      "qp": 2.0999999046325684,
+      "identity_type": 1,
+      "headline": "新东方学校校草大赛冠军",
+      "cmf": 347,
+      "dist": 0,
+      "sr": 100000,
+      "is_addr": false,
+      "cmf_no6": 0,
+      "cmf_lv3": 18,
+      "d1type": 0,
+      "mem_id": 2,
+      "mem_st": 0,
+      "mem_raw_st": 2,
+      "former": 0,
+      "cid": 3487,
+      "web_cid": "SJdjsQ5S",
+      "custom_title": null,
+      "ouid": 4160909672,
+      "trackable_token": "eAFvza4dMR0s7odf4XG9rO07ZUITivrywsB66rwE8V5_J2BzGZSYy4h1fOo4c9-6",
+      "encode_mmid": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1Ijo1MTU2NzQxLCJsZXZlbCI6MCwidCI6ImN0dCJ9._z8-R1sg2wUOpfS4S6G10OukJzL5wGgPFyVpiEY8laM",
+      "lv": 0,
+      "line2": "",
+      "job_line": "",
+      "emobile": "",
+      "user_pfmj": {
+        "src_type": 3,
+        "profession1": "0104",
+        "pf_name1": "电子商务",
+        "pf_path1": "01,0104",
+        "major1": "0101",
+        "mj_name1": "研发",
+        "lv3_code": "01#02#03",
+        "lv3_name": "移动开发",
+        "rec_lv3_code": "",
+        "rec_lv3_name": ""
+      },
+      "cmf1": "",
+      "cmf2": "",
+      "oline2": "",
+      "remark_name": "",
+      "remark_name_py": "",
+      "original_rank": 938.7500610351562,
+      "co": true,
+      "exco": true,
+      "sh": true,
+      "prof": true,
+      "hp": true,
+      "one_sentence": ""
+    },
+    "get_template": {
+      "result": "ok",
+      "static_templates": [
+        {
+          "title": "求职类",
+          "type": 4,
+          "id": 103,
+          "content": "您好，我对您发布的岗位十分感兴趣，期待能加入贵公司！"
+        },
+        {
+          "title": "招聘类",
+          "type": 1,
+          "id": 100,
+          "content": "你好，看了你的经历，觉得背景很赞。我正在招聘，不知道你有没有兴趣加入我们公司。如果愿意，我们可以详细聊聊职位细节。"
+        },
+        {
+          "title": "商务类",
+          "type": 3,
+          "id": 101,
+          "content": "你好，我是京东的零售直播技术客户端负责人，想与您沟通下公司合作的可能性，盼回复。"
+        },
+        {
+          "title": "交友类",
+          "type": 2,
+          "id": 102,
+          "content": "你好，我是京东的零售直播技术客户端负责人，我十分想同你有一次交流机会。看到你的脉脉资料，对你的经历十分感兴趣，请问你是否愿意交个朋友，改天一起喝个咖啡？"
+        }
+      ],
+      "default_content": "京东直播大前端负责人，想看机会的话可以加个 vx",
+      "ret": 0,
+      "custom_templates": [],
+      "has_todo": 0,
+      "uh_templates": [
+        {
+          "title": "求职类",
+          "type": 4,
+          "id": 103,
+          "content": "您好，我对您发布的岗位十分感兴趣，期待能加入贵公司！"
+        },
+        {
+          "title": "招聘类",
+          "type": 1,
+          "id": 100,
+          "content": "你好，看了你的经历，觉得背景很赞。我正在招聘，不知道你有没有兴趣加入我们公司。如果愿意，我们可以详细聊聊职位细节。"
+        },
+        {
+          "title": "商务类",
+          "type": 3,
+          "id": 101,
+          "content": "你好，我是京东的零售直播技术客户端负责人，想与您沟通下公司合作的可能性，盼回复。"
+        },
+        {
+          "title": "交友类",
+          "type": 2,
+          "id": 102,
+          "content": "你好，我是京东的零售直播技术客户端负责人，我十分想同你有一次交流机会。看到你的脉脉资料，对你的经历十分感兴趣，请问你是否愿意交个朋友，改天一起喝个咖啡？"
+        }
+      ],
+      "job_id": -1,
+      "job_title": "",
+      "show_job_card": 0,
+      "first_chat_view": 0,
+      "to_user_gender": 1
+    },
+    "get_tuser": {
+      "tuser": {
+        "last_login_txt": "6小时前活跃"
+      },
+      "is_noincome": 0,
+      "fast_amount": 0,
+      "set_amount": 0,
+      "pc_msg": "",
+      "u1": 39980776,
+      "ret": 1,
+      "pcid": 0,
+      "min_amount_qp": 0,
+      "call_services": [],
+      "u": 5156741,
+      "result": "ok",
+      "has_todo": 0,
+      "services": [],
+      "userauth": {
+        "login_time_raw": "2026-02-14 11:09:18",
+        "login_time": "2026-02-14 11:09:18",
+        "last_login_txt": "6小时前活跃"
+      }
+    },
+    "fast_contact_pay_num": {
+      "final_num": 1,
+      "base_num": 1,
+      "code": 0,
+      "ab": 1,
+      "result": "ok",
+      "search_profile_is_free": 0
+    },
+    "mem_status": {
+      "mem_info": {
+        "mem_st": 2,
+        "mem_id": 2,
+        "mp_is_admin": 0,
+        "req_resume_left": 0,
+        "exposure_left": 0,
+        "staff_left": 0,
+        "expire_time": "2026-01-23 23:59:59",
+        "renews": 0,
+        "addfr_left": 150,
+        "uh_left": 25,
+        "coin_left": 0,
+        "super_fc_left": 0,
+        "super_addfr_left": 0,
+        "job_exposure_left": 0,
+        "dc_left": 35,
+        "stash_addfr": 0,
+        "stash_uh": 0,
+        "little_message_left": 0
+      },
+      "ret": 1,
+      "result": "ok"
+    },
+    "job_list": {
+      "job_list": [],
+      "noMore": true
+    },
+    "auth_info": {
+      "u": "5156741",
+      "access_token": "1.967685f036dc74fa46b860ecc8459e0b"
+    },
+    "message": "京东直播大前端负责人，想看机会的话可以加个 vx",
+    "select_job_info": "",
+    "show_select_job_type": false,
+    "push_type": false,
+    "show_buy_iframe": false,
+    "appellation_type": 0,
+    "send_name_card": 0,
+    "chat": {
+      "jid": 0,
+      "match_free": false,
+      "to_uid": 39980776,
+      "pcid": 0,
+      "uid": 5156741,
+      "get_common_to_uids": [],
+      "fr": "pc_web_search",
+      "first_chat_view": 0,
+      "fuser": {
+        "default_msg_content": "京东直播大前端负责人，想看机会的话可以加个 vx",
+        "appellation_type": 0,
+        "call": ""
+      },
+      "result": "ok"
+    }
+  },
+  "componentConstructorName": "b"
+}
+Verified state: {
+  "ucard2": {
+    "id": 39980776,
+    "name": "浩然",
+    "py": "hao4浩ran2然",
+    "avatar": "https://i9.taou.com/maimai/p/22075/5544_104_42wv7Hi0a4ajruhv-a160",
+    "line1": "我爱我家Flutter开发工程师",
+    "line3": "我爱我家Flutter开发工程师(北京)",
+    "line4": "房产建筑 | 其它, 影响力: 806",
+    "rank": 113,
+    "compos": "我爱我家Flutter开发工程师",
+    "loc": "北京",
+    "pub": 0,
+    "short_compos": "我爱我家Flutter开发工程师",
+    "judge": 0,
+    "position_judge": 0,
+    "vip_level": 1,
+    "vip_status": 0,
+    "vip_score": 57,
+    "company": "我爱我家",
+    "career": "我爱我家Flutter开发工程师",
+    "gender": 1,
+    "position": "Flutter开发工程师",
+    "short_career": "我爱我家Flutter开发工程师",
+    "mmid": "39980776",
+    "status": 1,
+    "utype": 1,
+    "in_app": 1,
+    "figure": 220755544,
+    "profession": 9,
+    "major": 255,
+    "province": "北京",
+    "city": "北京",
+    "qp": 2.1,
+    "identity_type": 1,
+    "headline": "自我介绍",
+    "cmf": 28,
+    "dist": 1,
+    "sr": 40,
+    "is_addr": false,
+    "cmf_no6": 0,
+    "cmf_lv3": 0,
+    "d1type": 16,
+    "mem_id": 0,
+    "mem_st": 0,
+    "mem_raw_st": 0,
+    "former": 0,
+    "cid": 7867,
+    "web_cid": "uejVKMDQ",
+    "custom_title": null,
+    "ouid": 2417169507,
+    "trackable_token": "mwpKvqk_S8V6qEm2MIhESjIZmIyeeX_0qXqhhN3bLKgS67Oh7Kfhta0GpGzD7GFO",
+    "encode_mmid": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1IjozOTk4MDc3NiwibGV2ZWwiOjEsInQiOiJjdHQifQ.dKfDA7Yi6WRI25DX9athrucdHKekpJCeY1s_gH67A1I",
+    "lv": 1,
+    "line2": "初识好友(LV1)",
+    "job_line": "初识好友(LV1)",
+    "emobile": "",
+    "user_pfmj": {
+      "src_type": 3,
+      "profession1": "030110",
+      "pf_name1": "房地产中介",
+      "pf_path1": "03,030110",
+      "major1": "0101",
+      "mj_name1": "研发",
+      "lv3_code": "01#02#03",
+      "lv3_name": "移动开发",
+      "rec_lv3_code": "01#02#03",
+      "rec_lv3_name": "移动开发"
+    },
+    "cmf1": "",
+    "cmf2": "",
+    "oline2": "",
+    "remark_name": "",
+    "remark_name_py": "",
+    "original_rank": 806.064208984375,
+    "co": false,
+    "exco": false,
+    "sh": false,
+    "prof": false,
+    "hp": false,
+    "one_sentence": ""
+  },
+  "my_card": {
+    "id": 5156741,
+    "name": "周博立",
+    "py": "zhou1周bo2博li4立",
+    "avatar": "https://i9.taou.com/maimai/p/2153/9896_5_62lhdYdU7zya7y-a160",
+    "line1": "京东零售直播技术客户端负责人",
+    "line3": "京东零售直播技术客户端负责人(北京)",
+    "line4": "IT互联网 | 研发, 影响力: 938",
+    "rank": 219,
+    "compos": "京东零售直播技术客户端负责人",
+    "loc": "北京",
+    "pub": 0,
+    "short_compos": "京东零售直播技术客户端负责人",
+    "judge": 1,
+    "position_judge": 0,
+    "vip_level": 3,
+    "vip_status": 0,
+    "vip_score": 864,
+    "company": "京东",
+    "career": "京东零售直播技术客户端负责人",
+    "gender": 1,
+    "position": "零售直播技术客户端负责人",
+    "short_career": "京东零售直播技术客户端负责人",
+    "mmid": "5156741",
+    "status": 1,
+    "utype": 1,
+    "in_app": 1,
+    "figure": 21539896,
+    "profession": 0,
+    "major": 0,
+    "province": "北京",
+    "city": "朝阳区",
+    "qp": 2.0999999046325684,
+    "identity_type": 1,
+    "headline": "新东方学校校草大赛冠军",
+    "cmf": 347,
+    "dist": 0,
+    "sr": 100000,
+    "is_addr": false,
+    "cmf_no6": 0,
+    "cmf_lv3": 18,
+    "d1type": 0,
+    "mem_id": 2,
+    "mem_st": 0,
+    "mem_raw_st": 2,
+    "former": 0,
+    "cid": 3487,
+    "web_cid": "SJdjsQ5S",
+    "custom_title": null,
+    "ouid": 4160909672,
+    "trackable_token": "eAFvza4dMR0s7odf4XG9rO07ZUITivrywsB66rwE8V5_J2BzGZSYy4h1fOo4c9-6",
+    "encode_mmid": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1Ijo1MTU2NzQxLCJsZXZlbCI6MCwidCI6ImN0dCJ9._z8-R1sg2wUOpfS4S6G10OukJzL5wGgPFyVpiEY8laM",
+    "lv": 0,
+    "line2": "",
+    "job_line": "",
+    "emobile": "",
+    "user_pfmj": {
+      "src_type": 3,
+      "profession1": "0104",
+      "pf_name1": "电子商务",
+      "pf_path1": "01,0104",
+      "major1": "0101",
+      "mj_name1": "研发",
+      "lv3_code": "01#02#03",
+      "lv3_name": "移动开发",
+      "rec_lv3_code": "",
+      "rec_lv3_name": ""
+    },
+    "cmf1": "",
+    "cmf2": "",
+    "oline2": "",
+    "remark_name": "",
+    "remark_name_py": "",
+    "original_rank": 938.7500610351562,
+    "co": true,
+    "exco": true,
+    "sh": true,
+    "prof": true,
+    "hp": true,
+    "one_sentence": ""
+  },
+  "get_template": {
+    "result": "ok",
+    "static_templates": [
+      {
+        "title": "求职类",
+        "type": 4,
+        "id": 103,
+        "content": "您好，我对您发布的岗位十分感兴趣，期待能加入贵公司！"
+      },
+      {
+        "title": "招聘类",
+        "type": 1,
+        "id": 100,
+        "content": "你好，看了你的经历，觉得背景很赞。我正在招聘，不知道你有没有兴趣加入我们公司。如果愿意，我们可以详细聊聊职位细节。"
+      },
+      {
+        "title": "商务类",
+        "type": 3,
+        "id": 101,
+        "content": "你好，我是京东的零售直播技术客户端负责人，想与您沟通下公司合作的可能性，盼回复。"
+      },
+      {
+        "title": "交友类",
+        "type": 2,
+        "id": 102,
+        "content": "你好，我是京东的零售直播技术客户端负责人，我十分想同你有一次交流机会。看到你的脉脉资料，对你的经历十分感兴趣，请问你是否愿意交个朋友，改天一起喝个咖啡？"
+      }
+    ],
+    "default_content": "京东直播大前端负责人，想看机会的话可以加个 vx",
+    "ret": 0,
+    "custom_templates": [],
+    "has_todo": 0,
+    "uh_templates": [
+      {
+        "title": "求职类",
+        "type": 4,
+        "id": 103,
+        "content": "您好，我对您发布的岗位十分感兴趣，期待能加入贵公司！"
+      },
+      {
+        "title": "招聘类",
+        "type": 1,
+        "id": 100,
+        "content": "你好，看了你的经历，觉得背景很赞。我正在招聘，不知道你有没有兴趣加入我们公司。如果愿意，我们可以详细聊聊职位细节。"
+      },
+      {
+        "title": "商务类",
+        "type": 3,
+        "id": 101,
+        "content": "你好，我是京东的零售直播技术客户端负责人，想与您沟通下公司合作的可能性，盼回复。"
+      },
+      {
+        "title": "交友类",
+        "type": 2,
+        "id": 102,
+        "content": "你好，我是京东的零售直播技术客户端负责人，我十分想同你有一次交流机会。看到你的脉脉资料，对你的经历十分感兴趣，请问你是否愿意交个朋友，改天一起喝个咖啡？"
+      }
+    ],
+    "job_id": -1,
+    "job_title": "",
+    "show_job_card": 0,
+    "first_chat_view": 0,
+    "to_user_gender": 1
+  },
+  "get_tuser": {
+    "tuser": {
+      "last_login_txt": "6小时前活跃"
+    },
+    "is_noincome": 0,
+    "fast_amount": 0,
+    "set_amount": 0,
+    "pc_msg": "",
+    "u1": 39980776,
+    "ret": 1,
+    "pcid": 0,
+    "min_amount_qp": 0,
+    "call_services": [],
+    "u": 5156741,
+    "result": "ok",
+    "has_todo": 0,
+    "services": [],
+    "userauth": {
+      "login_time_raw": "2026-02-14 11:09:18",
+      "login_time": "2026-02-14 11:09:18",
+      "last_login_txt": "6小时前活跃"
+    }
+  },
+  "fast_contact_pay_num": {
+    "final_num": 1,
+    "base_num": 1,
+    "code": 0,
+    "ab": 1,
+    "result": "ok",
+    "search_profile_is_free": 0
+  },
+  "mem_status": {
+    "mem_info": {
+      "mem_st": 2,
+      "mem_id": 2,
+      "mp_is_admin": 0,
+      "req_resume_left": 0,
+      "exposure_left": 0,
+      "staff_left": 0,
+      "expire_time": "2026-01-23 23:59:59",
+      "renews": 0,
+      "addfr_left": 150,
+      "uh_left": 25,
+      "coin_left": 0,
+      "super_fc_left": 0,
+      "super_addfr_left": 0,
+      "job_exposure_left": 0,
+      "dc_left": 35,
+      "stash_addfr": 0,
+      "stash_uh": 0,
+      "little_message_left": 0
+    },
+    "ret": 1,
+    "result": "ok"
+  },
+  "job_list": {
+    "job_list": [],
+    "noMore": true
+  },
+  "auth_info": {
+    "u": "5156741",
+    "access_token": "1.967685f036dc74fa46b860ecc8459e0b"
+  },
+  "message": "你好",
+  "select_job_info": "",
+  "show_select_job_type": false,
+  "push_type": 1,
+  "show_buy_iframe": false,
+  "appellation_type": 0,
+  "send_name_card": 0,
+  "chat": {
+    "jid": 0,
+    "match_free": false,
+    "to_uid": 39980776,
+    "pcid": 0,
+    "uid": 5156741,
+    "get_common_to_uids": [],
+    "fr": "pc_web_search",
+    "first_chat_view": 0,
+    "fuser": {
+      "default_msg_content": "京东直播大前端负责人，想看机会的话可以加个 vx",
+      "appellation_type": 0,
+      "call": ""
+    },
+    "result": "ok"
+  }
+}
+
+=== Step 3a: Press Enter key in textarea ===
+  Pressed Enter. Waiting 3 seconds...
+  [After Enter] Captured requests: 0
+
+=== Step 3b: Press Ctrl+Enter in textarea ===
+  Pressed Ctrl+Enter. Waiting 3 seconds...
+  [After Ctrl+Enter] Captured requests: 0
+
+=== Step 3c: Debounce closure extraction + prototype send/submit methods ===
+{
+  "handlerKeys": [
+    "type",
+    "className",
+    "onClick",
+    "children"
+  ],
+  "onClickSource": "function E(){var t=i(),n=v(t);if(c=arguments,s=this,u=t,n){if(void 0===f)return b(u);if(h)return clearTimeout(f),f=setTimeout(y,e),A(u)}return void 0===f&&(f=setTimeout(y,e)),d}",
+  "onClickOwnProps": [
+    "length",
+    "name",
+    "prototype",
+    "cancel",
+    "flush"
+  ],
+  "onClickFnProps": {
+    "length": "0",
+    "name": "E",
+    "prototype": "[object Object]",
+    "cancel": "function(){void 0!==f&&clearTimeout(f),g=0,c=u=s=f=void 0}",
+    "flush": "function(){return void 0===f?d:w(i())}"
+  },
+  "protoMethods": [
+    "constructor",
+    "componentDidMount",
+    "render"
+  ],
+  "sendMethods": [],
+  "methodSources": {
+    "constructor": "function b(e){var t;!function(e,t){if(!(e instanceof t))throw new TypeError(\"Cannot call a class as a function\")}(this,b),pe(ue(t=f.call(this,e)),\"state\",{ucard2:{},my_card:{},get_template:{},get_tuser:{},fast_contact_pay_num:{},mem_status:{},job_list:{},auth_info:{},message:\"\",select_job_info:\"\",show_select_job_type:!1,push_type:!1,show_buy_iframe:!1,appellation_type:0,send_name_card:0}),pe(ue(t),\"showSelectJobList\",(function(e){var n=t.state.show_select_job_type;e.stopPropagation(),t.setState(",
+    "componentDidMount": "function(){var e=this,t=this.props.u2,n=(0,i.stringify)({only_json:1,u2:t});l()(window.share_data)&&p()(\"/bizmember/uh-chat?\".concat(n)).then((function(t){var n=t.data,o=n.chat,r=(o=void 0===o?{}:o).fuser,i=(r=void 0===r?{}:r).default_msg_content,a=void 0===i?\"\":i;e.setState(ae(ae({},n),{},{message:a}))})),this.windowClickHideSelectJobType()}",
+    "render": "function(){var e,t=this,n=this.state,i=n.ucard2,c=(i=void 0===i?{}:i).avatar,l=void 0===c?\"\":c,s=i.name,u=void 0===s?\"\":s,f=i.company,p=void 0===f?\"\":f,d=i.position,b=void 0===d?\"\":d,v=i.mem_st,h=void 0===v?0:v,_=i.mem_id,g=void 0===_?0:_,j=i.judge,w=n.my_card,E=(w=void 0===w?{}:w).mem_st,O=void 0===E?0:E,A=w.mem_id,P=void 0===A?0:A,S=n.get_tuser,k=(S=void 0===S?{}:S).userauth,C=(k=void 0===k?{}:k).last_login_txt,N=void 0===C?\"\":C,R=n.get_template,x=(R=void 0===R?{}:R).static_templates,I=void 0="
+  },
+  "instanceMethods": [
+    "showSelectJobList",
+    "windowClickHideSelectJobType",
+    "getMoreJobList",
+    "selectJob",
+    "selectName",
+    "send"
+  ],
+  "instanceMethodSources": {
+    "showSelectJobList": "function(e){var n=t.state.show_select_job_type;e.stopPropagation(),t.setState({show_select_job_type:!n})}",
+    "windowClickHideSelectJobType": "function(){window.addEventListener(\"click\",(function(){t.setState({show_select_job_type:!1})}))}",
+    "getMoreJobList": "function(e){e.stopPropagation();var n=t.state,o=n.job_list,r=void 0===o?{}:o,i=n.job_list,a=(i=void 0===i?{}:i).page,c=void 0===a?1:a,l=i.noMore,s=i.total;!1===l&&p().get(\"/jobs/b/job_management_page\",{params:{count:200,page:c,jsononly:1,recruitingPositions:!0}}).then((function(){var e=arguments.length>0&&void 0!==arguments[0]?arguments[0]:{},n=e.data,o=(n=void 0===n?{}:n).data,i=(o=void 0===o?{}:o).jobListData,a=void 0===i?[]:i;r.job_list=r.job_list.concat(a.map((function(e){var t=e.position,n=",
+    "selectJob": "function(e){e.stopPropagation(),t.setState({select_job_info:\"-请选择职位\",show_select_job_type:!1})}",
+    "selectName": "function(e){t.setState({appellation_type:e})}",
+    "send": "function E(){var t=i(),n=v(t);if(c=arguments,s=this,u=t,n){if(void 0===f)return b(u);if(h)return clearTimeout(f),f=setTimeout(y,e),A(u)}return void 0===f&&(f=setTimeout(y,e)),d}"
+  },
+  "callResults": {
+    "send": {
+      "success": true,
+      "returnType": "undefined",
+      "returnValue": "undefined"
+    }
+  }
+}
+
+  Waiting 3 seconds after closure calls...
+  [After closure extraction calls] Captured requests: 0
+
+=== Step 3d: React fiber memoizedProps on button ===
+{
+  "buttonFiberType": "button",
+  "buttonFiberTag": 5,
+  "fiberChain": [
+    {
+      "depth": 0,
+      "tag": 5,
+      "type": "button",
+      "propKeys": [
+        "type",
+        "className",
+        "onClick",
+        "children"
+      ],
+      "onClickSource": "function E(){var t=i(),n=v(t);if(c=arguments,s=this,u=t,n){if(void 0===f)return b(u);if(h)return clearTimeout(f),f=setTimeout(y,e),A(u)}return void 0===f&&(f=setTimeout(y,e)),d}",
+      "pendingPropKeys": [
+        "type",
+        "className",
+        "onClick",
+        "children"
+      ],
+      "pendingOnClickSource": "function E(){var t=i(),n=v(t);if(c=arguments,s=this,u=t,n){if(void 0===f)return b(u);if(h)return clearTimeout(f),f=setTimeout(y,e),A(u)}return void 0===f&&(f=setTimeout(y,e)),d}"
+    },
+    {
+      "depth": 1,
+      "tag": 5,
+      "type": "div",
+      "propKeys": [
+        "className",
+        "children"
+      ],
+      "pendingPropKeys": [
+        "className",
+        "children"
+      ]
+    },
+    {
+      "depth": 2,
+      "tag": 5,
+      "type": "div",
+      "propKeys": [
+        "children",
+        "className"
+      ],
+      "pendingPropKeys": [
+        "children",
+        "className"
+      ]
+    },
+    {
+      "depth": 3,
+      "tag": 11,
+      "type": "style__PayItem",
+      "propKeys": [
+        "children"
+      ],
+      "pendingPropKeys": [
+        "children"
+      ]
+    },
+    {
+      "depth": 4,
+      "tag": 0,
+      "type": "M",
+      "propKeys": [
+        "ucard2",
+        "my_card",
+        "get_template",
+        "get_tuser",
+        "fast_contact_pay_num",
+        "mem_status",
+        "job_list",
+        "auth_info",
+        "message",
+        "select_job_info",
+        "show_select_job_type",
+        "push_type",
+        "show_buy_iframe",
+        "appellation_type",
+        "send_name_card",
+        "chat",
+        "send"
+      ],
+      "pendingPropKeys": [
+        "ucard2",
+        "my_card",
+        "get_template",
+        "get_tuser",
+        "fast_contact_pay_num",
+        "mem_status",
+        "job_list",
+        "auth_info",
+        "message",
+        "select_job_info",
+        "show_select_job_type",
+        "push_type",
+        "show_buy_iframe",
+        "appellation_type",
+        "send_name_card",
+        "chat",
+        "send"
+      ]
+    },
+    {
+      "depth": 5,
+      "tag": 5,
+      "type": "div",
+      "propKeys": [
+        "className",
+        "children"
+      ],
+      "pendingPropKeys": [
+        "className",
+        "children"
+      ]
+    },
+    {
+      "depth": 6,
+      "tag": 5,
+      "type": "div",
+      "propKeys": [
+        "children",
+        "className"
+      ],
+      "pendingPropKeys": [
+        "children",
+        "className"
+      ]
+    },
+    {
+      "depth": 7,
+      "tag": 11,
+      "type": "style__Content",
+      "propKeys": [
+        "children"
+      ],
+      "pendingPropKeys": [
+        "children"
+      ]
+    },
+    {
+      "depth": 8,
+      "tag": 5,
+      "type": "div",
+      "propKeys": [
+        "className",
+        "children"
+      ],
+      "pendingPropKeys": [
+        "className",
+        "children"
+      ]
+    },
+    {
+      "depth": 9,
+      "tag": 11,
+      "type": "style__Main",
+      "propKeys": [
+        "className",
+        "children"
+      ],
+      "pendingPropKeys": [
+        "className",
+        "children"
+      ]
+    },
+    {
+      "depth": 10,
+      "tag": 1,
+      "type": "b",
+      "propKeys": [
+        "className"
+      ],
+      "pendingPropKeys": [
+        "className"
+      ]
+    },
+    {
+      "depth": 11,
+      "tag": 0,
+      "type": "ve",
+      "propKeys": [
+        "history",
+        "location",
+        "match",
+        "staticContext"
+      ],
+      "pendingPropKeys": [
+        "history",
+        "location",
+        "match",
+        "staticContext"
+      ]
+    },
+    {
+      "depth": 12,
+      "tag": 1,
+      "type": "n",
+      "propKeys": [
+        "history",
+        "location",
+        "match",
+        "staticContext"
+      ],
+      "pendingPropKeys": [
+        "history",
+        "location",
+        "match",
+        "staticContext"
+      ]
+    },
+    {
+      "depth": 13,
+      "tag": 10,
+      "type": "Component",
+      "propKeys": [
+        "value",
+        "children"
+      ],
+      "pendingPropKeys": [
+        "value",
+        "children"
+      ]
+    },
+    {
+      "depth": 14,
+      "tag": 9,
+      "type": "Router",
+      "propKeys": [
+        "children"
+      ],
+      "pendingPropKeys": [
+        "children"
+      ]
+    }
+  ],
+  "nativeListenersNote": "getEventListeners not available in page context",
+  "clickDispatched": true
+}
+
+  Waiting 3 seconds after fiber click...
+  [After fiber + btn.click()] Captured requests: 0
+
+=== Step 4: Full prototype method source dump ===
+Constructor: b
+State keys: ['ucard2', 'my_card', 'get_template', 'get_tuser', 'fast_contact_pay_num', 'mem_status', 'job_list', 'auth_info', 'message', 'select_job_info', 'show_select_job_type', 'push_type', 'show_buy_iframe', 'appellation_type', 'send_name_card', 'chat']
+Props keys: ['className']
+
+--- Proto methods (3) ---
+
+  [constructor]:
+  function b(e){var t;!function(e,t){if(!(e instanceof t))throw new TypeError("Cannot call a class as a function")}(this,b),pe(ue(t=f.call(this,e)),"state",{ucard2:{},my_card:{},get_template:{},get_tuser:{},fast_contact_pay_num:{},mem_status:{},job_list:{},auth_info:{},message:"",select_job_info:"",show_select_job_type:!1,push_type:!1,show_buy_iframe:!1,appellation_type:0,send_name_card:0}),pe(ue(t),"showSelectJobList",(function(e){var n=t.state.show_select_job_type;e.stopPropagation(),t.setState({show_select_job_type:!n})})),pe(ue(t),"windowClickHideSelectJobType",(function(){window.addEventListener("click",(function(){t.setState({show_select_job_type:!1})}))})),pe(ue(t),"getMoreJobList",(function(e){e.stopPropagation();var n=t.state,o=n.job_list,r=void 0===o?{}:o,i=n.job_list,a=(i=void 0===i?{}:i).page,c=void 0===a?1:a,l=i.noMore,s=i.total;!1===l&&p().get("/jobs/b/job_management_page",{params:{count:200,page:c,jsononly:1,recruitingPositions:!0}}).then((function(){var e=arguments.length>0&&void 0!==arguments[0]?arguments[0]:{},n=e.data,o=(n=void 0===n?{}:n).data,i=(o=void 0===o?{}:o).jobListData,a=void 0===i?[]:i;r.job_list=r.job_list.concat(a.map((function(e){var t=e.position,n=void 0===t?"":t,o=e.salary_str;return{title:n,salary_str:void 0===o?"":o,id:e.id}}))),t.setState({job_list:ae(ae({},r),{},{page:c+1,noMore:!(s<r.job_list.length)})})}))})),pe(ue(t),"selectJob",(function(e){e.stopPropagation(),t.setState({select_job_info:"-请选择职位",show_select_job_type:!1})})),pe(ue(t),"selectName",(function(e){t.setState({appellation_type:e})})),pe(ue(t),"send",u()((function(){(0,d.s9)("member_uh_chat",ae(ae({},(0,i.parse)(window.location.search,{ignoreQueryPrefix:!0})),{},{target_type:"pc_click"}));var e=t.state,n=e.message,o=e.select_job_info,r=void 0===o?"":o,c=e.get_tuser,l=(c=void 0===c?{}:c).pcid,s=void 0===l?0:l,u=e.ucard2.id,f=e.mem_status,m=void 0===f?{}:f,y=e.my_card,b=(y=void 0===y?{}:y).mem_st,v=void 0===b?0:b,h=e.get_template,_=(h=void 0===h?{}:h).has_todo,g=void 0===_?0:_,j=e.get_template,w=void 0===j?{}:j,E=e.push_type,O=void 0!==E&&E,A=e.appellation_type,P=void 0===A?0:A,S=e.send_name_card;(0,d.s9)("send_uh_pc.send_bnt.name_option.click",{appellation_type:P});var k,C,N=t.props.isInsert,R=(k=r.split("-"),C=1,re(k)||function(e,t){var n=null==e?null:"undefined"!=typeof Symbol&&e[Symbol.iterator]||e["@@iterator"];if(null!=n){var o,r,i=[],a=!0,c=!1;try{for(n=n.call(e);!(a=(o=n.next()).done)&&(i.push(o.value),!t||i.length!==t);a=!0);}catch(e){c=!0,r=e}finally{try{a||null==n.return||n.return()}finally{if(c)throw r}}return i}}(k,C)||ne(k,C)||te())[0],x={u2:u,msg_content:n,fr:"pc_chat",jid:R,pcid:s,job_id:R,appellation_type:P,send_name_card:S};return!0!==O&&1!==g&&(n.length<10||n.length>300?alert("字数限10~300"):(t.setState({push_type:!0}),void p().post("/bizmember/uh-chat/api/send_v2",x).then((function(e){var n=e.data,o=(n=void 0===n?{}:n).ret,r=n.error,c=n.uh_left,l=n.uh_id,s=n.error_code;1===o?(m.mem_info.uh_left=c,w.has_todo=1,(0,Q.l)("member_uh_chat_send_success",{u2:u,uh_id:l},"all"),t.setState({mem_status:m,get_template:w}),(0,d.s9)("member_uh_chat",ae(ae({},(0,i.parse)(window.location.search,{ignoreQueryPrefix:!0})),{},{deal_id:l})),alert("发送成功！"),N&&(0,a.O9)({domId:me})):((0,d.s9)("member_uh_chat",ae(ae({},(0,i.parse)(window.location.search,{ignoreQueryPrefix:!0})),{},{target_type:"pc_click_fail",error_code:s})),30101===s?1!==v?t.setState({show_buy_iframe:!0}):alert("联系劵额度不足，请至脉脉APP购买叠加包获取更多额度。"):alert(r)),t.setState({push_type:!1})}))))}),200));var n=window.share_data,o=n.job_list,r=(o=void 0===o?{}:o).total,c=o.job_list,l=void 0===c?[]:c,s=function(e,t){if(null==e)return{};var n,o,r=function(e,t){if(null==e)return{};var n,o,r={},i=Object.keys(e);for(o=0;o<i.length;o++)n=i[o],t.indexOf(n)>=0||(r[n]=e[n]);return r}(e,t);if(Object.getOwnPropertySymbols){var i=Object.getOwnPropertySymbols(e);for(o=0;o<i.length;o++)n=i[o],t.indexOf(n)>=0||Object.prototype.propertyIsEnumerable.call(e,n)&&(r[n]=e[n])}return r}(o,$),m=n.chat,y=(m=void 0===m?{}:m).fuser,v=(y=void 0===y?{}:y).default_msg_content,h=void 0===v?"":v,_=y.appellation_type,g=void 0===_?0:_;return t.state=ae(ae(ae({},t.state),window.share_data),{},{message:h,job_list:ae(ae({},s),{},{job_list:l,noMore:!(r<l.length)}),appellation_type:g}),t}
+
+  [componentDidMount]:
+  function(){var e=this,t=this.props.u2,n=(0,i.stringify)({only_json:1,u2:t});l()(window.share_data)&&p()("/bizmember/uh-chat?".concat(n)).then((function(t){var n=t.data,o=n.chat,r=(o=void 0===o?{}:o).fuser,i=(r=void 0===r?{}:r).default_msg_content,a=void 0===i?"":i;e.setState(ae(ae({},n),{},{message:a}))})),this.windowClickHideSelectJobType()}
+
+  [render]:
+  function(){var e,t=this,n=this.state,i=n.ucard2,c=(i=void 0===i?{}:i).avatar,l=void 0===c?"":c,s=i.name,u=void 0===s?"":s,f=i.company,p=void 0===f?"":f,d=i.position,b=void 0===d?"":d,v=i.mem_st,h=void 0===v?0:v,_=i.mem_id,g=void 0===_?0:_,j=i.judge,w=n.my_card,E=(w=void 0===w?{}:w).mem_st,O=void 0===E?0:E,A=w.mem_id,P=void 0===A?0:A,S=n.get_tuser,k=(S=void 0===S?{}:S).userauth,C=(k=void 0===k?{}:k).last_login_txt,N=void 0===C?"":C,R=n.get_template,x=(R=void 0===R?{}:R).static_templates,I=void 0===x?[]:x,B=n.job_list,U=(B=void 0===B?{}:B).job_list,Q=void 0===U?[]:U,z=B.noMore,J=void 0!==z&&z,T=n.message,Y=void 0===T?"":T,Z=n.select_job_info,D=n.show_select_job_type,V=void 0!==D&&D,L=n.show_buy_iframe,F=void 0!==L&&L,W=n.chat,K=(W=void 0===W?{}:W).fuser,X=void 0===K?{}:K,G=n.send_name_card,$=this.props,oe=$.isInsert,ie=$.className,ae=1===O?N:"会员可见活跃时间",ce=[p.slice(0,6),p.length>6?"...":""].join(""),le=[b.slice(0,6),b.length>6?"...":""].join(""),se=re(e=Z.split("-"))||function(e){if("undefined"!=typeof Symbol&&null!=e[Symbol.iterator]||null!=e["@@iterator"])return Array.from(e)}(e)||ne(e)||te(),ue=se[0],fe=se.slice(1),pe=(0,y.Ho)({mem_st:O,mem_id:P});return o.createElement(r.or,{className:ie},o.createElement(r.VY,null,o.createElement("div",{className:"title"},"极速联系"," ",oe&&o.createElement("span",{onClick:function(){return(0,a.O9)({domId:me})},className:"close"})),o.createElement("div",{className:"content"},o.createElement("div",{className:"top"},o.createElement("div",{className:"info-item"},o.createElement("div",{className:"img-item"},o.createElement("img",{src:l,alt:""})),o.createElement("div",{className:"info"},o.createElement("div",{className:"name"},u," ",o.createElement("span",null,ae)),o.createElement("div",{className:"other"},ce," · ",le," ",1===j&&o.createElement(m.V,null)," ",1===h&&o.createElement(m.ZP,{level:g})))),o.createElement("div",{className:"message"},"有什么可以帮到你？我尽量在24小时内回复")),o.createElement(r.v0,null,o.createElement(q,{name:u,fuser:X,selectName:this.selectName}),o.createElement("div",{className:"tag-list"},I.slice(0,3).map((function(e,n){var r=e.title,i=e.content;return o.createElement("div",{key:n,className:"item",onClick:function(){return t.setState({message:i})}},r)}))),o.createElement("div",{className:"message-item"},o.createElement("textarea",{value:Y,onChange:function(e){var n=e.target.value;return t.setState({message:n.slice(0,300)})},placeholder:"请选择模板或输入内容"})),o.createElement("div",{className:"num"},Y.length,"/300")),0!==Q.length&&o.createElement(r.s6,null,o.createElement("div",{onClick:this.showSelectJobList,className:"select ".concat(V?"activity":"")},fe.join("")?fe.join(""):"请选择职位"),V&&o.createElement(r.$m,null,o.createElement("div",{className:"select-option-content"},o.createElement("div",{className:"option ".concat(""===ue?"action":""),onClick:this.selectJob},"请选择职位"),Q.map((function(e,n){var r=e.id,i=e.title;return o.createElement("div",{className:"option ".concat(r.toString()===ue?"action":""),key:n,onClick:function(){return t.setState({select_job_info:"".concat(r,"-").concat(i),show_select_job_type:!1})}},i)})),!1===J&&o.createElement("div",{className:"option",style:{textAlign:"center"},onClick:this.getMoreJobList},"加载更多")))),pe&&o.createElement(H.Z,{def_selected:1===G,onChangeSelected:function(e){t.setState({send_name_card:e?1:0})}}),o.createElement(M,ee({},this.state,{send:this.send})))),F&&1!==O&&o.createElement("iframe",{ref:"pc_buy_iframe",seamless:!0,style:de,src:"https://maimai.cn/contact/member/pc_buy_popup_page?mem_id=2&from=uh_chat_pc"}))}
+
+--- Instance methods (6) ---
+
+  [showSelectJobList]:
+  function(e){var n=t.state.show_select_job_type;e.stopPropagation(),t.setState({show_select_job_type:!n})}
+
+  [windowClickHideSelectJobType]:
+  function(){window.addEventListener("click",(function(){t.setState({show_select_job_type:!1})}))}
+
+  [getMoreJobList]:
+  function(e){e.stopPropagation();var n=t.state,o=n.job_list,r=void 0===o?{}:o,i=n.job_list,a=(i=void 0===i?{}:i).page,c=void 0===a?1:a,l=i.noMore,s=i.total;!1===l&&p().get("/jobs/b/job_management_page",{params:{count:200,page:c,jsononly:1,recruitingPositions:!0}}).then((function(){var e=arguments.length>0&&void 0!==arguments[0]?arguments[0]:{},n=e.data,o=(n=void 0===n?{}:n).data,i=(o=void 0===o?{}:o).jobListData,a=void 0===i?[]:i;r.job_list=r.job_list.concat(a.map((function(e){var t=e.position,n=void 0===t?"":t,o=e.salary_str;return{title:n,salary_str:void 0===o?"":o,id:e.id}}))),t.setState({job_list:ae(ae({},r),{},{page:c+1,noMore:!(s<r.job_list.length)})})}))}
+
+  [selectJob]:
+  function(e){e.stopPropagation(),t.setState({select_job_info:"-请选择职位",show_select_job_type:!1})}
+
+  [selectName]:
+  function(e){t.setState({appellation_type:e})}
+
+  [send]:
+  function E(){var t=i(),n=v(t);if(c=arguments,s=this,u=t,n){if(void 0===f)return b(u);if(h)return clearTimeout(f),f=setTimeout(y,e),A(u)}return void 0===f&&(f=setTimeout(y,e)),d}
+
+
+=== Final: All captured requests ===
+Total captured: 0
+
+Screenshot saved to data/screenshots/qc_submit7.png
+(node:23160) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)

@@ -1,0 +1,30 @@
+/* Boss Assistant — client-side helpers */
+
+/**
+ * Show a toast notification.
+ * @param {string} message
+ * @param {"success"|"error"|"warning"|"info"} type
+ */
+function showToast(message, type = "info") {
+    const container = document.getElementById("toast-container");
+    if (!container) return;
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+}
+
+/* Listen for HX-Trigger response headers to show toasts */
+document.body.addEventListener("showToast", function (evt) {
+    const detail = evt.detail || {};
+    showToast(detail.message || "操作完成", detail.type || "success");
+});
+
+/* Auto-scroll pipeline log to bottom when new content arrives */
+document.body.addEventListener("htmx:afterSwap", function (evt) {
+    const log = document.querySelector(".pipeline-log");
+    if (log) {
+        log.scrollTop = log.scrollHeight;
+    }
+});

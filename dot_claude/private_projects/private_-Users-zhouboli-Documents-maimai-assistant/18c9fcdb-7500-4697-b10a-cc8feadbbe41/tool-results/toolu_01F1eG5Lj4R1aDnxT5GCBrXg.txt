@@ -1,0 +1,280 @@
+   750→async def _send_message_batch_common(
+   751→    candidates: List[dict],
+   752→    template_name: str,
+   753→    common_variables: Dict[str, str],
+   754→    send_one: Callable[[dict, str], Awaitable[CandidateSendResult]],
+   755→    batch_config: BatchConfig,
+   756→    skip_messaged: bool = True,
+   757→    skip_confirmation: bool = False,
+   758→) -> Dict[str, Any]:
+   759→    """Common orchestration for all three batch-send paths.
+   760→
+   761→    Handles: template loading, filtering already-messaged, preview panel,
+   762→    confirmation, progress bar, rate limiting, template rendering, and
+   763→    result collection.  The actual per-candidate send logic is delegated
+   764→    to the ``send_one`` callback.
+   765→
+   766→    Args:
+   767→        candidates: List of dicts with maimai_id, name, company, title
+   768→        template_name: Name of message template
+   769→        common_variables: Shared template variables
+   770→        send_one: async callback(candidate_dict, rendered_content) → CandidateSendResult
+   771→        batch_config: Display / behaviour config for this path
+   772→        skip_messaged: Skip already-messaged candidates
+   773→        skip_confirmation: Skip interactive confirmation prompt
+   774→
+   775→    Returns:
+   776→        Dict with total, sent, failed, skipped, rate_limited, details
+   777→    """
+   778→    config = get_config()
+   779→    db_manager = get_db_manager()
+   780→
+   781→    try:
+   782→        template = config.get_template(template_name)
+   783→    except Exception:
+   784→        raise ValidationError(f"Template not found: {template_name}")
+   785→
+   786→    results = {
+   787→        "total": len(candidates),
+   788→        "sent": 0,
+   789→        "failed": 0,
+   790→        "skipped": 0,
+   791→        "rate_limited": 0,
+   792→        "quota_exhausted": 0,
+   793→        "details": [],
+   794→    }
+   795→
+   796→    # --- Filter already-messaged candidates ---
+   797→    send_list = []
+   798→    if skip_messaged:
+   799→        all_ids = [c["maimai_id"] for c in candidates]
+   800→        with db_manager.session_scope() as session:
+   801→            rows = (
+   802→                session.query(Message.candidate_maimai_id)
+   803→                .filter(Message.candidate_maimai_id.in_(all_ids), Message.status == "sent")
+   804→                .distinct()
+   805→                .all()
+   806→            )
+   807→            messaged_ids = {row[0] for row in rows}
+   808→
+   809→        for c in candidates:
+   810→            if c["maimai_id"] in messaged_ids:
+   811→                results["skipped"] += 1
+   812→                results["details"].append(
+   813→                    {
+   814→                        "maimai_id": c["maimai_id"],
+   815→                        "name": c["name"],
+   816→                        "status": "skipped",
+   817→                        "reason": "already messaged",
+   818→                    }
+   819→                )
+   820→            else:
+   821→                send_list.append(c)
+   822→    else:
+   823→        send_list = list(candidates)
+   824→
+   825→    if not send_list:
+   826→        if results["skipped"] > 0:
+   827→            console.print(
+   828→                f"[yellow]All {results['skipped']} candidates already messaged. Skipping send.[/yellow]"
+   829→            )
+   830→        else:
+   831→            console.print("[yellow]No candidates to send messages to.[/yellow]")
+   832→        return results
+   833→
+   834→    # --- Optional pre-validation (Path A) ---
+   835→    if batch_config.pre_validate:
+   836→        console.print("[dim]Validating template for all candidates...[/dim]")
+   837→        for c in send_list:
+   838→            test_vars = {
+   839→                **common_variables,
+   840→                "name": c.get("name", ""),
+   841→                "company": c.get("company", ""),
+   842→                "position": c.get("title", ""),
+   843→            }
+   844→            is_valid, missing = validate_template_rendering(template["content"], test_vars, c)
+   845→            if not is_valid:
+   846→                raise ValidationError(
+   847→                    f"候选人 {c.get('name', 'Unknown')} 的模板变量缺失或为空:\n"
+   848→                    f"  缺失: {', '.join(missing)}\n"
+   849→                    f"  候选人信息: {c}\n"
+   850→                    f"  请检查模板或补充变量"
+   851→                )
+   852→
+   853→    # --- Build preview ---
+   854→    first = send_list[0]
+   855→    first_vars = {
+   856→        **common_variables,
+   857→        "name": first["name"],
+   858→        "company": first["company"],
+   859→        "position": first["title"],
+   860→    }
+   861→    # If pre-validated, skip redundant validation in render
+   862→    first_content = render_template(
+   863→        template["content"], first_vars, validate=not batch_config.pre_validate
+   864→    )
+   865→
+   866→    summary_text = Text()
+   867→    summary_text.append("Template: ", style="bold")
+   868→    summary_text.append(f"{template_name}\n")
+   869→    if batch_config.mode_label:
+   870→        summary_text.append("Mode: ", style="bold")
+   871→        summary_text.append(f"{batch_config.mode_label}\n")
+   872→    summary_text.append("Candidates: ", style="bold")
+   873→    summary_text.append(f"{len(candidates)} found, {results['skipped']} already messaged\n")
+   874→    summary_text.append("Will send to: ", style="bold")
+   875→    summary_text.append(f"{len(send_list)} candidates\n\n")
+   876→    summary_text.append("Message Preview ", style="bold cyan")
+   877→    summary_text.append("(first candidate):\n", style="dim")
+   878→    summary_text.append("To: ", style="bold cyan")
+   879→    recipient = first["name"]
+   880→    if first.get("title") and first.get("company"):
+   881→        recipient += f" ({first['title']} @ {first['company']})"
+   882→    summary_text.append(f"{recipient}\n\n")
+   883→    summary_text.append(first_content)
+   884→
+   885→    console.print(
+   886→        Panel(
+   887→            summary_text,
+   888→            title=batch_config.panel_title,
+   889→            border_style="green",
+   890→            padding=(1, 2),
+   891→        )
+   892→    )
+   893→
+   894→    # --- Confirmation ---
+   895→    if skip_confirmation:
+   896→        console.print(f"[green]Auto-confirmed: sending to {len(send_list)} candidates[/green]")
+   897→    else:
+   898→        loop = asyncio.get_running_loop()
+   899→        confirm = await loop.run_in_executor(
+   900→            None,
+   901→            lambda: questionary.confirm(
+   902→                f"Confirm batch send to {len(send_list)} candidates?"
+   903→            ).unsafe_ask(),
+   904→        )
+   905→        if not confirm:
+   906→            console.print("[yellow]Batch send cancelled.[/yellow]")
+   907→            return results
+   908→
+   909→    # --- Send loop ---
+   910→    from rich.progress import (
+   911→        Progress,
+   912→        BarColumn,
+   913→        TextColumn as ProgressTextColumn,
+   914→        MofNCompleteColumn,
+   915→    )
+   916→
+   917→    with Progress(
+   918→        ProgressTextColumn("[progress.description]{task.description}"),
+   919→        BarColumn(),
+   920→        MofNCompleteColumn(),
+   921→        console=console,
+   922→    ) as progress:
+   923→        task = progress.add_task(batch_config.progress_description, total=len(send_list))
+   924→
+   925→        for c in send_list:
+   926→            # Rate limit check
+   927→            try:
+   928→                await async_check_rate_limit("send_message")
+   929→            except RateLimitExceededError as e:
+   930→                console.print(f"\n[yellow]Rate limit reached: {e}[/yellow]")
+   931→                remaining = len(send_list) - (results["sent"] + results["failed"])
+   932→                results["rate_limited"] = remaining
+   933→                results["details"].append(
+   934→                    {
+   935→                        "maimai_id": c["maimai_id"],
+   936→                        "name": c["name"],
+   937→                        "status": "rate_limited",
+   938→                        "reason": str(e),
+   939→                    }
+   940→                )
+   941→                break
+   942→
+   943→            # Build per-candidate variables and render template
+   944→            variables = {
+   945→                **common_variables,
+   946→                "name": c["name"],
+   947→                "company": c["company"],
+   948→                "position": c["title"],
+   949→            }
+   950→            try:
+   951→                content = render_template(
+   952→                    template["content"],
+   953→                    variables,
+   954→                    validate=not batch_config.pre_validate,
+   955→                )
+   956→            except ValidationError as e:
+   957→                logger.error(f"Template rendering failed for {c['name']}: {e}")
+   958→                results["failed"] += 1
+   959→                results["details"].append(
+   960→                    {
+   961→                        "maimai_id": c["maimai_id"],
+   962→                        "name": c["name"],
+   963→                        "status": "failed",
+   964→                        "reason": f"模板渲染失败: {e}",
+   965→                    }
+   966→                )
+   967→                progress.advance(task)
+   968→                continue
+   969→
+   970→            # Delegate to path-specific sender
+   971→            result = await send_one(c, content)
+   972→
+   973→            # Record result
+   974→            if result.status == "sent":
+   975→                results["sent"] += 1
+   976→            elif result.status in ("quota_exhausted", "rate_limited"):
+   977→                if result.status == "rate_limited":
+   978→                    remaining = len(send_list) - (results["sent"] + results["failed"])
+   979→                    results["rate_limited"] = remaining
+   980→                else:
+   981→                    results["quota_exhausted"] += 1
+   982→            else:
+   983→                results["failed"] += 1
+   984→
+   985→            detail = {
+   986→                "maimai_id": c["maimai_id"],
+   987→                "name": c["name"],
+   988→                "status": result.status,
+   989→            }
+   990→            if result.reason:
+   991→                detail["reason"] = result.reason
+   992→            if result.attempts > 1:
+   993→                detail["attempts"] = result.attempts
+   994→            if result.content:
+   995→                detail["content"] = result.content
+   996→            elif content:
+   997→                detail["content"] = content
+   998→            results["details"].append(detail)
+   999→
+  1000→            if result.abort_batch:
+  1001→                remaining = len(send_list) - (results["sent"] + results["failed"])
+  1002→                if remaining > 0:
+  1003→                    console.print(f"[yellow]跳过剩余 {remaining} 位候选人[/yellow]")
+  1004→                break
+  1005→
+  1006→            progress.advance(task)
+  1007→
+  1008→            await async_random_delay("message")
+  1009→
+  1010→    return results
+  1011→
+  1012→
+  1013→# ---------------------------------------------------------------------------
+  1014→# Path-specific sender callbacks
+  1015→# ---------------------------------------------------------------------------
+  1016→
+  1017→
+  1018→def _make_search_center_sender(
+  1019→    browser: BrowserManager,
+  1020→    template_name: str,
+  1021→    interactive: bool,
+  1022→    discovered_selectors,
+  1023→) -> Callable[[dict, str], Awaitable[CandidateSendResult]]:
+  1024→    """Create a sender callback for search-center (Path A) with retry + timeout."""
+  1025→
+  1026→    max_retries = 2
+  1027→    per_candidate_timeout = 90
+  1028→
+  1029→    async def _send(c: dict, content: str) -> CandidateSendResult:

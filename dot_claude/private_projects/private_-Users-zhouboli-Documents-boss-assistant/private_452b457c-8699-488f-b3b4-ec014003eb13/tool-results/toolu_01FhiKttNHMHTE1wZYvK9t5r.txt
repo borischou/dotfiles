@@ -1,0 +1,77 @@
+     1→.PHONY: help install test lint format typecheck ci dev web cli db clean
+     2→
+     3→PYTHON := venv/bin/python3
+     4→PIP := venv/bin/pip
+     5→
+     6→help: ## Show this help
+     7→	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+     8→
+     9→# ── Setup ──────────────────────────────────────────────
+    10→
+    11→install: ## Install dependencies
+    12→	$(PIP) install -r requirements.txt
+    13→	venv/bin/patchright install chrome
+    14→
+    15→db: ## Initialize database
+    16→	$(PYTHON) scripts/setup_db.py
+    17→
+    18→# ── Quality ────────────────────────────────────────────
+    19→
+    20→test: ## Run tests
+    21→	$(PYTHON) -m pytest --tb=short -q
+    22→
+    23→test-v: ## Run tests (verbose)
+    24→	$(PYTHON) -m pytest -v
+    25→
+    26→test-cov: ## Run tests with coverage
+    27→	$(PYTHON) -m pytest --cov=src --cov-report=term-missing
+    28→
+    29→lint: ## Run linter (ruff)
+    30→	venv/bin/ruff check src/ tests/
+    31→
+    32→format: ## Format code (black + ruff fix)
+    33→	venv/bin/black src/ tests/
+    34→	venv/bin/ruff check --fix src/ tests/
+    35→
+    36→typecheck: ## Run type checker (mypy)
+    37→	venv/bin/mypy src/
+    38→
+    39→ci: ## Run full CI pipeline (format check + lint + typecheck + test)
+    40→	venv/bin/black --check src/ tests/
+    41→	venv/bin/ruff check src/ tests/
+    42→	venv/bin/mypy src/
+    43→	$(PYTHON) -m pytest --tb=short -q
+    44→
+    45→# ── Run ────────────────────────────────────────────────
+    46→
+    47→dev: ## Start web server (dev mode)
+    48→	$(PYTHON) run_web.py
+    49→
+    50→web: dev ## Alias for dev
+    51→
+    52→cli: ## Show CLI help
+    53→	$(PYTHON) -m src.cli.main --help
+    54→
+    55→search: ## Quick search (usage: make search K="前端" P=2)
+    56→	$(PYTHON) -m src.cli.main search -k "$(K)" -p $(or $(P),2)
+    57→
+    58→pipeline: ## Run pipeline (usage: make pipeline K="前端" T=greeting P=2)
+    59→	$(PYTHON) -m src.cli.main pipeline -k "$(K)" -t $(or $(T),greeting) -p $(or $(P),2)
+    60→
+    61→# ── Tools ──────────────────────────────────────────────
+    62→
+    63→record: ## Launch browser action recorder
+    64→	$(PYTHON) scripts/recorder.py
+    65→
+    66→chrome: ## Start Chrome with CDP debug port
+    67→	/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+    68→		--remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile-boss &
+    69→
+    70→# ── Clean ──────────────────────────────────────────────
+    71→
+    72→clean: ## Remove cache and build artifacts
+    73→	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+    74→	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+    75→	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
+    76→	find . -name "*.pyc" -delete 2>/dev/null || true
+    77→

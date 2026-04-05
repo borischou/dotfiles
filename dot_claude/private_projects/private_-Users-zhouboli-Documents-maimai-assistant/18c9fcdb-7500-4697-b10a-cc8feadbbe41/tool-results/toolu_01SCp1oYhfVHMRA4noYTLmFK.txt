@@ -1,0 +1,300 @@
+   250→                # Save candidates to database
+   251→                try:
+   252→                    _save_candidates_to_db(db_manager, candidates, keywords)
+   253→                except Exception as e:
+   254→                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+   255→
+   256→                # Delay before next page
+   257→                if page_num < end_page - 1:
+   258→                    await async_random_delay('page_load')
+   259→
+   260→            except (BrowserError, SessionExpiredError):
+   261→                raise  # Critical errors must propagate
+   262→            except Exception as e:
+   263→                logger.error(f"Error on page {page_num}: {e}")
+   264→                progress.update(task, description=f"Page {page_num}: Error - {str(e)[:30]}")
+   265→                # Take screenshot for debugging
+   266→                await browser.screenshot(f"search_error_page{page_num}")
+   267→                continue
+   268→
+   269→    # Log search to history
+   270→    _log_search_history(db_manager, keywords, company, location, pages, len(all_candidates))
+   271→
+   272→    console.print(f"[green]Search complete. Found {len(all_candidates)} candidates.[/green]")
+   273→    return all_candidates
+   274→
+   275→
+   276→async def _extract_search_results(page: Page, config) -> List[CandidateBasic]:
+   277→    """
+   278→    Extract candidate information from search results page.
+   279→
+   280→    Args:
+   281→        page: Playwright page instance
+   282→        config: Config instance
+   283→
+   284→    Returns:
+   285→        List of CandidateBasic objects
+   286→    """
+   287→    candidates = []
+   288→
+   289→    # NOTE: The caller (search_candidates) already waits for contactcard_
+   290→    # elements before calling this function.  Maimai's SPA strips URL
+   291→    # params within ~5-8s and clears results, so we must NOT add long
+   292→    # waits here (no networkidle, no loading-text polling).
+   293→
+   294→    try:
+   295→        # Strategy: Extract candidates by finding avatar images and their associated text
+   296→        candidates_data = await page.evaluate('''() => {
+   297→            const candidates = [];
+   298→            const seenNames = new Set();
+   299→
+   300→            // Find all images that look like avatars
+   301→            const images = document.querySelectorAll('img');
+   302→
+   303→            for (const img of images) {
+   304→                // Skip large images (probably not avatars)
+   305→                const rect = img.getBoundingClientRect();
+   306→                if (rect.width > 100 || rect.height > 100) continue;
+   307→                if (rect.width < 20 || rect.height < 20) continue;
+   308→
+   309→                // Find parent container (the card)
+   310→                let card = img.parentElement;
+   311→                for (let i = 0; i < 8 && card; i++) {
+   312→                    const cardRect = card.getBoundingClientRect();
+   313→                    // Look for a reasonable card size
+   314→                    if (cardRect.width > 200 && cardRect.height > 50 && cardRect.height < 200) {
+   315→                        break;
+   316→                    }
+   317→                    card = card.parentElement;
+   318→                }
+   319→
+   320→                if (!card) continue;
+   321→
+   322→                // Get all text nodes from card, preserving order
+   323→                const textParts = [];
+   324→                const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT, null, false);
+   325→                while (walker.nextNode()) {
+   326→                    const text = walker.currentNode.textContent.trim();
+   327→                    if (text && text.length > 0 && text.length < 100) {
+   328→                        textParts.push(text);
+   329→                    }
+   330→                }
+   331→
+   332→                // Parse candidate info from text parts
+   333→                // Pattern: Name, Activity time, Company+Position, Industry|Department
+   334→                let name = '';
+   335→                let company = '';
+   336→                let title = '';
+   337→                let industry = '';
+   338→
+   339→                // Compound job title patterns (longer patterns first for greedy match)
+   340→                const jobPatterns = [
+   341→                    // Compound titles with prefix modifiers
+   342→                    /(?:高级|资深|首席|初级|中级|senior|junior|staff|principal|lead)?\s*(?:前端|后端|全栈|web|Web|iOS|Android|Java|Python|Go|C\+\+|PHP|.NET|算法|数据|AI|机器学习|深度学习|NLP|大数据|云计算|DevOps|SRE|安全|测试|嵌入式|移动端|客户端|服务端|区块链|具身智能|自动驾驶|机器人)?\s*(?:工程师|开发|架构师|专家|技术经理|技术总监|技术负责人|Tech\s*Lead)/i,
+   343→                    // Management titles
+   344→                    /(?:技术|产品|运营|市场|销售|人力|财务|行政|项目|研发)?\s*(?:总监|经理|主管|负责人|VP|总裁|副总|合伙人|创始人|董事|CEO|CTO|COO|CFO|CMO|CHO|CIO)/i,
+   345→                    // Other roles
+   346→                    /(?:产品|UI|UX|交互|视觉)?\s*(?:设计师|分析师|顾问|运营|助理|实习生?)/i,
+   347→                ];
+   348→
+   349→                // Patterns for text that should be skipped
+   350→                const skipPatterns = [
+   351→                    /^[+＋]\s*好友$/,          // "+ 好友" button
+   352→                    /^\d+个共同好友$/,           // "1个共同好友" social label
+   353→                    /^共同好友/,                 // "共同好友..." variants
+   354→                    /^已关注$/,                  // "已关注" button
+   355→                    /^添加好友$/,                // "添加好友" button
+   356→                    /^关注$/,                    // "关注" button
+   357→                    /^好友$/,                    // "好友" label
+   358→                    /^[|｜·]$/,                  // separators
+   359→                ];
+   360→
+   361→                const isSkippable = (text) => {
+   362→                    if (skipPatterns.some(p => p.test(text))) return true;
+   363→                    // Activity time
+   364→                    if (/天前|小时前|分钟前|刚刚|活跃|在线/.test(text)) return true;
+   365→                    // Social relationship labels
+   366→                    if (/同行|前同事|校友|共同好友/.test(text)) return true;
+   367→                    return false;
+   368→                };
+   369→
+   370→                for (let i = 0; i < textParts.length; i++) {
+   371→                    const part = textParts[i];
+   372→
+   373→                    if (isSkippable(part)) continue;
+   374→
+   375→                    // First short text (2-15 chars, pure CJK/letters) is likely the name
+   376→                    if (!name && part.length >= 2 && part.length <= 15) {
+   377→                        if (/^[\u4e00-\u9fa5a-zA-Z·\s()（）]+$/.test(part)) {
+   378→                            name = part.replace(/[（(][^)）]*[）)]/g, '').trim();
+   379→                            continue;
+   380→                        }
+   381→                    }
+   382→
+   383→                    // After name, next substantial text is company+position
+   384→                    if (name && !company && part.length > 2) {
+   385→                        // Try to split company and position using regex patterns
+   386→                        let splitDone = false;
+   387→                        for (const pattern of jobPatterns) {
+   388→                            const match = part.match(pattern);
+   389→                            if (match && match.index > 0) {
+   390→                                company = part.substring(0, match.index).trim();
+   391→                                title = match[0].trim();
+   392→                                splitDone = true;
+   393→                                break;
+   394→                            }
+   395→                        }
+   396→                        if (!splitDone) {
+   397→                            company = part;
+   398→                        }
+   399→                        continue;
+   400→                    }
+   401→
+   402→                    // Next part is industry|department info
+   403→                    if (name && company && !industry && part.length > 2) {
+   404→                        industry = part;
+   405→                        // If title wasn't split from company, use industry as fallback context
+   406→                        if (!title) {
+   407→                            title = industry;
+   408→                        }
+   409→                        break;
+   410→                    }
+   411→                }
+   412→
+   413→                // Skip if no name found or premium placeholder
+   414→                if (!name) continue;
+   415→                if (name === '脉脉高价值人脉') continue;
+   416→
+   417→                // Extract user ID from DOM patterns on card and ancestor elements.
+   418→                // Two patterns exist:
+   419→                //   1. contactcard_{numeric_id} — on ancestors (colleagues layout)
+   420→                //   2. member_entry_{numeric_id} — on descendants (standard layout)
+   421→                let userId = '';
+   422→
+   423→                // Check ancestors for numeric contactcard_{id}
+   424→                let el = card;
+   425→                while (el) {
+   426→                    const elId = el.id || '';
+   427→                    const ccMatch = elId.match(/^contactcard_(\d+)$/);
+   428→                    if (ccMatch) {
+   429→                        userId = ccMatch[1];
+   430→                        break;
+   431→                    }
+   432→                    el = el.parentElement;
+   433→                }
+   434→
+   435→                // Check descendants for member_entry_{id} (most common pattern)
+   436→                if (!userId) {
+   437→                    const meEl = card.querySelector('[id^="member_entry_"]');
+   438→                    if (meEl) {
+   439→                        const meMatch = meEl.id.match(/^member_entry_(\d+)$/);
+   440→                        if (meMatch) {
+   441→                            userId = meMatch[1];
+   442→                        }
+   443→                    }
+   444→                }
+   445→
+   446→                // Also check ancestor descendants for contactcard with numeric ID
+   447→                if (!userId) {
+   448→                    const ccEl = card.querySelector('[id^="contactcard_"]');
+   449→                    if (ccEl) {
+   450→                        const ccMatch = ccEl.id.match(/^contactcard_(\d+)$/);
+   451→                        if (ccMatch) {
+   452→                            userId = ccMatch[1];
+   453→                        }
+   454→                    }
+   455→                }
+   456→
+   457→                // Use real user_id as maimai_id when available, fall back to hash
+   458→                let maimaiId;
+   459→                if (userId) {
+   460→                    maimaiId = 'mm_' + userId;
+   461→                } else {
+   462→                    const idSource = (name || '') + '|' + (company || '') + '|' + (title || '');
+   463→                    let hash = 0;
+   464→                    for (let j = 0; j < idSource.length; j++) {
+   465→                        const ch = idSource.charCodeAt(j);
+   466→                        hash = ((hash << 5) - hash) + ch;
+   467→                        hash = hash & hash; // Convert to 32bit integer
+   468→                    }
+   469→                    maimaiId = 'mm_' + Math.abs(hash).toString(16).padStart(8, '0');
+   470→                }
+   471→
+   472→                // Skip duplicates based on the computed ID
+   473→                if (seenNames.has(maimaiId)) continue;
+   474→                seenNames.add(maimaiId);
+   475→
+   476→                // Build profile URL from user ID when available
+   477→                let profileUrl = '';
+   478→                if (userId) {
+   479→                    profileUrl = 'https://maimai.cn/contact/detail/' + userId + '?dstu=' + userId;
+   480→                }
+   481→
+   482→                // Fallback: extract profile URL from <a> tags inside the card
+   483→                if (!profileUrl) {
+   484→                    let fallbackUrl = '';
+   485→
+   486→                    // First: check <a> ancestors between img and card
+   487→                    let ancestor = img.parentElement;
+   488→                    while (ancestor && ancestor !== card) {
+   489→                        if (ancestor.tagName === 'A' && ancestor.href) {
+   490→                            const href = ancestor.getAttribute('href') || '';
+   491→                            if (href.includes('/profile/detail') || href.includes('/contact/detail/') || href.includes('/u/') || href.includes('egid=') || href.includes('dstu=')) {
+   492→                                profileUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+   493→                                break;
+   494→                            }
+   495→                        }
+   496→                        ancestor = ancestor.parentElement;
+   497→                    }
+   498→
+   499→                    // Second: search all <a> descendants inside the card
+   500→                    if (!profileUrl) {
+   501→                        const links = card.querySelectorAll('a[href]');
+   502→                        for (const link of links) {
+   503→                            const href = link.getAttribute('href') || '';
+   504→                            if (href.includes('/profile/detail') || href.includes('/contact/detail/') || href.includes('/u/') || href.includes('egid=') || href.includes('dstu=')) {
+   505→                                profileUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+   506→                                break;
+   507→                            }
+   508→                            if (!fallbackUrl && href && !href.startsWith('javascript:') && (href.startsWith('/') || href.includes('maimai.cn'))) {
+   509→                                fallbackUrl = href.startsWith('http') ? href : 'https://maimai.cn' + href;
+   510→                            }
+   511→                        }
+   512→                    }
+   513→                    if (!profileUrl && fallbackUrl) {
+   514→                        profileUrl = fallbackUrl;
+   515→                    }
+   516→                }
+   517→
+   518→                // Extract location: look for remaining short text parts after name/company/title
+   519→                // Common patterns: city names like "北京", "上海", "深圳" etc.
+   520→                let location = '';
+   521→                const locationPatterns = /^(北京|上海|广州|深圳|杭州|成都|南京|武汉|西安|苏州|长沙|天津|重庆|郑州|东莞|青岛|大连|宁波|厦门|合肥|佛山|福州|昆明|济南|珠海|无锡|常州|海外|远程|香港|台北|新加坡|美国|日本|韩国|英国|全国|其他)/;
+   522→                for (let i = 0; i < textParts.length; i++) {
+   523→                    const part = textParts[i];
+   524→                    if (part === name || part === company || part === title || part === industry) continue;
+   525→                    if (isSkippable(part)) continue;
+   526→                    if (locationPatterns.test(part) && part.length <= 10) {
+   527→                        location = part;
+   528→                        break;
+   529→                    }
+   530→                }
+   531→
+   532→                candidates.push({
+   533→                    name: name,
+   534→                    title: title || '',
+   535→                    company: company || '',
+   536→                    maimai_id: maimaiId,
+   537→                    profile_url: profileUrl,
+   538→                    location: location,
+   539→                });
+   540→            }
+   541→
+   542→            return candidates;
+   543→        }''')
+   544→
+   545→        logger.info(f"JavaScript extraction found {len(candidates_data)} candidates")
+   546→
+   547→        for data in candidates_data:
+   548→            if data.get('name'):
+   549→                candidates.append(CandidateBasic(

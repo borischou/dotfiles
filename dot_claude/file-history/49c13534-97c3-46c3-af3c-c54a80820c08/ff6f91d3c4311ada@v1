@@ -1,0 +1,51 @@
+"""Shared captcha detection utility.
+
+Detects captcha elements on page and pauses for manual resolution.
+Boss直聘 may use Geetest slider captcha or similar mechanisms.
+"""
+
+import asyncio
+import sys
+
+from patchright.async_api import Page
+from loguru import logger
+from rich.console import Console
+
+console = Console()
+
+CAPTCHA_SELECTORS = [
+    '[class*="captcha"]',
+    '[class*="verify"]',
+    '[id*="captcha"]',
+    '[class*="slider"]',
+    '[class*="geetest"]',
+    'iframe[src*="captcha"]',
+    '[class*="verify-wrap"]',
+    '[class*="slide-verify"]',
+]
+
+
+async def _async_input() -> str:
+    """Read a line from stdin without blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, sys.stdin.readline)
+
+
+async def check_captcha(page: Page, report_to_rate_limiter: bool = False) -> None:
+    """Detect captcha elements on page and pause for manual resolution."""
+    for selector in CAPTCHA_SELECTORS:
+        try:
+            elem = await page.query_selector(selector)
+            if elem and await elem.is_visible():
+                if report_to_rate_limiter:
+                    from src.utils.rate_limiter import get_rate_limiter
+                    rate_limiter = get_rate_limiter()
+                    rate_limiter.report_captcha()
+
+                console.print("[bold red]Captcha detected! Please solve it in the browser window.[/bold red]")
+                console.print("[dim]Press Enter here after solving the captcha...[/dim]")
+                await _async_input()
+                await page.wait_for_timeout(2000)
+                return
+        except Exception:
+            continue

@@ -1,0 +1,837 @@
+#!/usr/bin/env python
+"""Main CLI entry point for Maimai Assistant."""
+
+# 抑制第三方库 warnings（必须在其他 import 之前）
+import warnings
+import os
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*urllib3.*OpenSSL.*")
+warnings.filterwarnings("ignore", message=".*NotOpenSSLWarning.*")
+os.environ["NODE_NO_WARNINGS"] = "1"
+
+import re
+import sys
+import asyncio
+from pathlib import Path
+
+import click
+from rich.console import Console
+from rich.table import Table
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from src.utils.logger import setup_logger
+from src.utils.config import get_config
+from src.utils.delays import reset_session as reset_delay_session
+from src.exceptions.errors import MaimaiAssistantError
+
+console = Console()
+
+
+def run_async(coro):
+    """Run async function in sync context."""
+    return asyncio.run(coro)
+
+
+def _validate_profile_name(value):
+    """Validate profile name: alphanumeric, hyphens, underscores only."""
+    if value is not None and not re.match(r'^[a-zA-Z0-9_-]+$', value):
+        raise click.BadParameter(f"Profile name must be alphanumeric (hyphens/underscores allowed): {value}")
+    return value
+
+
+def _apply_cdp_endpoint(ctx):
+    """Apply CDP endpoint override from CLI --cdp flag to browser manager."""
+    cdp_endpoint = ctx.obj.get('cdp_endpoint') if ctx.obj else None
+    if cdp_endpoint:
+        from src.core.browser import get_browser_manager
+        get_browser_manager().set_cdp_endpoint(cdp_endpoint)
+
+
+@click.group()
+@click.version_option(version='0.1.0')
+@click.option('--profile', default=None, envvar='MAIMAI_PROFILE',
+              callback=lambda ctx, param, v: _validate_profile_name(v),
+              help='Account profile name for data isolation (e.g. alice, bob)')
+@click.option('--cdp', 'cdp_endpoint', default=None, envvar='MAIMAI_CDP_ENDPOINT',
+              help='CDP endpoint URL (default: http://localhost:9222)')
+@click.pass_context
+def cli(ctx, profile, cdp_endpoint):
+    """
+    Maimai Semi-Automated Recruitment Assistant
+
+    Connects to your Chrome browser via CDP. Start Chrome with:
+
+        /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222
+
+    Then log in to Maimai manually before running commands.
+
+    Use --profile to isolate data for multiple accounts:
+
+        maimai --profile alice pipeline -k "前端" -t greeting -p 2
+    """
+    try:
+        # Apply profile BEFORE logger init (profile redirects log_dir)
+        if profile:
+            from src.utils.config import apply_profile
+            apply_profile(profile)
+
+        # Initialize logging (reads data.log_dir from config)
+        setup_logger()
+        ctx.ensure_object(dict)
+        ctx.obj['cdp_endpoint'] = cdp_endpoint
+        ctx.obj['profile'] = profile
+    except Exception as e:
+        console.print(f"[red]Failed to initialize application: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+@click.pass_context
+def login(ctx):
+    """
+    Verify login status via CDP connection.
+
+    Connects to your Chrome browser and checks if you're logged in to Maimai.
+    If not, waits for you to log in manually in the browser.
+
+    First, start Chrome with remote debugging:
+
+        /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222
+
+    Then log in to Maimai in that Chrome window.
+    """
+    from src.modules.auth import login as do_login
+    from src.core.browser import get_browser_manager
+
+    _apply_cdp_endpoint(ctx)
+
+    async def _login():
+        browser = get_browser_manager()
+        try:
+            success = await do_login(browser)
+            if success:
+                console.print("[green]Login verified![/green]")
+            else:
+                console.print("[red]Login failed or timed out.[/red]")
+                sys.exit(1)
+        finally:
+            await browser.close()
+
+    run_async(_login())
+
+
+@cli.command()
+@click.option('--keywords', '-k', required=True, multiple=True, help='Search keywords (can specify multiple times)')
+@click.option('--company', '-c', multiple=True, help='Filter by company name (can specify multiple)')
+@click.option('--location', '-l', help='Filter by location')
+@click.option('--max-pages', '-p', type=int, default=1, help='Maximum pages to scrape per keyword')
+@click.option('--mode', '-m', type=click.Choice(['search_center', 'enterprise', 'talent_bank', 'recruit_manage']), default='search_center',
+              help='Search mode: search_center (default), enterprise, or talent_bank')
+@click.option('--export', '-e', help='Export results to file (Excel/CSV)')
+@click.option('--auto-filter/--no-auto-filter', default=True, help='Auto filter low-quality candidates')
+@click.pass_context
+def search(ctx, keywords, company, location, max_pages, mode, export, auto_filter):
+    """
+    Search for candidates with specified criteria.
+
+    Supports multiple keywords - each will be searched separately and results merged.
+
+    Use --mode enterprise for the enterprise recruitment tab.
+    Use --mode talent_bank for the talent bank path.
+    Use --mode recruit_manage for the recruit manage path (standard paid accounts).
+
+    Examples:\n
+        maimai search -k "高级前端工程师" -c "阿里巴巴" --max-pages 3\n
+        maimai search -k "前端工程师" -k "React开发" -k "Vue工程师" -p 2\n
+        maimai search -k "研发" -m enterprise\n
+        maimai search -k "算法" -m talent_bank\n
+        maimai search -k "安卓" -m recruit_manage
+    """
+    from src.modules.export import export_candidates
+    from src.core.browser import get_browser_manager
+    from src.services.pipeline import search_all_keywords, search_all_keywords_enterprise, search_all_keywords_talent_bank, search_all_keywords_recruit_manage
+
+    _apply_cdp_endpoint(ctx)
+
+    async def _search():
+        reset_delay_session()
+        browser = get_browser_manager()
+        try:
+            if mode == 'enterprise':
+                all_candidates, seen_ids = await search_all_keywords_enterprise(
+                    browser, keywords, company, max_pages
+                )
+            elif mode == 'talent_bank':
+                all_candidates, seen_ids = await search_all_keywords_talent_bank(
+                    browser, keywords, company, max_pages
+                )
+            elif mode == 'recruit_manage':
+                all_candidates, seen_ids = await search_all_keywords_recruit_manage(
+                    browser, keywords, company, max_pages
+                )
+            else:
+                all_candidates, seen_ids = await search_all_keywords(
+                    browser, keywords, company, location, max_pages
+                )
+
+            # Apply auto-filter
+            if auto_filter:
+                from src.utils.filters import filter_candidates
+                before_count = len(all_candidates)
+                # Convert to dict for filtering
+                candidates_dict = [
+                    {
+                        'maimai_id': c.maimai_id,
+                        'name': c.name,
+                        'title': c.title,
+                        'company': c.company,
+                        'location': c.location,
+                    }
+                    for c in all_candidates
+                ]
+                filtered_dict = filter_candidates(candidates_dict, auto_filter=True)
+
+                # Filter original list
+                filtered_ids = {c['maimai_id'] for c in filtered_dict}
+                all_candidates = [c for c in all_candidates if c.maimai_id in filtered_ids]
+
+                if len(all_candidates) < before_count:
+                    console.print(f"[dim]自动过滤: {before_count} → {len(all_candidates)} 位候选人[/dim]\n")
+
+            # Display combined results
+            if all_candidates:
+                table = Table(title=f"Search Results ({len(all_candidates)} candidates total)")
+                table.add_column("Name", style="cyan")
+                table.add_column("Title", style="green")
+                table.add_column("Company", style="yellow")
+                table.add_column("Location", style="blue")
+                table.add_column("ID", style="dim")
+
+                for c in all_candidates[:30]:  # Show first 30
+                    table.add_row(c.name, c.title, c.company, c.location or '', c.maimai_id)
+
+                console.print(table)
+
+                if len(all_candidates) > 30:
+                    console.print(f"[dim]... and {len(all_candidates) - 30} more[/dim]")
+            else:
+                console.print("[yellow]No candidates found for any keyword.[/yellow]")
+
+            # Export if requested
+            if export and all_candidates:
+                fmt = 'csv' if export.endswith('.csv') else 'excel'
+                export_candidates(format=fmt, output_path=export)
+
+        finally:
+            await browser.close()
+
+    run_async(_search())
+
+
+@cli.command()
+@click.argument('maimai_id')
+@click.pass_context
+def profile(ctx, maimai_id):
+    """
+    Extract detailed profile for a candidate.
+
+    Example:
+        maimai profile abc123
+    """
+    from src.modules.profile import extract_profile
+    from src.core.browser import get_browser_manager
+
+    _apply_cdp_endpoint(ctx)
+
+    async def _profile():
+        browser = get_browser_manager()
+        try:
+            await extract_profile(maimai_id, browser)
+        finally:
+            await browser.close()
+
+    run_async(_profile())
+
+
+@cli.command()
+@click.argument('maimai_id')
+@click.option('--template', '-t', required=True, help='Message template name')
+@click.option('--preview', is_flag=True, help='Preview only, do not send')
+@click.option('--var', '-v', multiple=True, help='Template variable (format: key=value)')
+@click.option('--interactive', '-i', is_flag=True, help='Enable interactive selector discovery when auto-detection fails')
+@click.pass_context
+def message(ctx, maimai_id, template, preview, var, interactive):
+    """
+    Send message to a candidate (requires confirmation).
+
+    Example:
+        maimai message abc123 -t greeting -v name=张三 -v recruiter_name=李四
+        maimai message abc123 -t follow_up --preview
+        maimai message abc123 -t greeting -i
+    """
+    from src.modules.message import send_message, preview_message
+    from src.core.browser import get_browser_manager
+
+    # Parse variables
+    variables = _parse_variables(var)
+
+    if preview:
+        # Just preview, no send
+        preview_message(template, variables)
+        return
+
+    _apply_cdp_endpoint(ctx)
+
+    async def _message():
+        browser = get_browser_manager()
+        try:
+            discovered_selectors = None
+            if interactive:
+                from src.modules.selector_discovery import DiscoveredSelectors
+                discovered_selectors = DiscoveredSelectors()
+
+            success = await send_message(
+                maimai_id=maimai_id,
+                template_name=template,
+                variables=variables,
+                browser=browser,
+                interactive=interactive,
+                discovered_selectors=discovered_selectors,
+            )
+            if not success:
+                sys.exit(1)
+        finally:
+            await browser.close()
+
+    run_async(_message())
+
+
+@cli.command()
+@click.option('--keywords', '-k', multiple=True, help='Search keywords (can specify multiple)')
+@click.option('--template', '-t', help='Message template name')
+@click.option('--var', '-v', multiple=True, help='Template variable (format: key=value)')
+@click.option('--company', '-c', multiple=True, help='Filter by company name (can specify multiple)')
+@click.option('--location', '-l', help='Filter by location')
+@click.option('--max-pages', '-p', type=int, default=1, help='Max pages to scrape per keyword')
+@click.option('--mode', '-m', type=click.Choice(['search_center', 'enterprise', 'talent_bank', 'recruit_manage']), default='search_center',
+              help='Search mode: search_center (default), enterprise, or talent_bank')
+@click.option('--dry-run', is_flag=True, help='Search only, do not send messages')
+@click.option('--skip-messaged/--no-skip-messaged', default=True, help='Skip already messaged candidates')
+@click.option('--batch-pages', '-b', type=int, default=0, help='Send messages every N pages (0 = send after all pages)')
+@click.option('--interactive', '-i', is_flag=True, help='Enable interactive selector discovery when auto-detection fails')
+@click.option('--resume', is_flag=True, help='Resume from last checkpoint')
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompt (auto-confirm send)')
+@click.option('--preview', is_flag=True, help='Preview first 3 messages without sending (exits after preview)')
+@click.option('--auto-filter/--no-auto-filter', default=True, help='Auto filter low-quality candidates')
+@click.option('--exchange-phone/--no-exchange-phone', default=False, help='Exchange phone number after sending (default ON in talent_bank mode)')
+@click.option('--exchange-wechat/--no-exchange-wechat', default=False, help='Exchange WeChat after sending (default ON in talent_bank mode)')
+@click.option('--min-years', type=int, default=None, help='Minimum work years filter (talent_bank/recruit_manage)')
+@click.option('--max-years', type=int, default=None, help='Maximum work years threshold (recruit_manage only, e.g. 5 selects up to 5-10年)')
+@click.option('--title', '-j', multiple=True, help='Strict title filter: only keep candidates whose title contains one of these keywords')
+@click.pass_context
+def pipeline(ctx, keywords, template, var, company, location, max_pages, mode, dry_run, skip_messaged, batch_pages, interactive, resume, yes, preview, auto_filter, exchange_phone, exchange_wechat, min_years, max_years, title):
+    """
+    Search candidates and batch send messages in one command.
+
+    Combines multi-keyword search with batch messaging:
+    search → preview → confirm → send.
+
+    Use --mode enterprise for the enterprise recruitment path with inline messaging.
+    Use --mode talent_bank for the talent bank path with inline messaging.
+    Use --mode recruit_manage for the recruit manage path (standard paid accounts).
+
+    Use --batch-pages to interleave search and messaging every N pages.
+    Example: -p 10 --batch-pages 2 searches pages 1-2, sends messages,
+    then pages 3-4, sends messages, etc.
+
+    Use --resume to continue from the last interrupted pipeline run.
+
+    Examples:\n
+        maimai pipeline -k "前端工程师" -t greeting -v "recruiter_name=张三" -p 2\n
+        maimai pipeline -k "前端" -k "后端" -t greeting -v "recruiter_name=张三" --dry-run\n
+        maimai pipeline -k "前端" -t greeting -p 10 --batch-pages 2\n
+        maimai pipeline -k "前端" -t greeting -p 1 -i\n
+        maimai pipeline -k "研发" -t greeting -m enterprise -p 3\n
+        maimai pipeline -k "算法" -t greeting -m talent_bank -p 2\n
+        maimai pipeline -k "安卓" -t jd_live -m recruit_manage -p 1\n
+        maimai pipeline --resume
+    """
+    from src.core.browser import get_browser_manager
+    from src.utils.checkpoint import CheckpointManager
+    from src.services.pipeline import run_pipeline_default, run_pipeline_batched, SearchMode, search_all_keywords_recruit_manage
+
+    # Handle resume mode
+    if resume:
+        ckpt = CheckpointManager.load_latest()
+        if ckpt is None:
+            console.print("[red]No checkpoint found to resume from.[/red]")
+            return
+
+        from rich.panel import Panel
+        console.print(Panel(ckpt.summary, title="Resuming Pipeline", border_style="cyan"))
+
+        p = ckpt.params
+        keywords = tuple(p.get('keywords', []))
+        template = p.get('template', template)
+        variables = p.get('variables', {})
+        company = tuple(p.get('company', []))
+        location = p.get('location', location)
+        max_pages = p.get('max_pages', max_pages)
+        batch_pages = p.get('batch_pages', batch_pages)
+        skip_messaged = p.get('skip_messaged', skip_messaged)
+        interactive = p.get('interactive', interactive)
+        mode = p.get('mode', mode)
+        dry_run = p.get('dry_run', dry_run)
+        exchange_phone = p.get('exchange_phone', exchange_phone)
+        exchange_wechat = p.get('exchange_wechat', exchange_wechat)
+        min_years = p.get('min_years', min_years)
+        max_years = p.get('max_years', max_years)
+    else:
+        ckpt = None
+        variables = _parse_variables(var)
+
+    if not keywords or not template:
+        console.print("[red]--keywords (-k) and --template (-t) are required (or use --resume).[/red]")
+        return
+
+    # Resolve SearchMode enum
+    search_mode = SearchMode(mode)
+
+    # Talent bank and recruit_manage default to exchanging phone & WeChat
+    if search_mode in (SearchMode.TALENT_BANK, SearchMode.RECRUIT_MANAGE):
+        exchange_phone = True
+        exchange_wechat = True
+
+    if search_mode in (SearchMode.ENTERPRISE, SearchMode.TALENT_BANK, SearchMode.RECRUIT_MANAGE) and batch_pages > 0:
+        console.print(f"[yellow]Note: --batch-pages with {search_mode.value} mode uses infinite scroll; "
+                      f"each batch opens a fresh search. Deduplication prevents re-messaging.[/yellow]")
+
+    _apply_cdp_endpoint(ctx)
+
+    async def _pipeline():
+        from src.modules.auth import ensure_logged_in
+        from src.services.pipeline import search_all_keywords, search_all_keywords_enterprise, search_all_keywords_talent_bank
+        from src.modules.message import render_template
+        from src.utils.config import get_config
+        from rich.panel import Panel
+
+        reset_delay_session()
+        browser = get_browser_manager()
+        try:
+            await ensure_logged_in(browser)
+
+            # Preview mode: search and show first 3 messages
+            if preview:
+                console.print("[cyan]Preview 模式: 搜索并预览前 3 条消息[/cyan]\n")
+
+                if mode == 'enterprise':
+                    all_candidates, _ = await search_all_keywords_enterprise(
+                        browser, keywords, company, min(max_pages, 1)
+                    )
+                elif mode == 'talent_bank':
+                    all_candidates, _ = await search_all_keywords_talent_bank(
+                        browser, keywords, company, min(max_pages, 1),
+                        min_years=min_years,
+                    )
+                elif mode == 'recruit_manage':
+                    all_candidates, _ = await search_all_keywords_recruit_manage(
+                        browser, keywords, company, min(max_pages, 1),
+                        min_years=min_years, max_years=max_years,
+                    )
+                else:
+                    all_candidates, _ = await search_all_keywords(
+                        browser, keywords, company, location, min(max_pages, 1)
+                    )
+
+                if not all_candidates:
+                    console.print("[yellow]没有找到候选人[/yellow]")
+                    return
+
+                # Apply auto-filter
+                if auto_filter:
+                    from src.utils.filters import filter_candidates
+                    before_count = len(all_candidates)
+                    candidates_dict = [
+                        {
+                            'maimai_id': c.maimai_id,
+                            'name': c.name,
+                            'title': c.title,
+                            'company': c.company,
+                        }
+                        for c in all_candidates
+                    ]
+                    filtered_dict = filter_candidates(candidates_dict, auto_filter=True)
+                    filtered_ids = {c['maimai_id'] for c in filtered_dict}
+                    all_candidates = [c for c in all_candidates if c.maimai_id in filtered_ids]
+
+                    if len(all_candidates) < before_count:
+                        console.print(f"[dim]自动过滤: {before_count} → {len(all_candidates)} 位候选人[/dim]\n")
+
+                    if not all_candidates:
+                        console.print("[yellow]过滤后没有符合条件的候选人[/yellow]")
+                        return
+
+                # Load template
+                config = get_config()
+                tmpl = config.get_template(template)
+
+                # Show first 3 candidates with rendered messages
+                preview_count = min(3, len(all_candidates))
+                console.print(f"[bold]预览前 {preview_count} 位候选人的消息:[/bold]\n")
+
+                for i, c in enumerate(all_candidates[:preview_count], 1):
+                    msg_vars = {
+                        **variables,
+                        'name': c.name,
+                        'company': c.company,
+                        'position': c.title,
+                    }
+                    try:
+                        rendered = render_template(tmpl['content'], msg_vars)
+                        console.print(f"[bold cyan]#{i} {c.name}[/bold cyan] - {c.title} @ {c.company}")
+                        console.print(Panel(rendered, title="消息预览", border_style="green"))
+                        console.print()
+                    except Exception as e:
+                        console.print(f"[red]渲染失败: {e}[/red]\n")
+
+                console.print(f"[dim]总共找到 {len(all_candidates)} 位候选人[/dim]")
+                console.print("[yellow]Preview 完成，使用 --dry-run 搜索所有页面但不发送[/yellow]")
+                return
+
+            if batch_pages > 0:
+                await run_pipeline_batched(
+                    browser, keywords, company, location,
+                    max_pages, batch_pages, template, variables,
+                    dry_run, skip_messaged, interactive, ckpt,
+                    mode=search_mode,
+                    skip_confirmation=yes,
+                    exchange_phone=exchange_phone,
+                    exchange_wechat=exchange_wechat,
+                    min_years=min_years,
+                    max_years=max_years,
+                    title_filters=list(title),
+                )
+            else:
+                await run_pipeline_default(
+                    browser, keywords, company, location,
+                    max_pages, template, variables,
+                    dry_run, skip_messaged, interactive,
+                    mode=search_mode,
+                    skip_confirmation=yes,
+                    exchange_phone=exchange_phone,
+                    exchange_wechat=exchange_wechat,
+                    min_years=min_years,
+                    max_years=max_years,
+                    title_filters=list(title),
+                )
+        finally:
+            await browser.close()
+
+    run_async(_pipeline())
+
+
+@cli.command()
+@click.option('--output', '-o', required=True, help='Output file path')
+@click.option('--format', '-f', 'fmt', type=click.Choice(['xlsx', 'csv']), default='xlsx', help='Export format')
+@click.option('--no-messages', is_flag=True, help='Exclude message history')
+def export(output, fmt, no_messages):
+    """
+    Export candidate data to Excel or CSV.
+
+    Example:
+        maimai export -o candidates_2026.xlsx
+        maimai export -o data.csv -f csv --no-messages
+    """
+    from src.modules.export import export_candidates
+
+    format_map = {'xlsx': 'excel', 'csv': 'csv'}
+    export_candidates(
+        format=format_map[fmt],
+        output_path=output,
+        include_messages=not no_messages
+    )
+
+
+@cli.command()
+def templates():
+    """List all available message templates."""
+    try:
+        config = get_config()
+        template_list = config.list_templates()
+
+        console.print("\n[bold cyan]Available Message Templates:[/bold cyan]\n")
+
+        table = Table()
+        table.add_column("Name", style="green")
+        table.add_column("Description")
+        table.add_column("Variables", style="dim")
+
+        for name in template_list:
+            template = config.get_template(name)
+            variables = ', '.join(template.get('variables', []))
+            table.add_row(
+                name,
+                template.get('description', 'No description'),
+                variables
+            )
+
+        console.print(table)
+        console.print(f"\n[dim]Total: {len(template_list)} templates[/dim]\n")
+
+    except Exception as e:
+        console.print(f"[red]Error loading templates: {e}[/red]")
+
+
+@cli.command()
+def logout():
+    """Clear saved session and log out."""
+    from src.core.session import get_session_manager
+
+    async def _logout():
+        session_manager = get_session_manager()
+        await session_manager.clear()
+        console.print("[green]Session cleared. You will need to log in again.[/green]")
+
+    run_async(_logout())
+
+
+@cli.command()
+@click.pass_context
+def status(ctx):
+    """
+    快速查看系统状态.
+
+    显示:
+    - Chrome 连接状态
+    - 脉脉登录状态
+    - 联系券余额
+    - 今日操作统计
+    - 数据库概况
+
+    Example:
+        maimai status
+    """
+    from src.core.browser import get_browser_manager
+    from src.modules.auth import check_login_status
+    from src.modules.message import fetch_contact_quota
+    from src.utils.rate_limiter import get_rate_limiter
+    from src.models.database import Candidate, Message, get_db_manager
+    from rich.table import Table
+
+    _apply_cdp_endpoint(ctx)
+
+    async def _check_status():
+        browser = get_browser_manager()
+        db_manager = get_db_manager()
+        rate_limiter = get_rate_limiter()
+
+        console.print("\n[bold cyan]系统状态检查[/bold cyan]\n")
+
+        status_table = Table(show_header=False, box=None)
+        status_table.add_column("Item", style="bold", width=20)
+        status_table.add_column("Status")
+
+        try:
+            # Chrome 连接
+            await browser.start()
+            chrome_status = "✅ 已连接" if browser.is_running else "❌ 未连接"
+            status_table.add_row("Chrome 连接", chrome_status)
+
+            if browser.is_running:
+                # 登录状态
+                logged_in = await check_login_status(browser.page)
+                login_status = "✅ 已登录" if logged_in else "❌ 未登录"
+                status_table.add_row("脉脉登录", login_status)
+
+                # 联系券余额
+                if logged_in:
+                    try:
+                        quota = await fetch_contact_quota(browser)
+                        if quota:
+                            uh_left = quota.get('uh_left', '?')
+                            quota_status = f"{uh_left} 张"
+                            if isinstance(uh_left, int) and uh_left <= 10:
+                                quota_status = f"[yellow]{quota_status} (余量不足)[/yellow]"
+                            status_table.add_row("联系券余额", quota_status)
+                    except Exception as e:
+                        status_table.add_row("联系券余额", f"[dim]查询失败: {e}[/dim]")
+
+            await browser.close()
+
+        except Exception as e:
+            status_table.add_row("Chrome 连接", f"[red]✗ 连接失败: {e}[/red]")
+
+        console.print(status_table)
+        console.print()
+
+        # 今日统计
+        console.print("[bold cyan]今日操作统计[/bold cyan]\n")
+        stats_table = Table(show_header=False, box=None)
+        stats_table.add_column("Action", style="bold", width=20)
+        stats_table.add_column("Count")
+
+        for action_type in ['search', 'view_profile', 'send_message']:
+            quota_status = rate_limiter.get_quota_status(action_type)
+            used = quota_status['hourly']['used']
+            hourly_limit = quota_status['hourly']['limit']
+            daily_used = quota_status['daily']['used']
+            daily_limit = quota_status['daily']['limit']
+
+            action_names = {
+                'search': '搜索',
+                'view_profile': '查看简历',
+                'send_message': '发送消息'
+            }
+            stats_table.add_row(
+                action_names[action_type],
+                f"今日: {daily_used}/{daily_limit}  本小时: {used}/{hourly_limit}"
+            )
+
+        console.print(stats_table)
+        console.print()
+
+        # 数据库统计
+        console.print("[bold cyan]数据库概况[/bold cyan]\n")
+        db_table = Table(show_header=False, box=None)
+        db_table.add_column("Metric", style="bold", width=20)
+        db_table.add_column("Value")
+
+        with db_manager.session_scope() as session:
+            total_candidates = session.query(Candidate).count()
+            messaged_count = session.query(Message.candidate_maimai_id).filter_by(status='sent').distinct().count()
+
+            db_table.add_row("候选人总数", str(total_candidates))
+            db_table.add_row("已沟通", str(messaged_count))
+            if total_candidates > 0:
+                coverage = messaged_count / total_candidates * 100
+                db_table.add_row("覆盖率", f"{coverage:.1f}%")
+
+        console.print(db_table)
+        console.print()
+
+    run_async(_check_status())
+
+
+@cli.command()
+@click.option('--limit', '-n', default=10, type=int, help='显示数量 (默认 10)')
+def recent(limit):
+    """
+    查看最近添加的候选人.
+
+    Example:
+        maimai recent
+        maimai recent -n 20
+    """
+    from src.models.database import Candidate, get_db_manager
+    from rich.table import Table
+
+    db_manager = get_db_manager()
+
+    with db_manager.session_scope() as session:
+        candidates = session.query(Candidate)\
+            .order_by(Candidate.first_seen.desc())\
+            .limit(limit).all()
+
+        if not candidates:
+            console.print("[yellow]数据库中还没有候选人[/yellow]")
+            return
+
+        console.print(f"\n[bold cyan]最近 {len(candidates)} 位候选人[/bold cyan]\n")
+
+        table = Table()
+        table.add_column("#", style="dim", justify="right", width=4)
+        table.add_column("姓名", style="cyan", width=12)
+        table.add_column("职位", style="green", width=25)
+        table.add_column("公司", style="yellow", width=20)
+        table.add_column("添加时间", style="blue", width=16)
+
+        for i, c in enumerate(candidates, 1):
+            table.add_row(
+                str(i),
+                c.name,
+                c.title or '[dim]未知[/dim]',
+                c.company or '[dim]未知[/dim]',
+                c.first_seen.strftime("%Y-%m-%d %H:%M") if c.first_seen else '[dim]N/A[/dim]'
+            )
+
+        console.print(table)
+        console.print()
+
+
+@cli.command()
+def duplicates():
+    """
+    查找重复的候选人.
+
+    按姓名+公司分组，显示重复项。
+
+    Example:
+        maimai duplicates
+    """
+    from src.models.database import Candidate, get_db_manager
+    from sqlalchemy import func
+    from rich.table import Table
+
+    db_manager = get_db_manager()
+
+    with db_manager.session_scope() as session:
+        # 按 name + company 分组，找出重复项
+        duplicates_query = session.query(
+            Candidate.name,
+            Candidate.company,
+            func.count(Candidate.id).label('count')
+        ).group_by(Candidate.name, Candidate.company)\
+         .having(func.count(Candidate.id) > 1)\
+         .all()
+
+        if not duplicates_query:
+            console.print("[green]✓ 没有发现重复的候选人[/green]")
+            return
+
+        console.print(f"\n[yellow]发现 {len(duplicates_query)} 组重复候选人:[/yellow]\n")
+
+        table = Table()
+        table.add_column("姓名", style="cyan")
+        table.add_column("公司", style="yellow")
+        table.add_column("重复次数", style="red", justify="right")
+
+        for name, company, count in duplicates_query:
+            table.add_row(name, company or '[dim]未知[/dim]', f"×{count}")
+
+        console.print(table)
+        console.print()
+        console.print("[dim]提示: 使用数据库工具手动清理重复项[/dim]")
+
+
+def _parse_variables(var: tuple) -> dict:
+    """Parse key=value variable pairs from CLI option."""
+    variables = {}
+    for v in var:
+        if '=' in v:
+            key, value = v.split('=', 1)
+            variables[key.strip()] = value.strip()
+        else:
+            console.print(f"[yellow]Warning: ignoring malformed variable '{v}' (expected key=value format)[/yellow]")
+    return variables
+
+
+def main():
+    """Main entry point."""
+    try:
+        cli()
+    except MaimaiAssistantError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Operation cancelled by user[/yellow]")
+        sys.exit(0)
+    except Exception as e:
+        console.print(f"[red]Unexpected error: {e}[/red]")
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

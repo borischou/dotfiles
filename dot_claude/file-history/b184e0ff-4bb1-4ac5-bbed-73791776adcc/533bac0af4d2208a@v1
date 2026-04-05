@@ -1,0 +1,40 @@
+# Lessons Learned
+
+项目经验教训记录，防止重复犯错。由 /lessons skill 维护。
+
+---
+
+### L001 - 2026-03-04
+
+- **问题**: XSS 修复跨 4 轮 review（R3: 6 处, R4: 2 处, R5: 2 处），每次都遗漏
+- **根因**: 逐文件人工排查 `HTMLResponse`，容易漏掉新增或不常触发的路由（如 settings JSONDecodeError）
+- **修复**: R3-R5 陆续补全了所有 `HTMLResponse` 错误消息的 `html.escape()`
+- **规则**: 修 XSS 时必须 `grep -r 'HTMLResponse.*f["\x27]' src/web/routes/` 全量扫描，不能逐文件凭记忆修；新增路由时优先用 Jinja2 模板渲染，避免 `HTMLResponse(f'...')` 模式
+
+### L002 - 2026-03-04
+
+- **问题**: naive/aware datetime 混用跨 3 轮修复（R1 大修, R4 发现 3 处遗漏）
+- **根因**: SQLite 读回的 datetime 是 naive 的，而代码中 `datetime.now(timezone.utc)` 是 aware 的，两者相减 TypeError
+- **修复**: R4 新增 `_ensure_aware()` 统一处理 SQLite 返回值
+- **规则**: 所有 datetime 操作统一用 `datetime.now(timezone.utc)`；从 SQLite 读回的 datetime 必须过 `_ensure_aware()` 转换；文件命名等本地时间场景用 `datetime.now()` 需加注释说明是 intentional
+
+### L003 - 2026-03-04
+
+- **问题**: R2 修复 `_ensure_lock()` 解决了依赖 Python `_loop` 私有属性的问题，但修复本身引入了新的竞态条件
+- **根因**: 多个 coroutine 可能同时检测到 event loop 变化并同时创建新 lock，修复时只关注了原问题没考虑并发
+- **修复**: R5 用 `_init_lock`（threading.Lock）+ 双重检查锁保护 lock 重建
+- **规则**: 修复并发/锁相关代码时，必须考虑"修复代码本身"的并发安全性；涉及 class-level mutable state 的写操作都要加锁
+
+### L004 - 2026-03-04
+
+- **问题**: `anti_detection.py` 模块定义了 3 个公共函数但全项目零引用，存在 4 轮 review 才最终删除
+- **根因**: R2 标记为待处理（"应该启用"），但实际上 message.py 直接用 Playwright 原生 API，anti_detection 从未被接入
+- **修复**: R5 确认零引用后直接删除整个模块
+- **规则**: 预留代码超过 2 轮 review 未被接入，直接删除而非继续标记"待启用"；代码应该 earn its place，不需要的就删
+
+### L005 - 2026-03-04
+
+- **问题**: `settings.py` 接受任意 JSON 写入 `settings.json`，可覆盖 `cdp_endpoint` 等安全关键配置
+- **根因**: Web 配置编辑器只校验了 JSON 语法合法性，没有 schema 校验
+- **修复**: 新增必要 key 集合校验 + 类型检查
+- **规则**: 任何接受用户输入并写入磁盘/修改运行时状态的接口，必须有 schema 校验，不能只验格式

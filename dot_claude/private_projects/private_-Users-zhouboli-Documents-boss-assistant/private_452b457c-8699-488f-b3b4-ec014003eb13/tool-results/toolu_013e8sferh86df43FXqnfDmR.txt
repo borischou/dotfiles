@@ -1,0 +1,290 @@
+     1→     1→     1→"""Export module for exporting candidate data.
+     2→     2→     2→
+     3→     3→     3→Supports Excel (.xlsx) and CSV formats with optional
+     4→     4→     4→message history inclusion.
+     5→     5→     5→"""
+     6→     6→     6→
+     7→     7→     7→from datetime import datetime
+     8→     8→     8→from pathlib import Path
+     9→     9→     9→from typing import Optional, Literal, List, Dict, Any
+    10→    10→    10→
+    11→    11→    11→import pandas as pd
+    12→    12→    12→from openpyxl import Workbook
+    13→    13→    13→from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    14→    14→    14→from openpyxl.utils.dataframe import dataframe_to_rows
+    15→    15→    15→from loguru import logger
+    16→    16→    16→from rich.console import Console
+    17→    17→    17→
+    18→    18→    18→from src.utils.config import get_config
+    19→    19→    19→from src.models.database import Candidate, Message, get_db_manager
+    20→    20→    20→
+    21→    21→    21→console = Console()
+    22→    22→    22→
+    23→    23→    23→
+    24→    24→    24→def export_candidates(
+    25→    25→    25→    output_format: Literal["excel", "xlsx", "csv"] = "excel",
+    26→    26→    26→    output_path: Optional[str] = None,
+    27→    27→    27→    include_messages: bool = True
+    28→    28→    28→) -> str:
+    29→    29→    29→    """
+    30→    30→    30→    Export candidate data to Excel or CSV.
+    31→    31→    31→
+    32→    32→    32→    Args:
+    33→    33→    33→        output_format: Export format ('excel', 'xlsx', or 'csv')
+    34→    34→    34→        output_path: Output file path (auto-generated if None)
+    35→    35→    35→        include_messages: Include message history
+    36→    36→    36→
+    37→    37→    37→    Returns:
+    38→    38→    38→        Path to exported file
+    39→    39→    39→    """
+    40→    40→    40→    config = get_config()
+    41→    41→    41→    db_manager = get_db_manager()
+    42→    42→    42→
+    43→    43→    43→    if output_format == "xlsx":
+    44→    44→    44→        output_format = "excel"
+    45→    45→    45→
+    46→    46→    46→    if output_path is None:
+    47→    47→    47→        export_dir = Path(config.get('data.export_dir', 'data/exports'))
+    48→    48→    48→        export_dir.mkdir(parents=True, exist_ok=True)
+    49→    49→    49→        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    50→    50→    50→        extension = 'xlsx' if output_format == 'excel' else 'csv'
+    51→    51→    51→        output_path = str(export_dir / f"candidates_{timestamp}.{extension}")
+    52→    52→    52→
+    53→    53→    53→    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    54→    54→    54→
+    55→    55→    55→    candidates_data = _get_candidates_data(db_manager, include_messages)
+    56→    56→    56→
+    57→    57→    57→    if not candidates_data:
+    58→    58→    58→        console.print("[yellow]No candidates to export[/yellow]")
+    59→    59→    59→        return ""
+    60→    60→    60→
+    61→    61→    61→    df = _create_dataframe(candidates_data)
+    62→    62→    62→
+    63→    63→    63→    if output_format == "excel":
+    64→    64→    64→        _export_to_excel(df, output_path)
+    65→    65→    65→    else:
+    66→    66→    66→        _export_to_csv(df, output_path)
+    67→    67→    67→
+    68→    68→    68→    console.print(f"[green]Exported {len(candidates_data)} candidates to: {output_path}[/green]")
+    69→    69→    69→    return output_path
+    70→    70→    70→
+    71→    71→    71→
+    72→    72→    72→def _get_candidates_data(db_manager, include_messages: bool) -> List[Dict[str, Any]]:
+    73→    73→    73→    """Get candidate data from database."""
+    74→    74→    74→    with db_manager.session_scope() as session:
+    75→    75→    75→        candidates = session.query(Candidate).all()
+    76→    76→    76→
+    77→    77→    77→        data = []
+    78→    78→    78→        for candidate in candidates:
+    79→    79→    79→            record = {
+    80→    80→    80→                'boss_id': candidate.boss_id,
+    81→    81→    81→                'name': candidate.name,
+    82→    82→    82→                'title': candidate.title,
+    83→    83→    83→                'company': candidate.company,
+    84→    84→    84→                'location': candidate.location,
+    85→    85→    85→                'salary_expect': candidate.salary_expect,
+    86→    86→    86→                'work_years': candidate.work_years,
+    87→    87→    87→                'education_level': candidate.education_level,
+    88→    88→    88→                'profile_url': candidate.profile_url,
+    89→    89→    89→                'first_seen': candidate.first_seen,
+    90→    90→    90→                'last_updated': candidate.last_updated,
+    91→    91→    91→                'source_search': candidate.source_search,
+    92→    92→    92→            }
+    93→    93→    93→
+    94→    94→    94→            # Flatten education
+    95→    95→    95→            education = candidate.education or []
+    96→    96→    96→            if education:
+    97→    97→    97→                latest_edu = education[0]
+    98→    98→    98→                record['latest_education'] = _format_education(latest_edu)
+    99→    99→    99→            else:
+   100→   100→   100→                record['latest_education'] = ''
+   101→   101→   101→
+   102→   102→   102→            # Flatten work experience
+   103→   103→   103→            work_exp = candidate.work_experience or []
+   104→   104→   104→            if work_exp:
+   105→   105→   105→                latest_work = work_exp[0]
+   106→   106→   106→                record['latest_experience'] = _format_work_experience(latest_work)
+   107→   107→   107→            else:
+   108→   108→   108→                record['latest_experience'] = ''
+   109→   109→   109→
+   110→   110→   110→            # Format skills
+   111→   111→   111→            skills = candidate.skills or []
+   112→   112→   112→            record['skills'] = ', '.join(skills) if skills else ''
+   113→   113→   113→
+   114→   114→   114→            data.append(record)
+   115→   115→   115→
+   116→   116→   116→        # Batch-fetch message info to avoid N+1 queries
+   117→   117→   117→        if include_messages and data:
+   118→   118→   118→            from sqlalchemy import func
+   119→   119→   119→
+   120→   120→   120→            boss_ids = [r['boss_id'] for r in data]
+   121→   121→   121→            # Get message counts and latest message per candidate in bulk
+   122→   122→   122→            msg_counts = {}
+   123→   123→   123→            latest_msgs = {}
+   124→   124→   124→
+   125→   125→   125→            # Count messages per candidate
+   126→   126→   126→            count_rows = session.query(
+   127→   127→   127→                Message.candidate_boss_id,
+   128→   128→   128→                func.count(Message.id).label('cnt')
+   129→   129→   129→            ).filter(
+   130→   130→   130→                Message.candidate_boss_id.in_(boss_ids)
+   131→   131→   131→            ).group_by(Message.candidate_boss_id).all()
+   132→   132→   132→
+   133→   133→   133→            for row in count_rows:
+   134→   134→   134→                msg_counts[row.candidate_boss_id] = row.cnt
+   135→   135→   135→
+   136→   136→   136→            # Get latest message per candidate using a subquery
+   137→   137→   137→            from sqlalchemy import desc
+   138→   138→   138→            all_msgs = session.query(Message).filter(
+   139→   139→   139→                Message.candidate_boss_id.in_(boss_ids)
+   140→   140→   140→            ).order_by(Message.candidate_boss_id, desc(Message.created_at)).all()
+   141→   141→   141→
+   142→   142→   142→            for msg in all_msgs:
+   143→   143→   143→                if msg.candidate_boss_id not in latest_msgs:
+   144→   144→   144→                    latest_msgs[msg.candidate_boss_id] = msg
+   145→   145→   145→
+   146→   146→   146→            for record in data:
+   147→   147→   147→                bid = record['boss_id']
+   148→   148→   148→                record['message_count'] = msg_counts.get(bid, 0)
+   149→   149→   149→                latest_msg = latest_msgs.get(bid)
+   150→   150→   150→                if latest_msg:
+   151→   151→   151→                    record['last_message_status'] = latest_msg.status
+   152→   152→   152→                    record['last_message_date'] = latest_msg.sent_at or latest_msg.created_at
+   153→   153→   153→                    record['last_message_template'] = latest_msg.template_name
+   154→   154→   154→                else:
+   155→   155→   155→                    record['last_message_status'] = ''
+   156→   156→   156→                    record['last_message_date'] = None
+   157→   157→   157→                    record['last_message_template'] = ''
+   158→   158→   158→
+   159→   159→   159→        return data
+   160→   160→   160→
+   161→   161→   161→
+   162→   162→   162→def _format_education(edu: Dict) -> str:
+   163→   163→   163→    """Format education entry as string."""
+   164→   164→   164→    parts = []
+   165→   165→   165→    if edu.get('school'):
+   166→   166→   166→        parts.append(edu['school'])
+   167→   167→   167→    if edu.get('degree'):
+   168→   168→   168→        parts.append(edu['degree'])
+   169→   169→   169→    if edu.get('major'):
+   170→   170→   170→        parts.append(edu['major'])
+   171→   171→   171→    return ' - '.join(parts) if parts else ''
+   172→   172→   172→
+   173→   173→   173→
+   174→   174→   174→def _format_work_experience(work: Dict) -> str:
+   175→   175→   175→    """Format work experience entry as string."""
+   176→   176→   176→    parts = []
+   177→   177→   177→    if work.get('title'):
+   178→   178→   178→        parts.append(work['title'])
+   179→   179→   179→    if work.get('company'):
+   180→   180→   180→        parts.append(f"@ {work['company']}")
+   181→   181→   181→    return ' '.join(parts) if parts else ''
+   182→   182→   182→
+   183→   183→   183→
+   184→   184→   184→def _create_dataframe(data: List[Dict[str, Any]]) -> pd.DataFrame:
+   185→   185→   185→    """Create pandas DataFrame from candidate data."""
+   186→   186→   186→    columns = [
+   187→   187→   187→        'boss_id',
+   188→   188→   188→        'name',
+   189→   189→   189→        'title',
+   190→   190→   190→        'company',
+   191→   191→   191→        'location',
+   192→   192→   192→        'salary_expect',
+   193→   193→   193→        'work_years',
+   194→   194→   194→        'education_level',
+   195→   195→   195→        'latest_education',
+   196→   196→   196→        'latest_experience',
+   197→   197→   197→        'skills',
+   198→   198→   198→        'profile_url',
+   199→   199→   199→        'source_search',
+   200→   200→   200→        'first_seen',
+   201→   201→   201→        'last_updated',
+   202→   202→   202→    ]
+   203→   203→   203→
+   204→   204→   204→    if data and 'message_count' in data[0]:
+   205→   205→   205→        columns.extend([
+   206→   206→   206→            'message_count',
+   207→   207→   207→            'last_message_status',
+   208→   208→   208→            'last_message_date',
+   209→   209→   209→            'last_message_template',
+   210→   210→   210→        ])
+   211→   211→   211→
+   212→   212→   212→    df = pd.DataFrame(data)
+   213→   213→   213→
+   214→   214→   214→    existing_columns = [c for c in columns if c in df.columns]
+   215→   215→   215→    df = df[existing_columns]
+   216→   216→   216→
+   217→   217→   217→    datetime_columns = ['first_seen', 'last_updated', 'last_message_date']
+   218→   218→   218→    for col in datetime_columns:
+   219→   219→   219→        if col in df.columns:
+   220→   220→   220→            df[col] = pd.to_datetime(df[col]).dt.strftime('%Y-%m-%d %H:%M').fillna('')
+   221→   221→   221→
+   222→   222→   222→    return df
+   223→   223→   223→
+   224→   224→   224→
+   225→   225→   225→def _export_to_excel(df: pd.DataFrame, output_path: str) -> None:
+   226→   226→   226→    """Export DataFrame to Excel with formatting."""
+   227→   227→   227→    wb = Workbook()
+   228→   228→   228→    ws = wb.active
+   229→   229→   229→    ws.title = "Candidates"
+   230→   230→   230→
+   231→   231→   231→    header_font = Font(bold=True, color="FFFFFF")
+   232→   232→   232→    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+   233→   233→   233→    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+   234→   234→   234→
+   235→   235→   235→    border = Border(
+   236→   236→   236→        left=Side(style='thin'),
+   237→   237→   237→        right=Side(style='thin'),
+   238→   238→   238→        top=Side(style='thin'),
+   239→   239→   239→        bottom=Side(style='thin')
+   240→   240→   240→    )
+   241→   241→   241→
+   242→   242→   242→    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+   243→   243→   243→        for c_idx, value in enumerate(row, 1):
+   244→   244→   244→            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+   245→   245→   245→            cell.border = border
+   246→   246→   246→
+   247→   247→   247→            if r_idx == 1:
+   248→   248→   248→                cell.font = header_font
+   249→   249→   249→                cell.fill = header_fill
+   250→   250→   250→                cell.alignment = header_alignment
+   251→   251→   251→            else:
+   252→   252→   252→                cell.alignment = Alignment(vertical="center", wrap_text=True)
+   253→   253→   253→
+   254→   254→   254→    column_widths = {
+   255→   255→   255→        'A': 20,  # boss_id
+   256→   256→   256→        'B': 12,  # name
+   257→   257→   257→        'C': 25,  # title
+   258→   258→   258→        'D': 20,  # company
+   259→   259→   259→        'E': 12,  # location
+   260→   260→   260→        'F': 15,  # salary_expect
+   261→   261→   261→        'G': 12,  # work_years
+   262→   262→   262→        'H': 12,  # education_level
+   263→   263→   263→        'I': 30,  # latest_education
+   264→   264→   264→        'J': 30,  # latest_experience
+   265→   265→   265→        'K': 40,  # skills
+   266→   266→   266→        'L': 40,  # profile_url
+   267→   267→   267→        'M': 20,  # source_search
+   268→   268→   268→        'N': 18,  # first_seen
+   269→   269→   269→        'O': 18,  # last_updated
+   270→   270→   270→        'P': 12,  # message_count
+   271→   271→   271→        'Q': 15,  # last_message_status
+   272→   272→   272→        'R': 18,  # last_message_date
+   273→   273→   273→        'S': 15,  # last_message_template
+   274→   274→   274→    }
+   275→   275→   275→
+   276→   276→   276→    for col, width in column_widths.items():
+   277→   277→   277→        ws.column_dimensions[col].width = width
+   278→   278→   278→
+   279→   279→   279→    ws.freeze_panes = 'A2'
+   280→   280→   280→    ws.auto_filter.ref = ws.dimensions
+   281→   281→   281→
+   282→   282→   282→    wb.save(output_path)
+   283→   283→   283→    logger.info(f"Excel file saved to: {output_path}")
+   284→   284→   284→
+   285→   285→   285→
+   286→   286→   286→def _export_to_csv(df: pd.DataFrame, output_path: str) -> None:
+   287→   287→   287→    """Export DataFrame to CSV."""
+   288→   288→   288→    df.to_csv(output_path, index=False, encoding='utf-8-sig')
+   289→   289→   289→    logger.info(f"CSV file saved to: {output_path}")
+   290→   290→   290→

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Pipeline — Boss Assistant{% endblock %}
+{% block header %}Pipeline 控制面板{% endblock %}
+
+{% block content %}
+<section>
+    <h2>启动 Pipeline</h2>
+    <form hx-post="/pipeline/start" hx-target="#pipeline-status" hx-indicator="#start-spinner">
+        <fieldset {% if pipeline_busy %}disabled{% endif %}>
+            <label for="keywords">关键词（逗号分隔）
+                <input type="text" id="keywords" name="keywords" placeholder="前端工程师, React" required>
+            </label>
+
+            <label for="template_name">消息模板
+                <select name="template_name" id="template_name" required>
+                    <option value="">选择模板...</option>
+                </select>
+            </label>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+                <label for="location">城市
+                    <input type="text" id="location" name="location" placeholder="北京">
+                </label>
+                <label for="pages">滚动轮数
+                    <input type="number" id="pages" name="pages" value="3" min="1" max="20">
+                </label>
+                <label for="batch_pages">批量页数 (0=全部)
+                    <input type="number" id="batch_pages" name="batch_pages" value="0" min="0">
+                </label>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+                <label for="experience">经验
+                    <input type="text" id="experience" name="experience" placeholder="3-5年">
+                </label>
+                <label for="education">学历
+                    <input type="text" id="education" name="education" placeholder="本科">
+                </label>
+                <label for="salary">薪资
+                    <input type="text" id="salary" name="salary" placeholder="20-40K">
+                </label>
+            </div>
+
+            <label>
+                <input type="checkbox" name="skip_messaged" value="true" checked>
+                跳过已发送消息的候选人
+            </label>
+
+            <label>
+                <input type="checkbox" name="dry_run" value="true">
+                Dry Run（仅模拟，不实际发送）
+            </label>
+
+            <button type="submit">启动 Pipeline</button>
+            <span id="start-spinner" class="htmx-indicator">启动中...</span>
+        </fieldset>
+    </form>
+
+    {% if pipeline_busy %}
+    <p><mark>Pipeline 运行中 ({{ current_task_id }})</mark></p>
+    <button hx-delete="/pipeline/cancel" hx-target="#cancel-result">取消 Pipeline</button>
+    <div id="cancel-result"></div>
+    {% endif %}
+</section>
+
+<section id="pipeline-status">
+    {% if pipeline_busy %}
+    {% include "partials/pipeline_progress.html" %}
+    {% endif %}
+</section>
+
+{% if recent_runs %}
+<section>
+    <h2>历史运行</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Task ID</th>
+                <th>状态</th>
+                <th>关键词</th>
+                <th>模板</th>
+                <th>开始时间</th>
+                <th>结果</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in recent_runs %}
+            <tr>
+                <td>{{ run.task_id }}</td>
+                <td>{{ run.status }}</td>
+                <td>{{ run.keywords|join(", ") if run.keywords else "—" }}</td>
+                <td>{{ run.template_name or "—" }}</td>
+                <td>{{ run.started_at.strftime('%m-%d %H:%M') if run.started_at else "—" }}</td>
+                <td>
+                    {% if run.result %}
+                    发送 {{ run.result.get('sent', 0) }} / 失败 {{ run.result.get('failed', 0) }}
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+
+{% block scripts %}
+<script>
+// Load template options
+fetch("/templates?format=json")
+    .then(r => r.json())
+    .then(data => {
+        const select = document.getElementById("template_name");
+        data.forEach(t => {
+            const opt = document.createElement("option");
+            opt.value = t.name;
+            opt.textContent = t.display_name + " — " + t.description;
+            select.appendChild(opt);
+        });
+    })
+    .catch(() => {});
+</script>
+{% endblock %}
+{% endblock %}

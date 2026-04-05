@@ -1,0 +1,42 @@
+     1→"""Entry point for Boss Assistant Web service.
+     2→
+     3→Usage:
+     4→    python run_web.py
+     5→    python run_web.py --host 0.0.0.0 --port 8080
+     6→"""
+     7→
+     8→import argparse
+     9→import sys
+    10→
+    11→import uvicorn
+    12→
+    13→from src.utils.config import get_config
+    14→
+    15→
+    16→def main():
+    17→    config = get_config()
+    18→
+    19→    default_host = config.get('web.host', '0.0.0.0')
+    20→    default_port = config.get('web.port', 8080)
+    21→
+    22→    parser = argparse.ArgumentParser(description='Boss Assistant Web Service')
+    23→    parser.add_argument('--host', default=default_host, help=f'Host (default: {default_host})')
+    24→    parser.add_argument('--port', type=int, default=default_port, help=f'Port (default: {default_port})')
+    25→    parser.add_argument('--reload', action='store_true', help='Enable auto-reload for development')
+    26→    args = parser.parse_args()
+    27→
+    28→    print(f"Starting Boss Assistant Web at http://{args.host}:{args.port}")
+    29→    print("Press Ctrl+C to stop")
+    30→
+    31→    uvicorn.run(
+    32→        "src.web.app:create_app",
+    33→        host=args.host,
+    34→        port=args.port,
+    35→        factory=True,
+    36→        reload=args.reload,
+    37→    )
+    38→
+    39→
+    40→if __name__ == '__main__':
+    41→    main()
+    42→

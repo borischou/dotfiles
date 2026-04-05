@@ -1,0 +1,1469 @@
+2026-02-17T11:39:26.102Z [DEBUG] [init] configureGlobalMTLS starting
+2026-02-17T11:39:26.102Z [DEBUG] [init] configureGlobalMTLS complete
+2026-02-17T11:39:26.102Z [DEBUG] [init] configureGlobalAgents starting
+2026-02-17T11:39:26.102Z [DEBUG] [init] configureGlobalAgents complete
+2026-02-17T11:39:26.108Z [DEBUG] Applying permission update: Adding 66 allow rule(s) to destination 'localSettings': ["Bash(tree:*)","Bash(wc:*)","Bash(git init:*)","WebSearch","Bash(claude /plugin marketplace add:*)","Bash(python scripts/setup_db.py:*)","Bash(python3:*)","Bash(brew uninstall:*)","Bash(python3.12:*)","Bash(source venv/bin/activate)","Bash(pip install:*)","Bash(playwright install:*)","Bash(python src/cli/main.py:*)","WebFetch(domain:maimai.cn)","Bash(python:*)","Bash(pip3 install:*)","Bash(/Users/zhouboli/Library/Python/3.9/bin/playwright install:*)","Bash(/Users/zhouboli/Library/Python/3.9/bin/pytest tests/ -v)","Bash(pkill:*)","Bash(LOGURU_LEVEL=DEBUG python3:*)","Bash(pip show:*)","WebFetch(domain:github.com)","Bash(git add:*)","Bash(git commit:*)","WebFetch(domain:raw.githubusercontent.com)","Bash(gh repo view:*)","Bash(gh api:*)","Bash(brew list:*)","Bash(git clone:*)","Bash(/Users/zhouboli/Library/Python/3.9/bin/patchright install:*)","Bash(pip3 show:*)","Bash(curl:*)","Bash(gh auth:*)","WebFetch(domain:gitee.com)","Bash(lsof:*)","Bash(pgrep:*)","Bash(npx playwright:*)","Bash(open:*)","Bash(killall:*)","Bash(xargs:*)","Bash(pip3 list:*)","Bash(networksetup -getwebproxy:*)","Bash(networksetup -getsecurewebproxy:*)","Bash(networksetup -getsocksfirewallproxy:*)","Bash(echo:*)","Bash(scutil:*)","Bash(nslookup:*)","Bash(yes:*)","Bash(grep:*)","Bash(git status:*)","Bash(expect:*)","Bash(source ~/.zshrc)","Bash(git -C /Users/zhouboli/Documents/maimai-assistant status)","Bash(git -C /Users/zhouboli/Documents/maimai-assistant diff)","Bash(git -C /Users/zhouboli/Documents/maimai-assistant log --oneline -5)","Bash(git -C /Users/zhouboli/Documents/maimai-assistant add src/cli/main.py src/modules/message.py src/services/pipeline.py)","Bash(ls:*)","Bash(/Users/zhouboli/Documents/maimai-assistant/scripts/diagnose_submit7.py:*)","Bash(pytest:*)","Bash(gh repo create:*)","Bash(git -C /Users/zhouboli/Documents/maimai-assistant ls-files)","Bash(git rm:*)","Bash(git push)","Bash(/Users/zhouboli/Library/Python/3.9/bin/git-filter-repo:*)","Bash(git remote add:*)","Bash(git push:*)"]
+2026-02-17T11:39:26.108Z [DEBUG] [STARTUP] Loading MCP configs...
+2026-02-17T11:39:26.109Z [DEBUG] [ToolSearch:optimistic] mode=tst-auto, ENABLE_TOOL_SEARCH=undefined, result=true
+2026-02-17T11:39:26.109Z [DEBUG] [STARTUP] Running setup()...
+2026-02-17T11:39:26.112Z [DEBUG] Loading skills from: managed=/Library/Application Support/ClaudeCode/.claude/skills, user=/Users/zhouboli/.claude/skills, project=[]
+2026-02-17T11:39:26.117Z [DEBUG] Error log sink initialized
+2026-02-17T11:39:26.118Z [DEBUG] [STARTUP] setup() completed in 9ms
+2026-02-17T11:39:26.118Z [DEBUG] [STARTUP] Loading commands and agents...
+2026-02-17T11:39:26.122Z [DEBUG] [Claude in Chrome] Found chrome profiles: Default
+2026-02-17T11:39:26.138Z [DEBUG] Loading plugin document-skills from source: "./"
+2026-02-17T11:39:26.139Z [DEBUG] Loaded 4 unique skills (4 unconditional, 0 conditional, managed: 0, user: 3, project: 0, additional: 0, legacy commands: 1)
+2026-02-17T11:39:26.139Z [DEBUG] [Claude in Chrome] Extension not found in any browser
+2026-02-17T11:39:26.139Z [DEBUG] Using git SHA for document-skills@anthropic-agent-skills: 69c0b1a06741
+2026-02-17T11:39:26.140Z [DEBUG] Plugin document-skills@anthropic-agent-skills version 69c0b1a06741 already cached at /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741
+2026-02-17T11:39:26.140Z [DEBUG] Copied local plugin document-skills to versioned cache: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741
+2026-02-17T11:39:26.140Z [DEBUG] Processing 4 skill paths for plugin document-skills
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/xlsx -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/xlsx (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/docx -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/docx (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/pptx -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/pptx (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/pdf -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/pdf (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Found 4 valid skill paths for plugin document-skills, setting skillsPaths
+2026-02-17T11:39:26.140Z [DEBUG] Loading plugin example-skills from source: "./"
+2026-02-17T11:39:26.140Z [DEBUG] Using git SHA for example-skills@anthropic-agent-skills: 69c0b1a06741
+2026-02-17T11:39:26.140Z [DEBUG] Plugin example-skills@anthropic-agent-skills version 69c0b1a06741 already cached at /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741
+2026-02-17T11:39:26.140Z [DEBUG] Copied local plugin example-skills to versioned cache: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741
+2026-02-17T11:39:26.140Z [DEBUG] Processing 12 skill paths for plugin example-skills
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/algorithmic-art -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/algorithmic-art (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/brand-guidelines -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/brand-guidelines (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/canvas-design -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/canvas-design (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/doc-coauthoring -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/doc-coauthoring (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/frontend-design -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/frontend-design (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/internal-comms -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/internal-comms (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/mcp-builder -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/mcp-builder (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/skill-creator -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/skill-creator (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/slack-gif-creator -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/slack-gif-creator (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/theme-factory -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/theme-factory (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/web-artifacts-builder -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/web-artifacts-builder (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Checking skill path: ./skills/webapp-testing -> /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/webapp-testing (exists: true)
+2026-02-17T11:39:26.140Z [DEBUG] Found 12 valid skill paths for plugin example-skills, setting skillsPaths
+2026-02-17T11:39:26.142Z [DEBUG] Loading plugin superpowers from source: {"source":"url","url":"https://github.com/obra/superpowers.git"}
+2026-02-17T11:39:26.142Z [DEBUG] No version found for superpowers@claude-plugins-official, using 'unknown'
+2026-02-17T11:39:26.142Z [DEBUG] Caching plugin from source: {"source":"url","url":"https://github.com/obra/superpowers.git"} to temporary path /Users/zhouboli/.claude/plugins/cache/temp_git_1771328366142_7g13m2
+2026-02-17T11:39:31.379Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:39:31.380Z [ERROR] Error: Error: 1P event logging: 4 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:41:29.251Z [ERROR] Failed to cache plugin superpowers: Failed to clone repository: Cloning into '/Users/zhouboli/.claude/plugins/cache/temp_git_1771328366142_7g13m2'...
+error: RPC failed; curl 16 Error in the HTTP2 framing layer
+fatal: expected flush after ref listing
+2026-02-17T11:41:29.253Z [ERROR] Error: Error: Failed to clone repository: Cloning into '/Users/zhouboli/.claude/plugins/cache/temp_git_1771328366142_7g13m2'...
+error: RPC failed; curl 16 Error in the HTTP2 framing layer
+fatal: expected flush after ref listing
+    at Mf7 (/$bunfs/root/claude:1514:6312)
+    at async Iv_ (/$bunfs/root/claude:1514:6797)
+    at async FDT (/$bunfs/root/claude:1514:7964)
+    at async uf7 (/$bunfs/root/claude:1522:7111)
+    at async vf7 (/$bunfs/root/claude:1522:5875)
+    at async <anonymous> (/$bunfs/root/claude:1522:14936)
+    at async <anonymous> (/$bunfs/root/claude:1462:390)
+    at async <anonymous> (/$bunfs/root/claude:2082:1535)
+    at async <anonymous> (/$bunfs/root/claude:7467:2571)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:41:29.254Z [DEBUG] Found 2 plugins (2 enabled, 0 disabled)
+2026-02-17T11:41:29.254Z [DEBUG] Plugin not available for MCP: superpowers@claude-plugins-official - error type: generic-error
+2026-02-17T11:41:29.255Z [DEBUG] Plugin loading errors: Failed to download/cache plugin superpowers: Failed to clone repository: Cloning into '/Users/zhouboli/.claude/plugins/cache/temp_git_1771328366142_7g13m2'...
+error: RPC failed; curl 16 Error in the HTTP2 framing layer
+fatal: expected flush after ref listing
+2026-02-17T11:41:29.255Z [DEBUG] getPluginSkills: Processing 2 enabled plugins
+2026-02-17T11:41:29.255Z [DEBUG] Checking plugin document-skills: skillsPath=exists, skillsPaths=4 paths
+2026-02-17T11:41:29.255Z [DEBUG] Attempting to load skills from plugin document-skills default skillsPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills
+2026-02-17T11:41:29.278Z [DEBUG] Plugin loading errors: Failed to download/cache plugin superpowers: Failed to clone repository: Cloning into '/Users/zhouboli/.claude/plugins/cache/temp_git_1771328366142_7g13m2'...
+error: RPC failed; curl 16 Error in the HTTP2 framing layer
+fatal: expected flush after ref listing
+2026-02-17T11:41:29.278Z [DEBUG] Total plugin commands loaded: 0
+2026-02-17T11:41:29.278Z [DEBUG] Registered 0 hooks from 2 plugins
+2026-02-17T11:41:29.278Z [DEBUG] Plugin loading errors: Failed to download/cache plugin superpowers: Failed to clone repository: Cloning into '/Users/zhouboli/.claude/plugins/cache/temp_git_1771328366142_7g13m2'...
+error: RPC failed; curl 16 Error in the HTTP2 framing layer
+fatal: expected flush after ref listing
+2026-02-17T11:41:29.278Z [DEBUG] Total plugin agents loaded: 0
+2026-02-17T11:41:29.279Z [DEBUG] Loaded 16 skills from plugin document-skills default directory
+2026-02-17T11:41:29.279Z [DEBUG] Attempting to load skills from plugin document-skills skillsPaths: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/xlsx, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/docx, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/pptx, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/pdf
+2026-02-17T11:41:29.279Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/xlsx for plugin document-skills
+2026-02-17T11:41:29.283Z [DEBUG] Loaded 0 skills from plugin document-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/xlsx
+2026-02-17T11:41:29.283Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/docx for plugin document-skills
+2026-02-17T11:41:29.283Z [DEBUG] Loaded 0 skills from plugin document-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/docx
+2026-02-17T11:41:29.283Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/pptx for plugin document-skills
+2026-02-17T11:41:29.294Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328489294
+2026-02-17T11:41:29.294Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:41:29.294Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:41:29.294Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:41:29.294Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328489294 to /Users/zhouboli/.claude.json
+2026-02-17T11:41:29.294Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:41:29.294Z [DEBUG] Loaded 0 skills from plugin document-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/pptx
+2026-02-17T11:41:29.294Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/pdf for plugin document-skills
+2026-02-17T11:41:29.294Z [DEBUG] Loaded 0 skills from plugin document-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/document-skills/69c0b1a06741/skills/pdf
+2026-02-17T11:41:29.294Z [DEBUG] Checking plugin example-skills: skillsPath=exists, skillsPaths=12 paths
+2026-02-17T11:41:29.294Z [DEBUG] Attempting to load skills from plugin example-skills default skillsPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 16 skills from plugin example-skills default directory
+2026-02-17T11:41:29.300Z [DEBUG] Attempting to load skills from plugin example-skills skillsPaths: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/algorithmic-art, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/brand-guidelines, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/canvas-design, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/doc-coauthoring, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/frontend-design, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/internal-comms, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/mcp-builder, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/skill-creator, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/slack-gif-creator, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/theme-factory, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/web-artifacts-builder, /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/webapp-testing
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/algorithmic-art for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/algorithmic-art
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/brand-guidelines for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/brand-guidelines
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/canvas-design for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/canvas-design
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/doc-coauthoring for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/doc-coauthoring
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/frontend-design for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/frontend-design
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/internal-comms for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/internal-comms
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/mcp-builder for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/mcp-builder
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/skill-creator for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/skill-creator
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/slack-gif-creator for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/slack-gif-creator
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/theme-factory for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/theme-factory
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/web-artifacts-builder for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/web-artifacts-builder
+2026-02-17T11:41:29.300Z [DEBUG] Loading from skillPath: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/webapp-testing for plugin example-skills
+2026-02-17T11:41:29.300Z [DEBUG] Loaded 0 skills from plugin example-skills custom path: /Users/zhouboli/.claude/plugins/cache/anthropic-agent-skills/example-skills/69c0b1a06741/skills/webapp-testing
+2026-02-17T11:41:29.300Z [DEBUG] Total plugin skills loaded: 32
+2026-02-17T11:41:29.300Z [DEBUG] getSkills returning: 4 skill dir commands, 32 plugin skills, 2 bundled skills
+2026-02-17T11:41:29.306Z [DEBUG] [STARTUP] Commands and agents loaded in 123188ms
+2026-02-17T11:41:29.317Z [DEBUG] [STARTUP] Running showSetupScreens()...
+2026-02-17T11:41:29.425Z [DEBUG] [Perfetto] initializePerfettoTracing called, env value: undefined
+2026-02-17T11:41:29.429Z [DEBUG] [STARTUP] showSetupScreens() completed in 112ms
+2026-02-17T11:41:29.429Z [DEBUG] [LSP MANAGER] initializeLspServerManager() called
+2026-02-17T11:41:29.429Z [DEBUG] [LSP MANAGER] Created manager instance, state=pending
+2026-02-17T11:41:29.429Z [DEBUG] [LSP MANAGER] Starting async initialization (generation 1)
+2026-02-17T11:41:29.456Z [DEBUG] Failed to fetch org fast mode status, defaulting to disabled
+2026-02-17T11:41:29.456Z [DEBUG] [STARTUP] MCP configs loaded in 123348ms
+2026-02-17T11:41:29.464Z [DEBUG] All plugins already exist, skipping migration
+2026-02-17T11:41:29.466Z [DEBUG] [Reconnection] computeInitialTeamContext: No teammate context set (not a teammate)
+2026-02-17T11:41:29.467Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328489467
+2026-02-17T11:41:29.467Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:41:29.467Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:41:29.467Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:41:29.467Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328489467 to /Users/zhouboli/.claude.json
+2026-02-17T11:41:29.467Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:41:29.471Z [DEBUG] Getting matching hook commands for SessionStart with query: startup
+2026-02-17T11:41:29.471Z [DEBUG] Found 1 hook matchers in settings
+2026-02-17T11:41:29.471Z [DEBUG] Matched 1 unique hooks for query "startup" (1 before deduplication)
+2026-02-17T11:41:29.472Z [DEBUG] Loaded 3 installed plugins from /Users/zhouboli/.claude/plugins/installed_plugins.json
+2026-02-17T11:41:29.472Z [DEBUG] Initialized versioned plugins system with 3 plugins
+2026-02-17T11:41:29.489Z [DEBUG] Total LSP servers loaded: 0
+2026-02-17T11:41:29.489Z [DEBUG] [LSP SERVER MANAGER] getAllLspServers returned 0 server(s)
+2026-02-17T11:41:29.489Z [DEBUG] LSP manager initialized with 0 servers
+2026-02-17T11:41:29.489Z [DEBUG] LSP server manager initialized successfully
+2026-02-17T11:41:29.489Z [DEBUG] LSP notification handlers registered successfully for all 0 server(s)
+2026-02-17T11:41:29.491Z [DEBUG] Git remote URL: git@github.com:borischou/maimai-assistant.git
+2026-02-17T11:41:29.491Z [DEBUG] Parsed repository: borischou/maimai-assistant from git@github.com:borischou/maimai-assistant.git
+2026-02-17T11:41:29.491Z [DEBUG] Parsed repository: borischou/maimai-assistant from URL: git@github.com:borischou/maimai-assistant.git
+2026-02-17T11:41:29.491Z [DEBUG] Path /Users/zhouboli/Documents/maimai-assistant already tracked for repo borischou/maimai-assistant
+2026-02-17T11:41:29.770Z [DEBUG] Ripgrep first use test: FAILED (mode=builtin, path=/opt/homebrew/Caskroom/claude-code/2.1.44/claude)
+2026-02-17T11:41:30.111Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:41:30.111Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:41:30.111Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:41:31.583Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-02-17T11:41:31.583Z [DEBUG] Hook SessionStart:startup (SessionStart) success:
+]0;maimai-assistant: ready
+2026-02-17T11:41:31.598Z [DEBUG] [keybindings] KeybindingSetup initialized with 102 bindings, 0 warnings
+2026-02-17T11:41:31.624Z [DEBUG] Detected Homebrew cask installation: /opt/homebrew/Caskroom/claude-code/2.1.44/claude
+2026-02-17T11:41:31.625Z [DEBUG] [keybindings] Skipping file watcher - user customization disabled
+2026-02-17T11:41:31.625Z [DEBUG] [REPL:mount] REPL mounted, disabled=false
+2026-02-17T11:41:31.626Z [DEBUG] Detected Homebrew cask installation: /opt/homebrew/Caskroom/claude-code/2.1.44/claude
+2026-02-17T11:41:31.626Z [DEBUG] Official marketplace auto-install skipped: already_attempted
+2026-02-17T11:41:31.626Z [DEBUG] performStartupChecks called
+2026-02-17T11:41:31.626Z [DEBUG] Starting background plugin installations
+2026-02-17T11:41:31.626Z [DEBUG] performBackgroundPluginInstallations called
+2026-02-17T11:41:31.627Z [DEBUG] Loaded 2 CLAUDE.md/rules files:
+  [User] /Users/zhouboli/.claude/CLAUDE.md (619 chars)
+  [Project] /Users/zhouboli/Documents/maimai-assistant/CLAUDE.md (7295 chars)
+2026-02-17T11:41:31.630Z [DEBUG] Watching for changes in setting files /Users/zhouboli/.claude/settings.json, /Users/zhouboli/Documents/maimai-assistant/.claude/settings.json, /Users/zhouboli/Documents/maimai-assistant/.claude/settings.local.json...
+2026-02-17T11:41:31.630Z [DEBUG] AutoUpdaterWrapper: Installation type: package-manager
+2026-02-17T11:41:31.630Z [DEBUG] Plugin not available for MCP: superpowers@claude-plugins-official - error type: generic-error
+2026-02-17T11:41:31.630Z [DEBUG] Plugin not available for MCP: superpowers@claude-plugins-official - error type: generic-error
+2026-02-17T11:41:31.856Z [DEBUG] Loaded plugins - Enabled: 2, Disabled: 0, Commands: 0, Agents: 0, Errors: 1
+2026-02-17T11:41:31.856Z [DEBUG] [claudeai-mcp] Checking gate (cached)...
+2026-02-17T11:41:31.856Z [DEBUG] [claudeai-mcp] Gate returned: false
+2026-02-17T11:41:31.856Z [DEBUG] [claudeai-mcp] Disabled via gate
+2026-02-17T11:41:31.856Z [DEBUG] Found 3 enabled plugins
+2026-02-17T11:41:31.857Z [DEBUG] All plugins already exist, skipping migration
+2026-02-17T11:41:31.857Z [DEBUG] Found 3 installed plugins (V2 format)
+2026-02-17T11:41:31.857Z [DEBUG] Found 0 missing plugins (not installed):
+2026-02-17T11:41:31.857Z [DEBUG] Setting installation status: 0 marketplaces, 0 installable plugins, 0 uninstallable plugins
+2026-02-17T11:41:31.858Z [DEBUG] Watching for changes in skill/command directories: /Users/zhouboli/.claude/skills, /Users/zhouboli/.claude/commands...
+2026-02-17T11:41:31.867Z [DEBUG] Detected Homebrew cask installation: /opt/homebrew/Caskroom/claude-code/2.1.44/claude
+2026-02-17T11:41:34.987Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:41:34.987Z [ERROR] Error: Error: 1P event logging: 50 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:41:34.987Z [ERROR] Error: Error: {"message":"Failed to export 50 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 50 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:42:29.564Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-02-17T11:42:29.564Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-02-17T11:42:29.564Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-02-17T11:42:29.564Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-02-17T11:42:29.568Z [DEBUG] Sending 36 skills via attachment (initial, 36 total sent)
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:theme-factory" (userFacingName="theme-factory")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:doc-coauthoring" (userFacingName="doc-coauthoring")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:xlsx" (userFacingName="xlsx")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:pdf" (userFacingName="pdf")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:algorithmic-art" (userFacingName="algorithmic-art")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:internal-comms" (userFacingName="internal-comms")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:skill-creator" (userFacingName="skill-creator")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:canvas-design" (userFacingName="canvas-design")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:pptx" (userFacingName="pptx")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:slack-gif-creator" (userFacingName="slack-gif-creator")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:webapp-testing" (userFacingName="webapp-testing")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:frontend-design" (userFacingName="frontend-design")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:mcp-builder" (userFacingName="mcp-builder")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:brand-guidelines" (userFacingName="brand-guidelines")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:docx" (userFacingName="docx")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "document-skills:web-artifacts-builder" (userFacingName="web-artifacts-builder")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:theme-factory" (userFacingName="theme-factory")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:doc-coauthoring" (userFacingName="doc-coauthoring")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:xlsx" (userFacingName="xlsx")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:pdf" (userFacingName="pdf")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:algorithmic-art" (userFacingName="algorithmic-art")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:internal-comms" (userFacingName="internal-comms")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:skill-creator" (userFacingName="skill-creator")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:canvas-design" (userFacingName="canvas-design")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:pptx" (userFacingName="pptx")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:slack-gif-creator" (userFacingName="slack-gif-creator")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:webapp-testing" (userFacingName="webapp-testing")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:frontend-design" (userFacingName="frontend-design")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:mcp-builder" (userFacingName="mcp-builder")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:brand-guidelines" (userFacingName="brand-guidelines")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:docx" (userFacingName="docx")
+2026-02-17T11:42:29.568Z [DEBUG] Skill prompt: showing "example-skills:web-artifacts-builder" (userFacingName="web-artifacts-builder")
+2026-02-17T11:42:29.578Z [DEBUG] Getting matching hook commands for UserPromptSubmit with query: undefined
+2026-02-17T11:42:29.578Z [DEBUG] Found 1 hook matchers in settings
+2026-02-17T11:42:29.578Z [DEBUG] Matched 1 unique hooks for query "no match query" (1 before deduplication)
+2026-02-17T11:42:29.606Z [DEBUG] Started caffeinate to prevent sleep
+2026-02-17T11:42:29.624Z [DEBUG] Stats cache is up to date
+2026-02-17T11:42:29.676Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-02-17T11:42:29.676Z [DEBUG] Hook UserPromptSubmit (UserPromptSubmit) success:
+]0;maimai-assistant: working
+2026-02-17T11:42:29.677Z [DEBUG] FileHistory: Added snapshot for 7d5832d7-b619-4c20-803a-110f3b2ae30d, tracking 0 files
+2026-02-17T11:42:29.678Z [DEBUG] [useDeferredValue] Messages deferred by 3 (2→5)
+2026-02-17T11:42:29.688Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328549688
+2026-02-17T11:42:29.688Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:42:29.689Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:42:29.689Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:42:29.689Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328549688 to /Users/zhouboli/.claude.json
+2026-02-17T11:42:29.689Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:42:29.690Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:42:29.692Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.f21; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:29.692Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:29.692Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:29.693Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:29.706Z [DEBUG] Plugin loading errors: Failed to download/cache plugin superpowers: Failed to clone repository: Cloning into '/Users/zhouboli/.claude/plugins/cache/temp_git_1771328366142_7g13m2'...
+error: RPC failed; curl 16 Error in the HTTP2 framing layer
+fatal: expected flush after ref listing
+2026-02-17T11:42:29.706Z [DEBUG] Total plugin output styles loaded: 0
+2026-02-17T11:42:29.707Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328549707
+2026-02-17T11:42:29.707Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:42:29.707Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:42:29.707Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:42:29.707Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328549707 to /Users/zhouboli/.claude.json
+2026-02-17T11:42:29.707Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:42:29.709Z [DEBUG] autocompact: tokens=3069 threshold=167000 effectiveWindow=180000
+2026-02-17T11:42:29.709Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:42:29.711Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328549711
+2026-02-17T11:42:29.711Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:42:29.711Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:42:29.711Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:42:29.711Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328549711 to /Users/zhouboli/.claude.json
+2026-02-17T11:42:29.711Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:42:29.712Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.30a; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:29.712Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:29.712Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:29.712Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:30.593Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:42:32.764Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:42:32.778Z [DEBUG] [useDeferredValue] Messages deferred by 1 (5→6)
+2026-02-17T11:42:32.780Z [DEBUG] [useDeferredValue] Messages deferred by 1 (5→6)
+2026-02-17T11:42:33.822Z [DEBUG] Successfully refreshed marketplace: claude-plugins-official
+2026-02-17T11:42:33.822Z [DEBUG] Plugin autoupdate: checking installed plugins
+2026-02-17T11:42:33.825Z [DEBUG] Caching plugin from source: {"source":"url","url":"https://github.com/obra/superpowers.git"} to temporary path /Users/zhouboli/.claude/plugins/cache/temp_git_1771328553825_wq23pa
+2026-02-17T11:42:34.389Z [DEBUG] [useDeferredValue] Messages deferred by 1 (6→7)
+2026-02-17T11:42:34.504Z [DEBUG] [useDeferredValue] Messages deferred by 1 (7→8)
+2026-02-17T11:42:34.562Z [DEBUG] executePreToolHooks called for tool: EnterPlanMode
+2026-02-17T11:42:34.563Z [DEBUG] Getting matching hook commands for PreToolUse with query: EnterPlanMode
+2026-02-17T11:42:34.563Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:34.563Z [DEBUG] Matched 0 unique hooks for query "EnterPlanMode" (0 before deduplication)
+2026-02-17T11:42:34.566Z [DEBUG] Applying permission update: Setting mode to 'plan'
+2026-02-17T11:42:34.567Z [DEBUG] Getting matching hook commands for PostToolUse with query: EnterPlanMode
+2026-02-17T11:42:34.567Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:34.567Z [DEBUG] Matched 0 unique hooks for query "EnterPlanMode" (0 before deduplication)
+2026-02-17T11:42:34.567Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-02-17T11:42:34.567Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-02-17T11:42:34.567Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-02-17T11:42:34.567Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-02-17T11:42:34.569Z [DEBUG] [useDeferredValue] Messages deferred by 1 (8→9)
+2026-02-17T11:42:34.576Z [DEBUG] autocompact: tokens=24048 threshold=167000 effectiveWindow=180000
+2026-02-17T11:42:34.577Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:42:34.579Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328554579
+2026-02-17T11:42:34.579Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:42:34.579Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:42:34.579Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:42:34.579Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328554579 to /Users/zhouboli/.claude.json
+2026-02-17T11:42:34.579Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:42:34.580Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.30a; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:34.580Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:34.580Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:34.580Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328554580
+2026-02-17T11:42:34.580Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:42:34.580Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:42:34.580Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:42:34.580Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328554580 to /Users/zhouboli/.claude.json
+2026-02-17T11:42:34.581Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:42:34.581Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328554581
+2026-02-17T11:42:34.581Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:42:34.581Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:42:34.581Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:42:34.581Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328554581 to /Users/zhouboli/.claude.json
+2026-02-17T11:42:34.581Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:42:34.582Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:34.583Z [DEBUG] [useDeferredValue] Messages deferred by 2 (8→10)
+2026-02-17T11:42:34.820Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:42:34.820Z [ERROR] Error: Error: 1P event logging: 36 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:42:34.820Z [ERROR] Error: Error: {"message":"Failed to export 36 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 36 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:42:37.372Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:42:38.194Z [DEBUG] [useDeferredValue] Messages deferred by 1 (10→11)
+2026-02-17T11:42:38.205Z [DEBUG] [useDeferredValue] Messages deferred by 1 (10→11)
+2026-02-17T11:42:40.047Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:42:40.047Z [ERROR] Error: Error: 1P event logging: 12 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:42:40.047Z [ERROR] Error: Error: {"message":"Failed to export 12 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 12 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:42:43.412Z [DEBUG] [useDeferredValue] Messages deferred by 1 (11→12)
+2026-02-17T11:42:43.428Z [DEBUG] executePreToolHooks called for tool: Task
+2026-02-17T11:42:43.429Z [DEBUG] Getting matching hook commands for PreToolUse with query: Task
+2026-02-17T11:42:43.429Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:43.429Z [DEBUG] Matched 0 unique hooks for query "Task" (0 before deduplication)
+2026-02-17T11:42:43.433Z [DEBUG] Getting matching hook commands for SubagentStart with query: Explore
+2026-02-17T11:42:43.433Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:43.433Z [DEBUG] Matched 0 unique hooks for query "Explore" (0 before deduplication)
+2026-02-17T11:42:43.433Z [DEBUG] autocompact: tokens=194 threshold=167000 effectiveWindow=180000
+2026-02-17T11:42:43.434Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:42:43.435Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:43.435Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:43.435Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:43.435Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:43.436Z [DEBUG] [useDeferredValue] Messages deferred by 1 (12→13)
+2026-02-17T11:42:43.466Z [DEBUG] High write ratio: blit=0, write=1048 (100.0% writes), screen=24x208
+2026-02-17T11:42:45.515Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:42:46.015Z [DEBUG] High write ratio: blit=0, write=1075 (100.0% writes), screen=25x208
+2026-02-17T11:42:46.517Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-02-17T11:42:46.519Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-02-17T11:42:46.519Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:46.519Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:42:46.534Z [DEBUG] [useDeferredValue] Messages deferred by 1 (13→14)
+2026-02-17T11:42:46.553Z [DEBUG] tree-sitter: loaded from embedded
+2026-02-17T11:42:46.569Z [DEBUG] Creating shell snapshot for zsh (/bin/zsh)
+2026-02-17T11:42:46.569Z [DEBUG] Looking for shell config file: /Users/zhouboli/.zshrc
+2026-02-17T11:42:46.569Z [DEBUG] Snapshots directory: /Users/zhouboli/.claude/shell-snapshots
+2026-02-17T11:42:46.569Z [DEBUG] Creating snapshot at: /Users/zhouboli/.claude/shell-snapshots/snapshot-zsh-1771328566569-sjqeq7.sh
+2026-02-17T11:42:46.569Z [DEBUG] Shell binary exists: true
+2026-02-17T11:42:46.569Z [DEBUG] Execution timeout: 10000ms
+2026-02-17T11:42:46.575Z [DEBUG] High write ratio: blit=0, write=1168 (100.0% writes), screen=25x208
+2026-02-17T11:42:46.776Z [DEBUG] Shell snapshot created successfully (134202 bytes)
+2026-02-17T11:42:46.777Z [DEBUG] No session environment scripts found
+2026-02-17T11:42:46.850Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:42:46.850Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.e96; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:46.850Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:46.850Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:46.851Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:46.851Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-02-17T11:42:46.851Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:46.851Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:42:46.852Z [DEBUG] autocompact: tokens=14258 threshold=167000 effectiveWindow=180000
+2026-02-17T11:42:46.852Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:42:46.853Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:46.853Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:46.853Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:46.853Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:46.853Z [DEBUG] [useDeferredValue] Messages deferred by 1 (14→15)
+2026-02-17T11:42:46.875Z [DEBUG] High write ratio: blit=0, write=1168 (100.0% writes), screen=26x208
+2026-02-17T11:42:47.759Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:42:48.467Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:42:48.734Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:42:48.734Z [ERROR] Error: Error: 1P event logging: 42 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:42:48.735Z [ERROR] Error: Error: {"message":"Failed to export 42 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 42 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:42:49.045Z [DEBUG] [useDeferredValue] Messages deferred by 1 (15→16)
+2026-02-17T11:42:49.074Z [DEBUG] High write ratio: blit=0, write=1093 (100.0% writes), screen=27x208
+2026-02-17T11:42:49.196Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-02-17T11:42:49.198Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-02-17T11:42:49.198Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:49.198Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:42:49.252Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:42:49.252Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.e96; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:49.252Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:49.252Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:49.253Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:49.253Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-02-17T11:42:49.253Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:49.253Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:42:49.253Z [DEBUG] autocompact: tokens=15329 threshold=167000 effectiveWindow=180000
+2026-02-17T11:42:49.253Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:42:49.254Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:49.254Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:49.254Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:49.254Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:49.255Z [DEBUG] [useDeferredValue] Messages deferred by 1 (16→17)
+2026-02-17T11:42:49.282Z [DEBUG] High write ratio: blit=0, write=1001 (100.0% writes), screen=27x208
+2026-02-17T11:42:50.167Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:42:51.195Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:42:51.967Z [DEBUG] [useDeferredValue] Messages deferred by 1 (17→18)
+2026-02-17T11:42:52.000Z [DEBUG] High write ratio: blit=0, write=1022 (100.0% writes), screen=27x208
+2026-02-17T11:42:52.426Z [DEBUG] [useDeferredValue] Messages deferred by 2 (18→20)
+2026-02-17T11:42:52.630Z [DEBUG] [useDeferredValue] Messages deferred by 1 (20→21)
+2026-02-17T11:42:52.646Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:42:52.647Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:42:52.647Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:42:52.647Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:42:52.648Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:42:52.648Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:52.648Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:42:52.648Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:42:52.648Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:52.648Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:42:52.648Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:42:52.648Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:52.648Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:42:52.648Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:42:52.648Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:52.648Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:42:52.654Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:42:52.654Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:52.654Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:42:52.655Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:42:52.655Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:52.655Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:42:52.657Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:42:52.657Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:52.657Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:42:52.657Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:42:52.657Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:52.657Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:42:52.659Z [DEBUG] autocompact: tokens=28044 threshold=167000 effectiveWindow=180000
+2026-02-17T11:42:52.659Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:42:52.660Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:52.660Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:52.660Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:52.660Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:52.660Z [DEBUG] [useDeferredValue] Messages deferred by 4 (21→25)
+2026-02-17T11:42:54.365Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:42:54.365Z [ERROR] Error: Error: 1P event logging: 72 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:42:54.365Z [ERROR] Error: Error: {"message":"Failed to export 72 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 72 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:42:55.156Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:42:56.058Z [DEBUG] [useDeferredValue] Messages deferred by 1 (25→26)
+2026-02-17T11:42:56.176Z [DEBUG] [useDeferredValue] Messages deferred by 1 (26→27)
+2026-02-17T11:42:56.636Z [DEBUG] [useDeferredValue] Messages deferred by 1 (27→28)
+2026-02-17T11:42:56.659Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:42:56.659Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:42:56.660Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:42:56.660Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:42:56.660Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:56.660Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:42:56.660Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:42:56.660Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:56.660Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:42:56.660Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:42:56.660Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:42:56.660Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:42:56.665Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:56.665Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:56.665Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:56.666Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:42:56.666Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:56.666Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:42:56.667Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:56.667Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:56.667Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:56.667Z [DEBUG] [useDeferredValue] Messages deferred by 1 (28→29)
+2026-02-17T11:42:57.300Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:42:57.300Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:57.300Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:42:57.301Z [DEBUG] [useDeferredValue] Messages deferred by 1 (29→30)
+2026-02-17T11:42:57.369Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:42:57.369Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:42:57.369Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:42:57.370Z [DEBUG] autocompact: tokens=69951 threshold=167000 effectiveWindow=180000
+2026-02-17T11:42:57.370Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:42:57.371Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:42:57.371Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:42:57.371Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:42:57.371Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:42:57.373Z [DEBUG] [useDeferredValue] Messages deferred by 1 (30→31)
+2026-02-17T11:43:01.351Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:43:01.351Z [ERROR] Error: Error: 1P event logging: 38 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:43:01.351Z [ERROR] Error: Error: {"message":"Failed to export 38 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 38 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:43:01.409Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:43:02.248Z [DEBUG] [useDeferredValue] Messages deferred by 1 (31→32)
+2026-02-17T11:43:02.457Z [DEBUG] [useDeferredValue] Messages deferred by 1 (32→33)
+2026-02-17T11:43:02.737Z [DEBUG] [useDeferredValue] Messages deferred by 1 (33→34)
+2026-02-17T11:43:02.769Z [DEBUG] High write ratio: blit=0, write=1018 (100.0% writes), screen=27x208
+2026-02-17T11:43:02.793Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:43:02.794Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:43:02.794Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:43:02.795Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:43:02.795Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:43:02.795Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:43:02.795Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:43:02.795Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:43:02.795Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:43:02.795Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:43:02.795Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:43:02.795Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:43:02.803Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:43:02.803Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:43:02.803Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:43:02.804Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:43:02.804Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:43:02.804Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:43:02.805Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:43:02.805Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:43:02.805Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:43:02.806Z [DEBUG] autocompact: tokens=84366 threshold=167000 effectiveWindow=180000
+2026-02-17T11:43:02.806Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:43:02.807Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:43:02.808Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:43:02.808Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:43:02.808Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:43:02.809Z [DEBUG] [useDeferredValue] Messages deferred by 3 (34→37)
+2026-02-17T11:43:05.903Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:43:06.836Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:43:06.838Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:43:06.838Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:43:06.838Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:43:06.839Z [DEBUG] [useDeferredValue] Messages deferred by 1 (37→38)
+2026-02-17T11:43:06.852Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:43:06.852Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:43:06.852Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:43:06.853Z [DEBUG] autocompact: tokens=92270 threshold=167000 effectiveWindow=180000
+2026-02-17T11:43:06.853Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:43:06.854Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:43:06.854Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:43:06.854Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:43:06.854Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:43:06.855Z [DEBUG] [useDeferredValue] Messages deferred by 1 (38→39)
+2026-02-17T11:43:07.698Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:43:07.698Z [ERROR] Error: Error: 1P event logging: 57 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:43:07.698Z [ERROR] Error: Error: {"message":"Failed to export 57 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 57 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:43:09.628Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:43:10.294Z [DEBUG] [useDeferredValue] Messages deferred by 1 (39→40)
+2026-02-17T11:43:10.587Z [DEBUG] [useDeferredValue] Messages deferred by 1 (40→41)
+2026-02-17T11:43:10.614Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:43:10.615Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:43:10.616Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:43:10.616Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:43:10.616Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:43:10.616Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:43:10.616Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:43:10.616Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:43:10.624Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:43:10.624Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:43:10.624Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:43:10.625Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:43:10.625Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:43:10.625Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:43:10.627Z [DEBUG] autocompact: tokens=95824 threshold=167000 effectiveWindow=180000
+2026-02-17T11:43:10.627Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:43:10.628Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:43:10.628Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:43:10.628Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:43:10.628Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:43:10.630Z [DEBUG] [useDeferredValue] Messages deferred by 2 (41→43)
+2026-02-17T11:43:13.314Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:43:15.587Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:43:15.587Z [ERROR] Error: Error: 1P event logging: 29 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:43:15.587Z [ERROR] Error: Error: {"message":"Failed to export 29 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 29 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:43:48.877Z [WARN] Plugin autoupdate: error updating superpowers@claude-plugins-official: Failed to clone repository: Cloning into '/Users/zhouboli/.claude/plugins/cache/temp_git_1771328553825_wq23pa'...
+fatal: unable to access 'https://github.com/obra/superpowers.git/': Failed to connect to github.com port 443 after 75003 ms: Couldn't connect to server
+2026-02-17T11:44:08.044Z [DEBUG] Getting matching hook commands for SubagentStop with query: Explore
+2026-02-17T11:44:08.044Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:44:08.044Z [DEBUG] Matched 0 unique hooks for query "Explore" (0 before deduplication)
+2026-02-17T11:44:08.047Z [DEBUG] Getting matching hook commands for PostToolUse with query: Task
+2026-02-17T11:44:08.047Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:44:08.047Z [DEBUG] Matched 0 unique hooks for query "Task" (0 before deduplication)
+2026-02-17T11:44:08.049Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-02-17T11:44:08.049Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-02-17T11:44:08.049Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-02-17T11:44:08.049Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-02-17T11:44:08.050Z [DEBUG] autocompact: tokens=30218 threshold=167000 effectiveWindow=180000
+2026-02-17T11:44:08.050Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:44:08.054Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328648054
+2026-02-17T11:44:08.054Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:44:08.054Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:44:08.054Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:44:08.054Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328648054 to /Users/zhouboli/.claude.json
+2026-02-17T11:44:08.054Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:44:08.055Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.30a; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:44:08.056Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:44:08.056Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:44:08.057Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328648057
+2026-02-17T11:44:08.057Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:44:08.057Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:44:08.057Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:44:08.057Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328648057 to /Users/zhouboli/.claude.json
+2026-02-17T11:44:08.057Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:44:08.058Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328648058
+2026-02-17T11:44:08.058Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:44:08.058Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:44:08.058Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:44:08.058Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328648058 to /Users/zhouboli/.claude.json
+2026-02-17T11:44:08.058Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:44:08.059Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:44:08.061Z [DEBUG] [useDeferredValue] Messages deferred by 1 (43→44)
+2026-02-17T11:44:11.072Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:44:13.277Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:44:13.277Z [ERROR] Error: Error: 1P event logging: 14 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:44:13.277Z [ERROR] Error: Error: {"message":"Failed to export 14 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 14 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:44:14.487Z [DEBUG] [useDeferredValue] Messages deferred by 1 (44→45)
+2026-02-17T11:44:14.493Z [DEBUG] [useDeferredValue] Messages deferred by 1 (44→45)
+2026-02-17T11:44:15.375Z [DEBUG] [useDeferredValue] Messages deferred by 1 (45→46)
+2026-02-17T11:44:15.384Z [DEBUG] [useDeferredValue] Messages deferred by 1 (45→46)
+2026-02-17T11:44:28.731Z [DEBUG] [useDeferredValue] Messages deferred by 1 (46→47)
+2026-02-17T11:44:28.801Z [DEBUG] executePreToolHooks called for tool: AskUserQuestion
+2026-02-17T11:44:28.804Z [DEBUG] Getting matching hook commands for PreToolUse with query: AskUserQuestion
+2026-02-17T11:44:28.804Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:44:28.804Z [DEBUG] Matched 0 unique hooks for query "AskUserQuestion" (0 before deduplication)
+2026-02-17T11:44:28.806Z [DEBUG] executePermissionRequestHooks called for tool: AskUserQuestion
+2026-02-17T11:44:28.807Z [DEBUG] Getting matching hook commands for PermissionRequest with query: AskUserQuestion
+2026-02-17T11:44:28.807Z [DEBUG] Found 1 hook matchers in settings
+2026-02-17T11:44:28.807Z [DEBUG] Matched 1 unique hooks for query "AskUserQuestion" (1 before deduplication)
+2026-02-17T11:44:28.819Z [DEBUG] High write ratio: blit=0, write=1454 (100.0% writes), screen=37x208
+2026-02-17T11:44:28.821Z [DEBUG] Stopped caffeinate, allowing sleep
+2026-02-17T11:44:30.541Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-02-17T11:44:30.541Z [DEBUG] Hook PermissionRequest:AskUserQuestion (PermissionRequest) success:
+]0;● maimai-assistant: needs approval]9;● maimai-assistant: needs approval: maimai-assistant  —  Permission needed
+2026-02-17T11:44:34.035Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:44:34.035Z [ERROR] Error: Error: 1P event logging: 4 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:44:34.035Z [ERROR] Error: Error: {"message":"Failed to export 4 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 4 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:44:34.829Z [DEBUG] Getting matching hook commands for Notification with query: permission_prompt
+2026-02-17T11:44:34.829Z [DEBUG] Found 1 hook matchers in settings
+2026-02-17T11:44:34.829Z [DEBUG] Matched 1 unique hooks for query "permission_prompt" (1 before deduplication)
+2026-02-17T11:44:36.773Z [DEBUG] Notification:permission_prompt [/Users/zhouboli/.claude/hooks/peon-ping/peon.sh] completed with status 0
+2026-02-17T11:44:36.773Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-02-17T11:44:40.075Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:44:40.075Z [ERROR] Error: Error: 1P event logging: 2 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:44:40.075Z [ERROR] Error: Error: {"message":"Failed to export 2 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 2 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:44:57.717Z [DEBUG] Getting matching hook commands for PostToolUse with query: AskUserQuestion
+2026-02-17T11:44:57.717Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:44:57.717Z [DEBUG] Matched 0 unique hooks for query "AskUserQuestion" (0 before deduplication)
+2026-02-17T11:44:57.719Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-02-17T11:44:57.719Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-02-17T11:44:57.719Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-02-17T11:44:57.719Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-02-17T11:44:57.721Z [DEBUG] autocompact: tokens=32207 threshold=167000 effectiveWindow=180000
+2026-02-17T11:44:57.722Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:44:57.728Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328697728
+2026-02-17T11:44:57.728Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:44:57.728Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:44:57.728Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:44:57.728Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328697728 to /Users/zhouboli/.claude.json
+2026-02-17T11:44:57.729Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:44:57.730Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.30a; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:44:57.730Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:44:57.730Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:44:57.732Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328697732
+2026-02-17T11:44:57.732Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:44:57.732Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:44:57.732Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:44:57.732Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328697732 to /Users/zhouboli/.claude.json
+2026-02-17T11:44:57.732Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:44:57.733Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328697733
+2026-02-17T11:44:57.733Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:44:57.733Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:44:57.734Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:44:57.734Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328697733 to /Users/zhouboli/.claude.json
+2026-02-17T11:44:57.734Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:44:57.734Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:44:57.737Z [DEBUG] [useDeferredValue] Messages deferred by 1 (47→48)
+2026-02-17T11:44:57.749Z [DEBUG] Detected Homebrew cask installation: /opt/homebrew/Caskroom/claude-code/2.1.44/claude
+2026-02-17T11:44:57.750Z [DEBUG] Started caffeinate to prevent sleep
+2026-02-17T11:44:57.750Z [DEBUG] [useDeferredValue] Messages deferred by 1 (47→48)
+2026-02-17T11:44:57.751Z [DEBUG] AutoUpdaterWrapper: Installation type: package-manager
+2026-02-17T11:44:57.773Z [DEBUG] High write ratio: blit=0, write=1156 (100.0% writes), screen=32x208
+2026-02-17T11:45:00.229Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:02.818Z [DEBUG] [useDeferredValue] Messages deferred by 1 (48→49)
+2026-02-17T11:45:02.847Z [DEBUG] High write ratio: blit=0, write=1172 (100.0% writes), screen=32x208
+2026-02-17T11:45:02.940Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:45:02.940Z [ERROR] Error: Error: 1P event logging: 13 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:02.940Z [ERROR] Error: Error: {"message":"Failed to export 13 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 13 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:03.353Z [DEBUG] [useDeferredValue] Messages deferred by 1 (49→50)
+2026-02-17T11:45:03.360Z [DEBUG] [useDeferredValue] Messages deferred by 1 (49→50)
+2026-02-17T11:45:03.380Z [DEBUG] High write ratio: blit=0, write=1190 (100.0% writes), screen=34x208
+2026-02-17T11:45:20.813Z [DEBUG] executePreToolHooks called for tool: Task
+2026-02-17T11:45:20.817Z [DEBUG] Getting matching hook commands for PreToolUse with query: Task
+2026-02-17T11:45:20.817Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:20.817Z [DEBUG] Matched 0 unique hooks for query "Task" (0 before deduplication)
+2026-02-17T11:45:20.821Z [DEBUG] Getting matching hook commands for SubagentStart with query: Plan
+2026-02-17T11:45:20.821Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:20.821Z [DEBUG] Matched 0 unique hooks for query "Plan" (0 before deduplication)
+2026-02-17T11:45:20.821Z [DEBUG] autocompact: tokens=776 threshold=167000 effectiveWindow=180000
+2026-02-17T11:45:20.822Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:45:20.824Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:20.824Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:20.824Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:20.824Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:20.825Z [DEBUG] [useDeferredValue] Messages deferred by 2 (50→52)
+2026-02-17T11:45:20.862Z [DEBUG] High write ratio: blit=0, write=1429 (100.0% writes), screen=38x208
+2026-02-17T11:45:23.574Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:24.405Z [DEBUG] High write ratio: blit=0, write=1456 (100.0% writes), screen=39x208
+2026-02-17T11:45:25.110Z [DEBUG] [useDeferredValue] Messages deferred by 1 (52→53)
+2026-02-17T11:45:25.138Z [DEBUG] High write ratio: blit=0, write=1549 (100.0% writes), screen=39x208
+2026-02-17T11:45:25.679Z [DEBUG] [useDeferredValue] Messages deferred by 1 (53→54)
+2026-02-17T11:45:25.709Z [DEBUG] High write ratio: blit=0, write=1613 (100.0% writes), screen=40x208
+2026-02-17T11:45:26.056Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:45:26.056Z [ERROR] Error: Error: 1P event logging: 15 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:26.056Z [ERROR] Error: Error: {"message":"Failed to export 15 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 15 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:26.190Z [DEBUG] [useDeferredValue] Messages deferred by 1 (54→55)
+2026-02-17T11:45:26.213Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-02-17T11:45:26.214Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-02-17T11:45:26.214Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-02-17T11:45:26.214Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-02-17T11:45:26.214Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:26.214Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:45:26.215Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-02-17T11:45:26.215Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:26.215Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:45:26.215Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-02-17T11:45:26.215Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:26.215Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:45:26.228Z [DEBUG] High write ratio: blit=0, write=1514 (100.0% writes), screen=41x208
+2026-02-17T11:45:26.277Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:45:26.278Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.f64; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:26.278Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:26.278Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:26.279Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:26.279Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-02-17T11:45:26.279Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:26.279Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:45:26.280Z [DEBUG] [useDeferredValue] Messages deferred by 1 (55→56)
+2026-02-17T11:45:26.282Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:45:26.282Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.eea; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:26.282Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:26.282Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:26.283Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:26.283Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-02-17T11:45:26.283Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:26.283Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:45:26.283Z [DEBUG] [useDeferredValue] Messages deferred by 2 (55→57)
+2026-02-17T11:45:26.305Z [DEBUG] High write ratio: blit=0, write=1358 (100.0% writes), screen=41x208
+2026-02-17T11:45:26.308Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-02-17T11:45:26.308Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.e96; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:26.308Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:26.308Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:26.309Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:26.309Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-02-17T11:45:26.309Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:26.309Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-02-17T11:45:26.310Z [DEBUG] autocompact: tokens=17802 threshold=167000 effectiveWindow=180000
+2026-02-17T11:45:26.311Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:45:26.311Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:26.312Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:26.312Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:26.312Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:26.312Z [DEBUG] [useDeferredValue] Messages deferred by 1 (57→58)
+2026-02-17T11:45:26.340Z [DEBUG] High write ratio: blit=0, write=1289 (100.0% writes), screen=41x208
+2026-02-17T11:45:27.567Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:27.567Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:27.616Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:29.191Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:30.637Z [DEBUG] [useDeferredValue] Messages deferred by 1 (58→59)
+2026-02-17T11:45:30.666Z [DEBUG] High write ratio: blit=0, write=1310 (100.0% writes), screen=41x208
+2026-02-17T11:45:31.009Z [DEBUG] [useDeferredValue] Messages deferred by 1 (59→60)
+2026-02-17T11:45:31.041Z [DEBUG] High write ratio: blit=0, write=1335 (100.0% writes), screen=41x208
+2026-02-17T11:45:31.562Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:31.563Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:31.564Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:31.564Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:31.564Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:31.564Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:31.564Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:31.564Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:31.564Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:31.564Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:31.564Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:31.564Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:31.567Z [DEBUG] [useDeferredValue] Messages deferred by 1 (60→61)
+2026-02-17T11:45:31.570Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:31.570Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:31.570Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:31.571Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:31.571Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:31.571Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:31.572Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:31.572Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:31.572Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:31.573Z [DEBUG] autocompact: tokens=32167 threshold=167000 effectiveWindow=180000
+2026-02-17T11:45:31.573Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:45:31.574Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:31.574Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:31.574Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:31.574Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:31.575Z [DEBUG] [useDeferredValue] Messages deferred by 4 (60→64)
+2026-02-17T11:45:31.579Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:45:31.579Z [ERROR] Error: Error: 1P event logging: 57 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:31.579Z [ERROR] Error: Error: {"message":"Failed to export 57 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 57 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:31.599Z [DEBUG] High write ratio: blit=0, write=1290 (100.0% writes), screen=41x208
+2026-02-17T11:45:34.387Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:35.747Z [DEBUG] [useDeferredValue] Messages deferred by 1 (64→65)
+2026-02-17T11:45:35.781Z [DEBUG] High write ratio: blit=0, write=1320 (100.0% writes), screen=41x208
+2026-02-17T11:45:36.424Z [DEBUG] [useDeferredValue] Messages deferred by 1 (65→66)
+2026-02-17T11:45:36.453Z [DEBUG] High write ratio: blit=0, write=1348 (100.0% writes), screen=41x208
+2026-02-17T11:45:36.883Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:45:36.883Z [ERROR] Error: Error: 1P event logging: 36 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:36.883Z [ERROR] Error: Error: {"message":"Failed to export 36 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 36 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:36.987Z [DEBUG] [useDeferredValue] Messages deferred by 1 (66→67)
+2026-02-17T11:45:36.998Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:36.998Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:36.999Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:36.999Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:36.999Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:36.999Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:36.999Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:36.999Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:36.999Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:36.999Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:36.999Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:36.999Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:37.009Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:37.009Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:37.009Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:37.010Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:37.010Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:37.010Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:37.011Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:37.011Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:37.011Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:37.012Z [DEBUG] autocompact: tokens=43455 threshold=167000 effectiveWindow=180000
+2026-02-17T11:45:37.012Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:45:37.013Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:37.013Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:37.013Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:37.013Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:37.015Z [DEBUG] [useDeferredValue] Messages deferred by 3 (67→70)
+2026-02-17T11:45:37.017Z [DEBUG] High write ratio: blit=0, write=1375 (100.0% writes), screen=41x208
+2026-02-17T11:45:37.042Z [DEBUG] High write ratio: blit=0, write=1290 (100.0% writes), screen=41x208
+2026-02-17T11:45:39.857Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:41.083Z [DEBUG] [useDeferredValue] Messages deferred by 1 (70→71)
+2026-02-17T11:45:41.111Z [DEBUG] High write ratio: blit=0, write=1321 (100.0% writes), screen=41x208
+2026-02-17T11:45:41.510Z [DEBUG] [useDeferredValue] Messages deferred by 1 (71→72)
+2026-02-17T11:45:41.538Z [DEBUG] High write ratio: blit=0, write=1350 (100.0% writes), screen=41x208
+2026-02-17T11:45:41.898Z [DEBUG] [useDeferredValue] Messages deferred by 1 (72→73)
+2026-02-17T11:45:41.927Z [DEBUG] High write ratio: blit=0, write=1375 (100.0% writes), screen=41x208
+2026-02-17T11:45:41.949Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:41.950Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:41.951Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:41.951Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:41.951Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:41.951Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:41.951Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:41.951Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:41.951Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:41.951Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:41.951Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:41.951Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:41.956Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:41.956Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:41.956Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:41.957Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:41.957Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:41.957Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:41.958Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:41.958Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:41.958Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:41.959Z [DEBUG] autocompact: tokens=53393 threshold=167000 effectiveWindow=180000
+2026-02-17T11:45:41.959Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:45:41.960Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:41.960Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:41.960Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:41.960Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:41.961Z [DEBUG] [useDeferredValue] Messages deferred by 3 (73→76)
+2026-02-17T11:45:41.986Z [DEBUG] High write ratio: blit=0, write=1290 (100.0% writes), screen=41x208
+2026-02-17T11:45:42.888Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:45:42.888Z [ERROR] Error: Error: 1P event logging: 71 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:42.889Z [ERROR] Error: Error: {"message":"Failed to export 71 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 71 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:45.385Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:48.151Z [DEBUG] [useDeferredValue] Messages deferred by 1 (76→77)
+2026-02-17T11:45:48.189Z [DEBUG] High write ratio: blit=0, write=1389 (100.0% writes), screen=41x208
+2026-02-17T11:45:48.766Z [DEBUG] [useDeferredValue] Messages deferred by 1 (77→78)
+2026-02-17T11:45:48.790Z [DEBUG] High write ratio: blit=0, write=1414 (100.0% writes), screen=41x208
+2026-02-17T11:45:49.388Z [DEBUG] executePreToolHooks called for tool: Grep
+2026-02-17T11:45:49.391Z [DEBUG] Getting matching hook commands for PreToolUse with query: Grep
+2026-02-17T11:45:49.391Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:49.391Z [DEBUG] Matched 0 unique hooks for query "Grep" (0 before deduplication)
+2026-02-17T11:45:49.391Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:49.392Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:49.392Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:49.392Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:49.392Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:49.392Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:49.392Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:49.392Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:49.398Z [DEBUG] [useDeferredValue] Messages deferred by 1 (78→79)
+2026-02-17T11:45:49.402Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:49.402Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:49.402Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:49.403Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:49.403Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:49.403Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:49.404Z [DEBUG] [useDeferredValue] Messages deferred by 3 (78→81)
+2026-02-17T11:45:49.433Z [DEBUG] High write ratio: blit=0, write=1320 (100.0% writes), screen=41x208
+2026-02-17T11:45:50.009Z [DEBUG] Getting matching hook commands for PostToolUse with query: Grep
+2026-02-17T11:45:50.009Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:50.009Z [DEBUG] Matched 1 unique hooks for query "Grep" (1 before deduplication)
+2026-02-17T11:45:50.011Z [DEBUG] autocompact: tokens=57846 threshold=167000 effectiveWindow=180000
+2026-02-17T11:45:50.011Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:45:50.013Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:50.013Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:50.013Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:50.013Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:50.015Z [DEBUG] [useDeferredValue] Messages deferred by 1 (81→82)
+2026-02-17T11:45:50.041Z [DEBUG] High write ratio: blit=0, write=1290 (100.0% writes), screen=41x208
+2026-02-17T11:45:53.163Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:53.414Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:45:53.414Z [ERROR] Error: Error: 1P event logging: 35 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:53.414Z [ERROR] Error: Error: {"message":"Failed to export 35 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 35 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:53.879Z [DEBUG] [useDeferredValue] Messages deferred by 1 (82→83)
+2026-02-17T11:45:53.914Z [DEBUG] High write ratio: blit=0, write=1312 (100.0% writes), screen=41x208
+2026-02-17T11:45:54.436Z [DEBUG] [useDeferredValue] Messages deferred by 1 (83→84)
+2026-02-17T11:45:54.466Z [DEBUG] High write ratio: blit=0, write=1338 (100.0% writes), screen=41x208
+2026-02-17T11:45:55.021Z [DEBUG] [useDeferredValue] Messages deferred by 1 (84→85)
+2026-02-17T11:45:55.052Z [DEBUG] High write ratio: blit=0, write=1363 (100.0% writes), screen=41x208
+2026-02-17T11:45:55.195Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:55.196Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:55.197Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:45:55.197Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:55.197Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:55.197Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:55.197Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:55.197Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:55.197Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:55.197Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:45:55.197Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:45:55.197Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:45:55.202Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:55.202Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:55.202Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:55.203Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:55.203Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:55.203Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:55.204Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:45:55.204Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:45:55.204Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:45:55.205Z [DEBUG] autocompact: tokens=61727 threshold=167000 effectiveWindow=180000
+2026-02-17T11:45:55.205Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:45:55.206Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:45:55.206Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:45:55.206Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:45:55.206Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:45:55.207Z [DEBUG] [useDeferredValue] Messages deferred by 3 (85→88)
+2026-02-17T11:45:55.231Z [DEBUG] High write ratio: blit=0, write=1290 (100.0% writes), screen=41x208
+2026-02-17T11:45:57.900Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:45:59.199Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:45:59.199Z [ERROR] Error: Error: 1P event logging: 37 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:59.199Z [ERROR] Error: Error: {"message":"Failed to export 37 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 37 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:45:59.302Z [DEBUG] [useDeferredValue] Messages deferred by 1 (88→89)
+2026-02-17T11:45:59.333Z [DEBUG] High write ratio: blit=0, write=1317 (100.0% writes), screen=41x208
+2026-02-17T11:46:00.026Z [DEBUG] [useDeferredValue] Messages deferred by 1 (89→90)
+2026-02-17T11:46:00.059Z [DEBUG] High write ratio: blit=0, write=1345 (100.0% writes), screen=41x208
+2026-02-17T11:46:00.748Z [DEBUG] [useDeferredValue] Messages deferred by 1 (90→91)
+2026-02-17T11:46:00.766Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:46:00.766Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:46:00.767Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:46:00.767Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:46:00.767Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:46:00.767Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:46:00.767Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:46:00.767Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:46:00.767Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:46:00.767Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:46:00.767Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:46:00.767Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:46:00.771Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:46:00.771Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:46:00.771Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:46:00.772Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:46:00.772Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:46:00.772Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:46:00.773Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:46:00.773Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:46:00.773Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:46:00.774Z [DEBUG] autocompact: tokens=67141 threshold=167000 effectiveWindow=180000
+2026-02-17T11:46:00.774Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:46:00.775Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:46:00.775Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:46:00.775Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:46:00.775Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:46:00.776Z [DEBUG] [useDeferredValue] Messages deferred by 3 (91→94)
+2026-02-17T11:46:00.779Z [DEBUG] High write ratio: blit=0, write=1373 (100.0% writes), screen=41x208
+2026-02-17T11:46:00.805Z [DEBUG] High write ratio: blit=0, write=1289 (100.0% writes), screen=41x208
+2026-02-17T11:46:03.618Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:46:04.572Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:46:04.572Z [ERROR] Error: Error: 1P event logging: 38 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:46:04.572Z [ERROR] Error: Error: {"message":"Failed to export 38 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 38 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:46:05.302Z [DEBUG] [useDeferredValue] Messages deferred by 1 (94→95)
+2026-02-17T11:46:05.335Z [DEBUG] High write ratio: blit=0, write=1314 (100.0% writes), screen=41x208
+2026-02-17T11:46:05.812Z [DEBUG] [useDeferredValue] Messages deferred by 1 (95→96)
+2026-02-17T11:46:05.841Z [DEBUG] High write ratio: blit=0, write=1346 (100.0% writes), screen=41x208
+2026-02-17T11:46:06.261Z [DEBUG] [useDeferredValue] Messages deferred by 1 (96→97)
+2026-02-17T11:46:06.287Z [DEBUG] High write ratio: blit=0, write=1376 (100.0% writes), screen=41x208
+2026-02-17T11:46:06.293Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:46:06.295Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:46:06.295Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:46:06.296Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:46:06.296Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:46:06.296Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:46:06.296Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:46:06.296Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:46:06.296Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:46:06.296Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:46:06.296Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:46:06.296Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:46:06.301Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:46:06.301Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:46:06.301Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:46:06.302Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:46:06.302Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:46:06.302Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:46:06.302Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:46:06.302Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:46:06.302Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:46:06.303Z [DEBUG] autocompact: tokens=72554 threshold=167000 effectiveWindow=180000
+2026-02-17T11:46:06.303Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:46:06.304Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:46:06.304Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:46:06.305Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:46:06.305Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:46:06.306Z [DEBUG] [useDeferredValue] Messages deferred by 3 (97→100)
+2026-02-17T11:46:06.330Z [DEBUG] High write ratio: blit=0, write=1289 (100.0% writes), screen=41x208
+2026-02-17T11:46:09.040Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:46:10.490Z [DEBUG] [useDeferredValue] Messages deferred by 1 (100→101)
+2026-02-17T11:46:10.509Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:46:10.510Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:46:10.510Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:46:10.510Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:46:10.514Z [DEBUG] High write ratio: blit=0, write=1310 (100.0% writes), screen=41x208
+2026-02-17T11:46:10.515Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:46:10.515Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:46:10.515Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:46:10.516Z [DEBUG] autocompact: tokens=73949 threshold=167000 effectiveWindow=180000
+2026-02-17T11:46:10.516Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:46:10.517Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.457; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:46:10.517Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:46:10.517Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:46:10.517Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:46:10.518Z [DEBUG] [useDeferredValue] Messages deferred by 1 (101→102)
+2026-02-17T11:46:10.548Z [DEBUG] High write ratio: blit=0, write=1310 (100.0% writes), screen=41x208
+2026-02-17T11:46:10.578Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:46:10.578Z [ERROR] Error: Error: 1P event logging: 36 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:46:10.578Z [ERROR] Error: Error: {"message":"Failed to export 36 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 36 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:46:13.339Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:46:15.835Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:46:15.835Z [ERROR] Error: Error: 1P event logging: 20 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:46:15.836Z [ERROR] Error: Error: {"message":"Failed to export 20 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 20 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:46:29.439Z [DEBUG] Failed to check metrics opt-out status: Auth error: No API key available
+2026-02-17T11:46:29.439Z [ERROR] Error: Error: Auth error: No API key available
+    at IWB (/$bunfs/root/claude:2153:25199)
+    at L78 (/$bunfs/root/claude:2153:25475)
+    at <anonymous> (/$bunfs/root/claude:62:19034)
+    at PYR (/$bunfs/root/claude:2153:26169)
+    at doExport (/$bunfs/root/claude:2153:26987)
+    at export (/$bunfs/root/claude:2153:26693)
+    at <anonymous> (/$bunfs/root/claude:2105:93164)
+    at <anonymous> (/$bunfs/root/claude:2105:93104)
+    at new Promise (native:1:11)
+    at Bl7 (/$bunfs/root/claude:2105:93081)
+2026-02-17T11:46:29.439Z [DEBUG] Metrics export disabled by organization setting
+2026-02-17T11:48:34.878Z [DEBUG] Getting matching hook commands for SubagentStop with query: Plan
+2026-02-17T11:48:34.878Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:48:34.878Z [DEBUG] Matched 0 unique hooks for query "Plan" (0 before deduplication)
+2026-02-17T11:48:34.880Z [DEBUG] Getting matching hook commands for PostToolUse with query: Task
+2026-02-17T11:48:34.880Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:48:34.880Z [DEBUG] Matched 0 unique hooks for query "Task" (0 before deduplication)
+2026-02-17T11:48:34.882Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-02-17T11:48:34.882Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-02-17T11:48:34.882Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-02-17T11:48:34.882Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-02-17T11:48:34.883Z [DEBUG] autocompact: tokens=42007 threshold=167000 effectiveWindow=180000
+2026-02-17T11:48:34.883Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:48:34.887Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328914887
+2026-02-17T11:48:34.887Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:48:34.888Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:48:34.888Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:48:34.888Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328914887 to /Users/zhouboli/.claude.json
+2026-02-17T11:48:34.889Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:48:34.890Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.30a; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:48:34.891Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:48:34.891Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:48:34.892Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328914892
+2026-02-17T11:48:34.892Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:48:34.892Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:48:34.892Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:48:34.892Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328914892 to /Users/zhouboli/.claude.json
+2026-02-17T11:48:34.892Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:48:34.893Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328914893
+2026-02-17T11:48:34.893Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:48:34.893Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:48:34.893Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:48:34.893Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328914893 to /Users/zhouboli/.claude.json
+2026-02-17T11:48:34.893Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:48:34.894Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:48:34.896Z [DEBUG] [useDeferredValue] Messages deferred by 2 (102→104)
+2026-02-17T11:48:34.904Z [DEBUG] High write ratio: blit=0, write=1221 (100.0% writes), screen=36x208
+2026-02-17T11:48:34.943Z [DEBUG] High write ratio: blit=0, write=1289 (100.0% writes), screen=38x208
+2026-02-17T11:48:37.418Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:48:37.418Z [DEBUG] [useDeferredValue] Messages deferred by 1 (104→105)
+2026-02-17T11:48:37.448Z [DEBUG] High write ratio: blit=0, write=1283 (100.0% writes), screen=38x208
+2026-02-17T11:48:39.419Z [DEBUG] [useDeferredValue] Messages deferred by 1 (105→106)
+2026-02-17T11:48:39.461Z [DEBUG] High write ratio: blit=0, write=1289 (100.0% writes), screen=38x208
+2026-02-17T11:48:40.140Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:48:40.140Z [ERROR] Error: Error: 1P event logging: 17 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:48:40.140Z [ERROR] Error: Error: {"message":"Failed to export 17 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 17 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:48:40.190Z [DEBUG] [useDeferredValue] Messages deferred by 1 (106→107)
+2026-02-17T11:48:40.225Z [DEBUG] High write ratio: blit=0, write=1351 (100.0% writes), screen=42x208
+2026-02-17T11:48:40.636Z [DEBUG] [useDeferredValue] Messages deferred by 1 (107→108)
+2026-02-17T11:48:40.644Z [DEBUG] High write ratio: blit=0, write=1352 (100.0% writes), screen=42x208
+2026-02-17T11:48:40.668Z [DEBUG] High write ratio: blit=0, write=1352 (100.0% writes), screen=42x208
+2026-02-17T11:48:41.235Z [DEBUG] [useDeferredValue] Messages deferred by 1 (108→109)
+2026-02-17T11:48:41.245Z [DEBUG] [useDeferredValue] Messages deferred by 1 (108→109)
+2026-02-17T11:48:41.257Z [DEBUG] High write ratio: blit=0, write=1353 (100.0% writes), screen=42x208
+2026-02-17T11:48:41.667Z [DEBUG] [useDeferredValue] Messages deferred by 1 (109→110)
+2026-02-17T11:48:41.697Z [DEBUG] High write ratio: blit=0, write=1353 (100.0% writes), screen=42x208
+2026-02-17T11:48:41.709Z [DEBUG] High write ratio: blit=0, write=1353 (100.0% writes), screen=42x208
+2026-02-17T11:48:41.711Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:48:41.712Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:48:41.712Z [DEBUG] executePreToolHooks called for tool: Read
+2026-02-17T11:48:41.713Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:48:41.713Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:48:41.713Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:48:41.713Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:48:41.713Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:48:41.713Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:48:41.713Z [DEBUG] Getting matching hook commands for PreToolUse with query: Read
+2026-02-17T11:48:41.713Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:48:41.713Z [DEBUG] Matched 0 unique hooks for query "Read" (0 before deduplication)
+2026-02-17T11:48:41.719Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:48:41.719Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:48:41.719Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:48:41.720Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:48:41.720Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:48:41.720Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:48:41.721Z [DEBUG] Getting matching hook commands for PostToolUse with query: Read
+2026-02-17T11:48:41.721Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:48:41.721Z [DEBUG] Matched 1 unique hooks for query "Read" (1 before deduplication)
+2026-02-17T11:48:41.722Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-02-17T11:48:41.722Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-02-17T11:48:41.722Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-02-17T11:48:41.722Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-02-17T11:48:41.723Z [DEBUG] autocompact: tokens=45949 threshold=167000 effectiveWindow=180000
+2026-02-17T11:48:41.723Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:48:41.725Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328921725
+2026-02-17T11:48:41.725Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:48:41.725Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:48:41.725Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:48:41.725Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328921725 to /Users/zhouboli/.claude.json
+2026-02-17T11:48:41.725Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:48:41.725Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.30a; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:48:41.726Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:48:41.726Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:48:41.726Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328921726
+2026-02-17T11:48:41.726Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:48:41.726Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:48:41.726Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:48:41.726Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328921726 to /Users/zhouboli/.claude.json
+2026-02-17T11:48:41.727Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:48:41.727Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328921727
+2026-02-17T11:48:41.727Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:48:41.727Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:48:41.727Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:48:41.727Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328921727 to /Users/zhouboli/.claude.json
+2026-02-17T11:48:41.727Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:48:41.728Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:48:41.729Z [DEBUG] [useDeferredValue] Messages deferred by 11 (110→121)
+2026-02-17T11:48:41.739Z [DEBUG] High write ratio: blit=0, write=1353 (100.0% writes), screen=42x208
+2026-02-17T11:48:44.208Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:48:46.653Z [DEBUG] [useDeferredValue] Messages deferred by 1 (121→122)
+2026-02-17T11:48:46.685Z [DEBUG] High write ratio: blit=0, write=1353 (100.0% writes), screen=42x208
+2026-02-17T11:48:47.005Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:48:47.005Z [ERROR] Error: Error: 1P event logging: 32 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:48:47.005Z [ERROR] Error: Error: {"message":"Failed to export 32 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 32 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:48:47.556Z [DEBUG] [useDeferredValue] Messages deferred by 1 (122→123)
+2026-02-17T11:48:47.590Z [DEBUG] High write ratio: blit=0, write=1372 (100.0% writes), screen=44x208
+2026-02-17T11:48:57.751Z [DEBUG] Restarting caffeinate to maintain sleep prevention
+2026-02-17T11:48:57.751Z [DEBUG] Stopped caffeinate, allowing sleep
+2026-02-17T11:48:57.752Z [DEBUG] Started caffeinate to prevent sleep
+2026-02-17T11:49:40.587Z [DEBUG] [useDeferredValue] Messages deferred by 1 (123→124)
+2026-02-17T11:49:40.625Z [DEBUG] High write ratio: blit=0, write=1385 (100.0% writes), screen=46x208
+2026-02-17T11:49:40.657Z [DEBUG] executePreToolHooks called for tool: Write
+2026-02-17T11:49:40.659Z [DEBUG] Getting matching hook commands for PreToolUse with query: Write
+2026-02-17T11:49:40.659Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:49:40.659Z [DEBUG] Matched 0 unique hooks for query "Write" (0 before deduplication)
+2026-02-17T11:49:40.660Z [DEBUG] FileHistory: Tracked file modification for /Users/zhouboli/.claude/plans/joyful-soaring-cosmos.md
+2026-02-17T11:49:40.668Z [DEBUG] High write ratio: blit=0, write=1385 (100.0% writes), screen=46x208
+2026-02-17T11:49:40.669Z [DEBUG] [lspRecommendation] Looking for LSP plugins for .md
+2026-02-17T11:49:41.241Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude/plans/joyful-soaring-cosmos.md.tmp.47390.1771328981241
+2026-02-17T11:49:41.242Z [DEBUG] Temp file written successfully, size: 5581 bytes
+2026-02-17T11:49:41.242Z [DEBUG] Renaming /Users/zhouboli/.claude/plans/joyful-soaring-cosmos.md.tmp.47390.1771328981241 to /Users/zhouboli/.claude/plans/joyful-soaring-cosmos.md
+2026-02-17T11:49:41.242Z [DEBUG] File /Users/zhouboli/.claude/plans/joyful-soaring-cosmos.md written atomically
+2026-02-17T11:49:41.244Z [DEBUG] Getting matching hook commands for PostToolUse with query: Write
+2026-02-17T11:49:41.244Z [DEBUG] Found 5 hook matchers in settings
+2026-02-17T11:49:41.244Z [DEBUG] Matched 1 unique hooks for query "Write" (1 before deduplication)
+2026-02-17T11:49:41.245Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-02-17T11:49:41.245Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-02-17T11:49:41.245Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-02-17T11:49:41.245Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-02-17T11:49:41.246Z [DEBUG] autocompact: tokens=50031 threshold=167000 effectiveWindow=180000
+2026-02-17T11:49:41.246Z [DEBUG] Auto tool search disabled: 0 tokens (threshold: 20000, 10% of context) [source: query]
+2026-02-17T11:49:41.249Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328981249
+2026-02-17T11:49:41.249Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:49:41.249Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:49:41.249Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:49:41.249Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328981249 to /Users/zhouboli/.claude.json
+2026-02-17T11:49:41.249Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:49:41.249Z [DEBUG] attribution header x-anthropic-billing-header: cc_version=2.1.44.30a; cc_entrypoint=cli; cch=00000;
+2026-02-17T11:49:41.249Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-02-17T11:49:41.249Z [DEBUG] [API:auth] OAuth token check starting
+2026-02-17T11:49:41.250Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328981250
+2026-02-17T11:49:41.250Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:49:41.250Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:49:41.250Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:49:41.250Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328981250 to /Users/zhouboli/.claude.json
+2026-02-17T11:49:41.250Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:49:41.251Z [DEBUG] Writing to temp file: /Users/zhouboli/.claude.json.tmp.47390.1771328981251
+2026-02-17T11:49:41.251Z [DEBUG] Preserving file permissions: 100600
+2026-02-17T11:49:41.251Z [DEBUG] Temp file written successfully, size: 20655 bytes
+2026-02-17T11:49:41.251Z [DEBUG] Applied original permissions to temp file
+2026-02-17T11:49:41.251Z [DEBUG] Renaming /Users/zhouboli/.claude.json.tmp.47390.1771328981251 to /Users/zhouboli/.claude.json
+2026-02-17T11:49:41.251Z [DEBUG] File /Users/zhouboli/.claude.json written atomically
+2026-02-17T11:49:41.251Z [DEBUG] [API:auth] OAuth token check complete
+2026-02-17T11:49:41.253Z [DEBUG] [useDeferredValue] Messages deferred by 3 (124→127)
+2026-02-17T11:49:41.258Z [DEBUG] High write ratio: blit=0, write=1385 (100.0% writes), screen=46x208
+2026-02-17T11:49:41.295Z [DEBUG] High write ratio: blit=0, write=1406 (100.0% writes), screen=47x208
+2026-02-17T11:49:44.205Z [DEBUG] Stream started - received first chunk
+2026-02-17T11:49:45.919Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:49:45.919Z [ERROR] Error: Error: 1P event logging: 22 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:49:45.919Z [ERROR] Error: Error: {"message":"Failed to export 22 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 22 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:49:48.216Z [DEBUG] [useDeferredValue] Messages deferred by 1 (127→128)
+2026-02-17T11:49:48.222Z [DEBUG] [useDeferredValue] Messages deferred by 1 (127→128)
+2026-02-17T11:49:48.263Z [DEBUG] High write ratio: blit=0, write=1713 (100.0% writes), screen=55x208
+2026-02-17T11:49:48.370Z [DEBUG] [useDeferredValue] Messages deferred by 1 (128→129)
+2026-02-17T11:49:48.400Z [DEBUG] High write ratio: blit=0, write=1713 (100.0% writes), screen=55x208
+2026-02-17T11:49:48.401Z [DEBUG] executePreToolHooks called for tool: ExitPlanMode
+2026-02-17T11:49:48.401Z [DEBUG] Getting matching hook commands for PreToolUse with query: ExitPlanMode
+2026-02-17T11:49:48.401Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T11:49:48.402Z [DEBUG] Matched 0 unique hooks for query "ExitPlanMode" (0 before deduplication)
+2026-02-17T11:49:48.402Z [DEBUG] executePermissionRequestHooks called for tool: ExitPlanMode
+2026-02-17T11:49:48.402Z [DEBUG] Getting matching hook commands for PermissionRequest with query: ExitPlanMode
+2026-02-17T11:49:48.402Z [DEBUG] Found 1 hook matchers in settings
+2026-02-17T11:49:48.402Z [DEBUG] Matched 1 unique hooks for query "ExitPlanMode" (1 before deduplication)
+2026-02-17T11:49:48.431Z [DEBUG] High write ratio: blit=0, write=8372 (100.0% writes), screen=249x208
+2026-02-17T11:49:49.872Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-02-17T11:49:49.872Z [DEBUG] Hook PermissionRequest:ExitPlanMode (PermissionRequest) success:
+]0;● maimai-assistant: needs approval
+2026-02-17T11:49:53.913Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:49:53.913Z [ERROR] Error: Error: 1P event logging: 4 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:49:53.914Z [ERROR] Error: Error: {"message":"Failed to export 4 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 4 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:49:54.440Z [DEBUG] Getting matching hook commands for Notification with query: permission_prompt
+2026-02-17T11:49:54.440Z [DEBUG] Found 1 hook matchers in settings
+2026-02-17T11:49:54.440Z [DEBUG] Matched 1 unique hooks for query "permission_prompt" (1 before deduplication)
+2026-02-17T11:49:56.114Z [DEBUG] Notification:permission_prompt [/Users/zhouboli/.claude/hooks/peon-ping/peon.sh] completed with status 0
+2026-02-17T11:49:56.115Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-02-17T11:49:59.753Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.b4b44f55-7916-4a90-8367-dbfb7f51ffa4.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T11:49:59.753Z [ERROR] Error: Error: 1P event logging: 2 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:49:59.753Z [ERROR] Error: Error: {"message":"Failed to export 2 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 2 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T11:51:29.448Z [DEBUG] Metrics export disabled by organization setting

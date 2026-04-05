@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Data - Maimai Assistant{% endblock %}
+
+{% block content %}
+<!-- Tabs -->
+<div class="tabs">
+    <button class="tab active" data-tab="candidates">Candidates</button>
+    <button class="tab" data-tab="messages">Messages</button>
+</div>
+
+<!-- Candidates Tab -->
+<div id="tab-candidates" class="tab-content active">
+    <div class="grid">
+        <input type="search" id="candidate-search" placeholder="Search by name, company, or title..." oninput="debouncedLoadCandidates()">
+        <button class="outline" onclick="exportCandidates()">Export Excel</button>
+    </div>
+
+    <table id="candidates-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Title</th>
+                <th>Company</th>
+                <th>Location</th>
+                <th>Messages</th>
+                <th>First Seen</th>
+            </tr>
+        </thead>
+        <tbody id="candidates-body">
+            <tr><td colspan="7">Loading...</td></tr>
+        </tbody>
+    </table>
+    <div id="candidates-pagination" class="pagination-controls"></div>
+</div>
+
+<!-- Messages Tab -->
+<div id="tab-messages" class="tab-content">
+    <table id="messages-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Candidate</th>
+                <th>Template</th>
+                <th>Status</th>
+                <th>Content</th>
+                <th>Sent At</th>
+            </tr>
+        </thead>
+        <tbody id="messages-body">
+            <tr><td colspan="6">Loading...</td></tr>
+        </tbody>
+    </table>
+    <div id="msg-pagination" class="pagination-controls"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// --- Tab switching ---
+document.querySelectorAll('.tabs .tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+});
+
+// --- Candidates ---
+let candidatePage = 1;
+const candidatePageSize = 20;
+
+async function loadCandidates(page = 1) {
+    candidatePage = page;
+    const search = document.getElementById('candidate-search').value.trim();
+    const params = new URLSearchParams({page, page_size: candidatePageSize});
+    if (search) params.append('search', search);
+
+    try {
+        const res = await safeFetch(`/api/candidates?${params}`);
+        const data = await res.json();
+        const tbody = document.getElementById('candidates-body');
+
+        if (!data.items.length) {
+            tbody.innerHTML = '<tr><td colspan="7">No candidates found</td></tr>';
+            document.getElementById('candidates-pagination').innerHTML = '';
+            return;
+        }
+
+        tbody.innerHTML = data.items.map((c, i) => `
+            <tr>
+                <td>${(page - 1) * candidatePageSize + i + 1}</td>
+                <td>${escapeHtml(c.name || '--')}</td>
+                <td>${escapeHtml(c.title || '--')}</td>
+                <td>${escapeHtml(c.company || '--')}</td>
+                <td>${escapeHtml(c.location || '--')}</td>
+                <td>${c.message_count}</td>
+                <td>${c.first_seen ? new Date(c.first_seen).toLocaleDateString() : '--'}</td>
+            </tr>
+        `).join('');
+
+        const pag = document.getElementById('candidates-pagination');
+        let html = '';
+        if (page > 1) html += `<button class="outline" onclick="loadCandidates(${page-1})">Previous</button> `;
+        html += `<span>Page ${page} / ${data.total_pages} (${data.total} total)</span> `;
+        if (page < data.total_pages) html += `<button class="outline" onclick="loadCandidates(${page+1})">Next</button>`;
+        pag.innerHTML = html;
+    } catch (e) {
+        console.error('Failed to load candidates:', e);
+    }
+}
+
+let candidateDebounce;
+function debouncedLoadCandidates() {
+    clearTimeout(candidateDebounce);
+    candidateDebounce = setTimeout(() => loadCandidates(1), 300);
+}
+
+async function exportCandidates() {
+    try {
+        const search = document.getElementById('candidate-search').value.trim();
+        const res = await safeFetch('/api/export', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({format: 'xlsx', search_keyword: search || null}),
+        });
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'candidates.xlsx';
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('Export failed: ' + e.message);
+    }
+}
+
+// --- Messages ---
+let msgPage = 1;
+const msgPageSize = 20;
+
+async function loadMessages(page = 1) {
+    msgPage = page;
+    try {
+        const msgRes = await safeFetch(`/api/messages?page=${page}&page_size=${msgPageSize}`);
+        const tbody = document.getElementById('messages-body');
+        const msgData = await msgRes.json();
+
+        if (!msgData.items || !msgData.items.length) {
+            tbody.innerHTML = '<tr><td colspan="6">No messages yet</td></tr>';
+            document.getElementById('msg-pagination').innerHTML = '';
+            return;
+        }
+        tbody.innerHTML = msgData.items.map((m, i) => `
+            <tr>
+                <td>${(page-1) * msgPageSize + i + 1}</td>
+                <td>${escapeHtml(m.candidate_name || m.candidate_maimai_id)}</td>
+                <td>${escapeHtml(m.template_name || '--')}</td>
+                <td><span class="badge" data-status="${m.status}">${m.status}</span></td>
+                <td title="${escapeHtml(m.content)}">${escapeHtml(m.content.substring(0, 60))}${m.content.length > 60 ? '...' : ''}</td>
+                <td>${m.sent_at ? new Date(m.sent_at).toLocaleString() : '--'}</td>
+            </tr>
+        `).join('');
+
+        const pag = document.getElementById('msg-pagination');
+        let html = '';
+        if (page > 1) html += `<button class="outline" onclick="loadMessages(${page-1})">Previous</button> `;
+        html += `<span>Page ${page} / ${msgData.total_pages} (${msgData.total} total)</span> `;
+        if (page < msgData.total_pages) html += `<button class="outline" onclick="loadMessages(${page+1})">Next</button>`;
+        pag.innerHTML = html;
+    } catch (e) {
+        console.error('Failed to load messages:', e);
+        document.getElementById('messages-body').innerHTML = '<tr><td colspan="6">Error loading messages</td></tr>';
+    }
+}
+
+// Init
+loadCandidates();
+loadMessages();
+</script>
+{% endblock %}

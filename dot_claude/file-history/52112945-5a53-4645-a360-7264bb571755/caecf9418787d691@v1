@@ -1,0 +1,113 @@
+# Code Review History
+
+工程审查历史记录，由 code-review-memory skill 自动维护。
+
+---
+
+## Review #1 - 2026-02-13
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/modules/message.py:226-244 | `_handle_quick_contact` 对同一 page 并发 7 个 `wait_for_selector`，Playwright 不支持并发操作 | 已修复 |
+| 严重 | src/modules/message.py:226-244 | `asyncio.create_task` 创建的任务取消后未 await，可能产生泄漏警告 | 已修复 |
+| 严重 | src/utils/captcha.py:43 | `sys.stdin.readline()` 阻塞事件循环，可能导致 CDP 连接超时 | 已修复 |
+| 中等 | src/modules/search.py:680-715 | `_save_candidates_to_db` N+1 查询，每候选人 2 次 SELECT | 已修复 |
+| 中等 | src/modules/message.py:612-628 | `send_message_batch` 跳过已发消息检查逐条开 DB session | 已修复 |
+| 中等 | src/modules/export.py:129-131 | `_get_candidates_data` 导出时每候选人单独查消息记录 | 已修复 |
+| 中等 | 多文件 | `datetime.utcnow()`（naive）与 `_utcnow()`（aware）混用 | 已修复 |
+| 中等 | src/modules/selector_discovery.py:286 | `apply_discovered_selectors` 验证失败仍返回 True | 已修复 |
+| 中等 | src/modules/message.py↔selector_discovery.py | 循环依赖（延迟 import 绕过，运行时正常） | 待处理 |
+| 中等 | src/modules/message.py:552+1479 | `send_message_batch` 和 enterprise 版约 100 行重复逻辑 | 待处理 |
+| 中等 | src/utils/rate_limiter.py:226 | `min_interval` 全局冷却而非按操作类型 | 已修复 |
+| 中等 | src/utils/validators.py:9-32 | `validate_maimai_id` 调用方未捕获返回值 | 已修复 |
+| 中等 | src/utils/config.py:15 | config_dir 使用相对路径 | 已修复 |
+| 轻微 | src/modules/profile.py:450 | `import re` 在函数内部 | 已修复 |
+| 轻微 | src/modules/message.py:1445,271 | `import sys`、`import traceback` 在函数内部 | 已修复 |
+| 轻微 | src/utils/delays.py:86 | `import datetime` 在函数内部 | 已修复 |
+| 轻微 | src/utils/checkpoint.py:17 | 硬编码路径 `data/.checkpoints` | 已修复 |
+| 轻微 | src/services/pipeline.py:233 | 硬编码路径 `data/reports` | 已修复 |
+| 轻微 | src/models/database.py:12 | `declarative_base()` 使用已弃用的 `sqlalchemy.ext.declarative` | 已修复 |
+| 轻微 | src/modules/search.py:551 | `profile_links = []` 冗余初始化 | 已修复 |
+
+### 修复内容
+- **并发改顺序**: `_handle_quick_contact` 的提交按钮探测从 `asyncio.create_task` 并发改为 `for` 循环顺序探测，每个 selector 1.5s 超时
+- **异步 stdin**: captcha.py 的 `sys.stdin.readline()` 改为 `await loop.run_in_executor(None, sys.stdin.readline)`
+- **N+1 查询优化**: search/message/export 三处改为 `IN (...)` 批量预取后内存查找
+- **datetime 统一**: rate_limiter.py、message.py、checkpoint.py 全部统一为 `datetime.now(timezone.utc)`
+- **返回值修复**: selector_discovery 验证失败现在正确返回 False
+- **validator 返回值**: message.py 和 profile.py 的 `validate_maimai_id` 调用方现在捕获清理后的值
+- **per-type 冷却**: rate_limiter 的 min_interval 检查改为按 action_type 查最后操作时间
+- **config 绝对路径**: Config 类默认从 `__file__` 向上推导项目根目录下的 config/
+- **imports 提升**: re/sys/traceback/datetime 从函数内部移到模块顶层
+- **路径可配置**: checkpoint_dir 和 report_dir 改为从 settings.json 读取
+- **deprecation 修复**: `declarative_base` 改用 `sqlalchemy.orm.declarative_base`
+- **测试修复**: test_validators.py 移除对已删除函数的测试，新增 template_variables 测试
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| src/modules/message.py:38 | 移除 `MAIMAI_PROFILE_URL` 常量（profile.py 有同名在用） | 未使用常量 |
+| src/utils/rate_limiter.py:35 | 移除 `_error_timestamps` 及相关代码（从未被填充） | 死代码管道 |
+| src/modules/message.py:437 | 空 except 块添加 `logger.debug` 避免隐藏 "等待回应" 检测失败 | 空异常处理 |
+| tests/test_validators.py | 移除引用已删除函数的测试（validate_page_number/validate_url/sanitize_text） | 过时测试 |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复前 1 error（test_validators 导入已删除函数），修复后全部通过
+
+### 复盘
+- **做得好的**: N+1 查询的批量优化模式可复用；datetime 统一有效避免了 naive/aware 混用陷阱
+- **待改进的**: `send_message_batch` 和 `send_message_batch_enterprise` 仍有约 100 行重复代码，应提取为带回调的通用批量编排函数；循环依赖（message↔selector_discovery）虽可运行但架构上需解耦
+- **遗留项**: 批量发送重复代码未重构（涉及面广，需独立 PR）；循环依赖未解耦（deferred import 当前可工作，重构优先级低）
+
+---
+
+## Review #2 - 2026-02-14
+
+### 发现的问题
+| 严重程度 | 文件 | 问题描述 | 状态 |
+|---------|------|---------|------|
+| 严重 | src/core/browser.py:31,75-83 | `asyncio.Lock` 绑定创建时的事件循环，多次 `asyncio.run()` 会 RuntimeError | 已修复 |
+| 严重 | src/modules/search.py:727-728 | `_save_candidates_to_db` 吞掉全部异常，DB 故障时静默丢数据 | 已修复 |
+| 严重 | src/modules/search.py:666-668 | `_extract_search_results` 外层 try-except 吞错误，提取失败返回空列表无告警 | 已修复 |
+| 中等 | src/utils/rate_limiter.py:310-332 | `async_check_rate_limit` 无总体超时，daily limit 触发后可挂起数小时 | 已修复 |
+| 中等 | src/utils/config.py:50-54 | `Config.get()` 把 JSON `null` 等同于"不存在"，无法显式禁用配置项 | 已修复 |
+| 中等 | src/modules/auth.py:109 | `check_login_status` 硬编码 `wait_for_timeout(3000)`，每次命令多等 3 秒 | 已修复 |
+| 中等 | src/modules/message.py:1362-1366 | `_log_message` 审计日志失败不中断，sent 状态丢失可导致重复发送 | 已修复 |
+| 中等 | src/modules/export.py:223-226 | `_create_dataframe` datetime 为 None 时 strftime 产生 "NaT" 文本 | 已修复 |
+| 中等 | tests/conftest.py:49-55 | fixture `start_date`/`end_date` 与 dataclass `start_year`/`end_year` 不一致 | 已修复 |
+| 轻微 | src/utils/captcha.py:48-49 | `except Exception: continue` 过于宽泛，隐藏 CDP 连接断开等底层问题 | 已修复 |
+| 轻微 | src/utils/scoring.py:171 | `c._score = s` 给 dataclass 添加未声明的私有属性 | 已修复 |
+| 中等 | src/modules/message.py↔selector_discovery.py | 循环依赖（延迟 import 绕过，运行时正常） | 待处理 |
+| 中等 | src/modules/message.py:540+1473 | `send_message_batch` 和 enterprise 版约 100 行重复逻辑 | 待处理 |
+
+### 修复内容
+- **Lock 跨循环修复**: `BrowserManager._ensure_lock()` 增加事件循环追踪，循环切换时自动重建 Lock
+- **异常传播**: `_save_candidates_to_db` 异常不再被吞掉而是 re-raise，调用方用 try-except 捕获并显示用户可见的警告
+- **提取失败告警**: `_extract_search_results` 异常仍返回空列表但增加 `console.print` 让用户感知
+- **总体超时**: `async_check_rate_limit` 新增 `max_total_wait=1800`（30 分钟），超时后直接抛异常而非无限等待
+- **Config sentinel**: `Config.get()` 使用 `_MISSING` 哨兵区分"键不存在"与"键为 null"
+- **登录检查优化**: `check_login_status` 用 `wait_for_url` 监测 login 重定向替代盲等 3 秒
+- **审计日志**: `_log_message` 对 `sent` 状态的审计失败 re-raise，防止静默丢失导致重复发送
+- **NaT 修复**: export datetime 格式化后用 `.fillna('')` 替换 NaT 为空字符串
+- **fixture 对齐**: conftest.py education/work_experience 字段名改为与 dataclass 一致（start_year/end_year/title）
+- **captcha 日志**: 非超时异常增加 `logger.debug` 输出，不再完全静默
+- **score 属性声明**: `CandidateBasic` 新增 `score: Optional[int] = None` 字段，`scoring.py` 和 `pipeline.py` 统一使用声明的字段
+
+### 死代码清理
+| 文件 | 清理内容 | 类型 |
+|------|---------|------|
+| tests/conftest.py:10 | 移除未使用的 `DatabaseManager` import | 未使用 import |
+| 多文件 | 7 处空 `except: pass` 块补充注释说明为何可忽略异常 | 空异常处理 |
+
+### 测试结果
+- 13 passed in 0.04s（test_config: 7, test_validators: 6）
+- 修复前后均全部通过，无回归
+
+### 复盘
+- **做得好的**: sentinel 模式解决 Config.get 的 None 歧义简洁有效；Lock 跨循环检测是 asyncio 单例的通用最佳实践；`_log_message` 对 sent 状态 re-raise 兼顾了容错与数据完整性
+- **待改进的**: 测试覆盖率仍然很低（仅 config 和 validators），scoring/delays/rate_limiter/checkpoint 等纯逻辑模块应优先补充单元测试；内联 JS（~380 行）应考虑抽取为独立 .js 文件便于维护和语法检查
+- **遗留项**: 批量发送重复代码未重构（Review #1 遗留）；循环依赖未解耦（Review #1 遗留）；测试覆盖率低（新增遗留）；内联 JS 未抽取（新增遗留）
+
+---

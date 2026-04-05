@@ -1,0 +1,94 @@
+     1→"""Pydantic schemas for Web request validation."""
+     2→
+     3→from typing import List, Optional
+     4→
+     5→from pydantic import BaseModel, field_validator
+     6→
+     7→
+     8→class PipelineParams(BaseModel):
+     9→    """Validated pipeline start parameters."""
+    10→    keywords: List[str]
+    11→    template_name: str
+    12→    location: Optional[str] = None
+    13→    pages: int = 3
+    14→    batch_pages: int = 0
+    15→    experience: Optional[str] = None
+    16→    education: Optional[str] = None
+    17→    salary: Optional[str] = None
+    18→    skip_messaged: bool = True
+    19→    dry_run: bool = False
+    20→
+    21→    @field_validator('keywords', mode='before')
+    22→    @classmethod
+    23→    def parse_keywords(cls, v):
+    24→        if isinstance(v, str):
+    25→            return [k.strip() for k in v.split(",") if k.strip()]
+    26→        return v
+    27→
+    28→    @field_validator('keywords')
+    29→    @classmethod
+    30→    def keywords_not_empty(cls, v):
+    31→        if not v:
+    32→            raise ValueError("请输入关键词")
+    33→        return v
+    34→
+    35→    @field_validator('template_name')
+    36→    @classmethod
+    37→    def template_not_empty(cls, v):
+    38→        if not v or not v.strip():
+    39→            raise ValueError("请选择消息模板")
+    40→        return v.strip()
+    41→
+    42→    @field_validator('pages')
+    43→    @classmethod
+    44→    def pages_range(cls, v):
+    45→        return max(1, min(v, 20))
+    46→
+    47→    @field_validator('batch_pages')
+    48→    @classmethod
+    49→    def batch_pages_range(cls, v):
+    50→        return max(0, min(v, 20))
+    51→
+    52→    @field_validator('location', 'experience', 'education', 'salary', mode='before')
+    53→    @classmethod
+    54→    def empty_str_to_none(cls, v):
+    55→        if isinstance(v, str) and not v.strip():
+    56→            return None
+    57→        return v
+    58→
+    59→
+    60→class SearchParams(BaseModel):
+    61→    """Validated search parameters."""
+    62→    keywords: List[str]
+    63→    location: Optional[str] = None
+    64→    pages: int = 1
+    65→    experience: Optional[str] = None
+    66→    education: Optional[str] = None
+    67→    salary: Optional[str] = None
+    68→
+    69→    @field_validator('keywords', mode='before')
+    70→    @classmethod
+    71→    def parse_keywords(cls, v):
+    72→        if isinstance(v, str):
+    73→            return [k.strip() for k in v.split(",") if k.strip()]
+    74→        return v
+    75→
+    76→    @field_validator('keywords')
+    77→    @classmethod
+    78→    def keywords_not_empty(cls, v):
+    79→        if not v:
+    80→            raise ValueError("请输入搜索关键词")
+    81→        return v
+    82→
+    83→    @field_validator('pages')
+    84→    @classmethod
+    85→    def pages_range(cls, v):
+    86→        return max(1, min(v, 20))
+    87→
+    88→    @field_validator('location', 'experience', 'education', 'salary', mode='before')
+    89→    @classmethod
+    90→    def empty_str_to_none(cls, v):
+    91→        if isinstance(v, str) and not v.strip():
+    92→            return None
+    93→        return v
+    94→

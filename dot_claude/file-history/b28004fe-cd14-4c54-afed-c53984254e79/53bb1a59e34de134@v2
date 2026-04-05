@@ -1,0 +1,490 @@
+# Multi-Profile Implementation Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+
+**Goal:** Support running two Maimai accounts in parallel via `--profile` flag, with isolated data directories and Chrome instances.
+
+**Architecture:** Add `apply_profile()` to Config that overrides data paths and CDP endpoint per profile. CLI passes `--profile` before any module initialization. Each profile is a separate OS process connecting to its own Chrome instance.
+
+**Tech Stack:** Python, Click CLI, JSON config deep merge
+
+**日期**: 2026-03-05
+**状态**: Approved
+
+## 目标
+
+在本机同时登录两个不同的脉脉账号，各自独立跑 pipeline。
+
+## 需求约束
+
+- 两个账号类型不确定（企业认证/标准付费均可能）
+- 真正并行：两个终端窗口同时跑
+- 不需要跨账号去重
+- 数据库各自独立
+
+## 方案：多 Profile 目录
+
+通过 `--profile` 参数指定账号 profile 名，每个 profile 有独立的 Chrome 端口、数据目录、配置。两个终端窗口各跑各的（独立进程）。
+
+### Chrome 多实例
+
+每个账号一个 Chrome 实例，不同端口 + 不同 user-data-dir：
+
+```bash
+# Alice（端口 9222，默认）
+Google\ Chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-profile-alice
+
+# Bob（端口 9223）
+Google\ Chrome --remote-debugging-port=9223 --user-data-dir=/tmp/chrome-profile-bob
+```
+
+Makefile 提供 `chrome-alice` / `chrome-bob` 快捷命令。
+
+### Profile 目录结构
+
+```
+data/
+  profiles/
+    alice/
+      maimai.db
+      .session/maimai_session.json
+      logs/
+      screenshots/
+      exports/
+      settings.json      # 可选，覆盖默认配置
+    bob/
+      ...同上...
+```
+
+### Profile settings.json（可选）
+
+只写想覆盖的字段，其余继承全局 `config/settings.json`：
+
+```json
+{
+  "browser": {
+    "cdp_endpoint": "http://127.0.0.1:9223"
+  }
+}
+```
+
+### 配置合并
+
+```
+全局 config/settings.json  <-  profile settings.json (deep merge, profile 优先)
+```
+
+### 代码改动
+
+| 文件 | 改动 |
+|------|------|
+| `src/cli/main.py` | 加 `--profile` 选项，调用 `apply_profile()` |
+| `src/utils/config.py` | 新增 `apply_profile()` 函数 |
+| `Makefile` | 加 `chrome-alice`、`chrome-bob` target |
+
+其他模块不改 — BrowserManager、SessionManager、Logger、DB 都从 Config 读路径，profile 改了路径后自动生效。
+
+### 使用流程
+
+```bash
+# 终端 1
+make chrome-alice
+python src/cli/main.py --profile alice pipeline -k "前端" -t greeting -m talent_bank -p 2
+
+# 终端 2
+make chrome-bob
+python src/cli/main.py --profile bob pipeline -k "安卓" -t jd_live -m recruit_manage -p 1
+```
+
+### 向后兼容
+
+不传 `--profile` 时行为完全不变，用现有 `data/` 目录。
+
+### 不做的事
+
+- 不做 profile 管理命令（目录即 profile）
+- 不做跨 profile 去重
+- 不做单进程多账号并发
+
+---
+
+## Implementation Tasks
+
+### Task 1: Config — add `apply_profile()` and `_deep_merge()`
+
+**Files:**
+- Modify: `src/utils/config.py:1-105`
+- Test: `tests/test_config.py`
+
+**Step 1: Write the failing test**
+
+Add to `tests/test_config.py`:
+
+```python
+import json
+import tempfile
+from pathlib import Path
+from src.utils.config import Config, apply_profile, _deep_merge
+
+
+def test_deep_merge_nested():
+    base = {"a": {"b": 1, "c": 2}, "d": 3}
+    override = {"a": {"b": 99}, "e": 4}
+    result = _deep_merge(base, override)
+    assert result == {"a": {"b": 99, "c": 2}, "d": 3, "e": 4}
+
+
+def test_deep_merge_does_not_mutate_base():
+    base = {"a": {"b": 1}}
+    override = {"a": {"b": 2}}
+    _deep_merge(base, override)
+    assert base == {"a": {"b": 1}}
+
+
+def test_apply_profile_overrides_data_paths(tmp_path):
+    """apply_profile should redirect all data.* paths under profile dir."""
+    # Create a minimal config
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.json").write_text(json.dumps({
+        "browser": {"cdp_endpoint": "http://127.0.0.1:9222"},
+        "data": {
+            "database_path": "data/maimai.db",
+            "session_path": "data/.session/maimai_session.json",
+            "log_dir": "data/logs",
+            "screenshot_dir": "data/screenshots",
+            "export_dir": "data/exports",
+        }
+    }))
+    (config_dir / "selectors.json").write_text('{"selectors":{}}')
+    (config_dir / "message_templates.json").write_text('{}')
+
+    config = Config(config_dir=str(config_dir))
+    apply_profile("alice", config=config, project_root=tmp_path)
+
+    # All data paths should be under profiles/alice/
+    assert "profiles/alice" in config.get("data.database_path")
+    assert "profiles/alice" in config.get("data.session_path")
+    assert "profiles/alice" in config.get("data.log_dir")
+
+    # Profile directory should be created
+    assert (tmp_path / "data" / "profiles" / "alice").is_dir()
+
+
+def test_apply_profile_merges_profile_settings(tmp_path):
+    """Profile-local settings.json should override global settings."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.json").write_text(json.dumps({
+        "browser": {"cdp_endpoint": "http://127.0.0.1:9222", "timeout": 30000},
+        "data": {"database_path": "data/maimai.db", "session_path": "data/.session/s.json",
+                 "log_dir": "data/logs", "screenshot_dir": "data/screenshots", "export_dir": "data/exports"}
+    }))
+    (config_dir / "selectors.json").write_text('{"selectors":{}}')
+    (config_dir / "message_templates.json").write_text('{}')
+
+    # Create profile settings with CDP override
+    profile_dir = tmp_path / "data" / "profiles" / "bob"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "settings.json").write_text(json.dumps({
+        "browser": {"cdp_endpoint": "http://127.0.0.1:9223"}
+    }))
+
+    config = Config(config_dir=str(config_dir))
+    apply_profile("bob", config=config, project_root=tmp_path)
+
+    assert config.get("browser.cdp_endpoint") == "http://127.0.0.1:9223"
+    assert config.get("browser.timeout") == 30000  # inherited
+
+
+def test_apply_profile_no_profile_settings(tmp_path):
+    """Should work even without a profile settings.json."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.json").write_text(json.dumps({
+        "browser": {"cdp_endpoint": "http://127.0.0.1:9222"},
+        "data": {"database_path": "data/maimai.db", "session_path": "data/.session/s.json",
+                 "log_dir": "data/logs", "screenshot_dir": "data/screenshots", "export_dir": "data/exports"}
+    }))
+    (config_dir / "selectors.json").write_text('{"selectors":{}}')
+    (config_dir / "message_templates.json").write_text('{}')
+
+    config = Config(config_dir=str(config_dir))
+    apply_profile("newprofile", config=config, project_root=tmp_path)
+
+    # Should still override paths, just no extra settings
+    assert "profiles/newprofile" in config.get("data.database_path")
+    assert config.get("browser.cdp_endpoint") == "http://127.0.0.1:9222"
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `venv/bin/python3 -m pytest tests/test_config.py -v -k "profile or deep_merge"`
+Expected: FAIL — `apply_profile` and `_deep_merge` not defined
+
+**Step 3: Write minimal implementation**
+
+Add to `src/utils/config.py` (before the global instance section, after the `Config` class):
+
+```python
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Deep merge override into a copy of base. Override wins on conflicts."""
+    import copy
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+def apply_profile(
+    profile_name: str,
+    config: 'Config' = None,
+    project_root: Path = None,
+) -> None:
+    """Override config data paths and optionally merge profile-local settings.
+
+    Args:
+        profile_name: Profile directory name (e.g. 'alice', 'bob')
+        config: Config instance to modify (defaults to global)
+        project_root: Project root for resolving paths (defaults to auto-detect)
+    """
+    if config is None:
+        config = get_config()
+    if project_root is None:
+        project_root = Path(__file__).parent.parent.parent
+
+    profile_dir = project_root / "data" / "profiles" / profile_name
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    # Merge profile-local settings.json if it exists
+    profile_settings_path = profile_dir / "settings.json"
+    if profile_settings_path.exists():
+        import json
+        with open(profile_settings_path, 'r', encoding='utf-8') as f:
+            profile_settings = json.load(f)
+        config._settings = _deep_merge(config._settings, profile_settings)
+
+    # Override all data.* paths to point under profile dir
+    rel_profile = f"data/profiles/{profile_name}"
+    data_overrides = {
+        "database_path": f"{rel_profile}/maimai.db",
+        "session_path": f"{rel_profile}/.session/maimai_session.json",
+        "log_dir": f"{rel_profile}/logs",
+        "screenshot_dir": f"{rel_profile}/screenshots",
+        "export_dir": f"{rel_profile}/exports",
+        "checkpoint_dir": f"{rel_profile}/.checkpoints",
+    }
+    if "data" not in config._settings:
+        config._settings["data"] = {}
+    config._settings["data"].update(data_overrides)
+
+    logger.info(f"Profile '{profile_name}' applied — data dir: {profile_dir}")
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `venv/bin/python3 -m pytest tests/test_config.py -v -k "profile or deep_merge"`
+Expected: All 5 new tests PASS
+
+**Step 5: Commit**
+
+```bash
+git add src/utils/config.py tests/test_config.py
+git commit -m "feat(config): add apply_profile() for multi-account isolation"
+```
+
+---
+
+### Task 2: CLI — add `--profile` option
+
+**Files:**
+- Modify: `src/cli/main.py:37-59`
+
+**Step 1: Add `--profile` to `cli` group and call `apply_profile` before `setup_logger`**
+
+In `src/cli/main.py`, modify the `cli()` function:
+
+```python
+@click.group()
+@click.version_option(version='0.1.0')
+@click.option('--profile', default=None, envvar='MAIMAI_PROFILE',
+              help='Account profile name for data isolation (e.g. alice, bob)')
+@click.option('--cdp', 'cdp_endpoint', default=None, envvar='MAIMAI_CDP_ENDPOINT',
+              help='CDP endpoint URL (default: http://localhost:9222)')
+@click.pass_context
+def cli(ctx, profile, cdp_endpoint):
+    """
+    Maimai Semi-Automated Recruitment Assistant
+
+    Connects to your Chrome browser via CDP. Start Chrome with:
+
+        /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222
+
+    Then log in to Maimai manually before running commands.
+
+    Use --profile to isolate data for multiple accounts:
+
+        maimai --profile alice pipeline -k "前端" -t greeting -p 2
+    """
+    try:
+        # Apply profile BEFORE logger init (profile redirects log_dir)
+        if profile:
+            from src.utils.config import apply_profile
+            apply_profile(profile)
+
+        # Initialize logging (reads data.log_dir from config)
+        setup_logger()
+        ctx.ensure_object(dict)
+        ctx.obj['cdp_endpoint'] = cdp_endpoint
+        ctx.obj['profile'] = profile
+    except Exception as e:
+        console.print(f"[red]Failed to initialize application: {e}[/red]")
+        sys.exit(1)
+```
+
+**Step 2: Manual smoke test**
+
+Run: `venv/bin/python3 src/cli/main.py --profile alice --help`
+Expected: Help text shows `--profile` option, no errors
+
+Run: `venv/bin/python3 src/cli/main.py --profile testprofile status 2>&1 | head -5`
+Expected: Creates `data/profiles/testprofile/` directory (then fails on Chrome connection — expected)
+
+Verify: `ls data/profiles/testprofile/`
+Expected: Directory exists
+
+**Step 3: Cleanup test profile**
+
+```bash
+rm -rf data/profiles/testprofile
+```
+
+**Step 4: Commit**
+
+```bash
+git add src/cli/main.py
+git commit -m "feat(cli): add --profile option for multi-account isolation"
+```
+
+---
+
+### Task 3: Makefile — add chrome-alice and chrome-bob targets
+
+**Files:**
+- Modify: `Makefile:64-66`
+
+**Step 1: Replace existing `chrome` target and add profile variants**
+
+Replace the existing `chrome` target with:
+
+```makefile
+chrome: ## Start Chrome with CDP debug port (default profile)
+	/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+		--remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile &
+
+chrome-alice: ## Start Chrome for alice profile (port 9222)
+	/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+		--remote-debugging-port=9222 --user-data-dir=/tmp/chrome-profile-alice &
+
+chrome-bob: ## Start Chrome for bob profile (port 9223)
+	/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+		--remote-debugging-port=9223 --user-data-dir=/tmp/chrome-profile-bob &
+```
+
+**Step 2: Verify**
+
+Run: `make help | grep chrome`
+Expected: Shows `chrome`, `chrome-alice`, `chrome-bob` targets
+
+**Step 3: Commit**
+
+```bash
+git add Makefile
+git commit -m "feat(makefile): add chrome-alice and chrome-bob targets for multi-profile"
+```
+
+---
+
+### Task 4: Create default profile settings for bob
+
+**Files:**
+- Create: `data/profiles/bob/settings.json`
+
+**Step 1: Create bob profile settings with port 9223**
+
+```bash
+mkdir -p data/profiles/bob
+```
+
+Write `data/profiles/bob/settings.json`:
+
+```json
+{
+  "browser": {
+    "cdp_endpoint": "http://127.0.0.1:9223"
+  }
+}
+```
+
+Alice uses default port 9222, so no settings.json needed.
+
+**Step 2: Add profiles to .gitignore (data is already ignored)**
+
+Verify `data/` is in `.gitignore`. Profile data (DB, logs, etc.) should not be committed. But `settings.json` templates might be useful — check if `data/` glob covers it.
+
+**Step 3: Commit**
+
+If `data/` is gitignored, no commit needed. Otherwise add the settings file.
+
+---
+
+### Task 5: Run full test suite
+
+**Step 1: Run all tests**
+
+Run: `venv/bin/python3 -m pytest --tb=short -q`
+Expected: All tests pass (existing + new profile tests)
+
+**Step 2: Run linter**
+
+Run: `venv/bin/ruff check src/utils/config.py src/cli/main.py`
+Expected: No errors
+
+---
+
+### Task 6: Final integration test
+
+**Step 1: Start two Chrome instances**
+
+```bash
+make chrome-alice
+make chrome-bob
+```
+
+Manually log in to different Maimai accounts in each Chrome window.
+
+**Step 2: Run both profiles in separate terminals**
+
+Terminal 1:
+```bash
+venv/bin/python3 src/cli/main.py --profile alice status
+```
+
+Terminal 2:
+```bash
+venv/bin/python3 src/cli/main.py --profile bob status
+```
+
+Expected: Both connect to their respective Chrome instances, show independent status.
+
+**Step 3: Verify data isolation**
+
+```bash
+ls data/profiles/alice/
+ls data/profiles/bob/
+```
+
+Expected: Each has its own `maimai.db`, `logs/`, etc.

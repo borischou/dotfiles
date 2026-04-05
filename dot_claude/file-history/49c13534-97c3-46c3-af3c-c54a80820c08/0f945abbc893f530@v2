@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}消息模板 — Boss Assistant{% endblock %}
+{% block header %}消息模板{% endblock %}
+
+{% block content %}
+<section>
+    {% for tmpl in template_list %}
+    <details>
+        <summary>
+            <strong>{{ tmpl.name }}</strong> — {{ tmpl.display_name }}
+            <small>({{ tmpl.description }})</small>
+        </summary>
+
+        <form onsubmit="saveTemplate(event, '{{ tmpl.name }}')">
+            <label for="content-{{ tmpl.name }}">模板内容
+                <textarea id="content-{{ tmpl.name }}" rows="4" style="width: 100%;">{{ tmpl.content }}</textarea>
+            </label>
+
+            <p><small>变量: {{ tmpl.variables|join(", ") if tmpl.variables else "无" }}</small></p>
+
+            <button type="submit">保存</button>
+            <span id="save-status-{{ tmpl.name }}"></span>
+        </form>
+    </details>
+    {% endfor %}
+</section>
+
+{% block scripts %}
+<script>
+function saveTemplate(event, name) {
+    event.preventDefault();
+    const content = document.getElementById("content-" + name).value;
+    const statusEl = document.getElementById("save-status-" + name);
+
+    fetch("/templates/" + name, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({content: content})
+    })
+    .then(r => r.json())
+    .then(data => {
+        statusEl.textContent = "已保存";
+        setTimeout(() => statusEl.textContent = "", 2000);
+    })
+    .catch(err => {
+        statusEl.textContent = "保存失败: " + err;
+    });
+}
+</script>
+{% endblock %}
+{% endblock %}

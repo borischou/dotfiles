@@ -1,0 +1,78 @@
+"""WebSocket endpoints for real-time progress updates."""
+
+import asyncio
+import json
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from loguru import logger
+
+from src.web.deps import get_broadcaster, get_queue
+
+router = APIRouter()
+
+
+@router.websocket("/ws/task/{task_id}")
+async def ws_task(websocket: WebSocket, task_id: str):
+    """WebSocket for receiving events about a specific task."""
+    broadcaster = get_broadcaster()
+    queue = get_queue()
+
+    await websocket.accept()
+
+    # If task already has a result, send it immediately
+    task = queue.get_task(task_id)
+    if task and task.status in ("completed", "failed", "cancelled"):
+        await websocket.send_text(json.dumps({
+            "task_id": task_id,
+            "event": task.status,
+            "result": task.result,
+            "error": task.error,
+        }))
+        await websocket.close()
+        return
+
+    await broadcaster.subscribe_task(task_id, websocket)
+    try:
+        # Keep connection alive, listen for client messages (e.g., ping)
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
+                # Handle ping/pong keepalive
+                if data == "ping":
+                    await websocket.send_text("pong")
+            except asyncio.TimeoutError:
+                # Send keepalive
+                try:
+                    await websocket.send_text(json.dumps({"event": "keepalive"}))
+                except Exception as e:
+                    logger.debug(f"WebSocket keepalive send failed: {e}")
+                    break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await broadcaster.unsubscribe_task(task_id, websocket)
+
+
+@router.websocket("/ws/global")
+async def ws_global(websocket: WebSocket):
+    """WebSocket for receiving all task events (dashboard use)."""
+    broadcaster = get_broadcaster()
+
+    await websocket.accept()
+    await broadcaster.subscribe_global(websocket)
+    try:
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
+                if data == "ping":
+                    await websocket.send_text("pong")
+            except asyncio.TimeoutError:
+                try:
+                    await websocket.send_text(json.dumps({"event": "keepalive"}))
+                except Exception as e:
+                    logger.debug(f"WebSocket keepalive send failed: {e}")
+                    break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await broadcaster.unsubscribe_global(websocket)

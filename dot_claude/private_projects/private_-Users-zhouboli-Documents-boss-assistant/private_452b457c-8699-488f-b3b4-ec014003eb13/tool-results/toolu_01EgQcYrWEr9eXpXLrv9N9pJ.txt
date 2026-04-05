@@ -1,0 +1,26 @@
+     1→     1→"""Retry utilities for navigation and network operations."""
+     2→     2→
+     3→     3→from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+     4→     4→from patchright.async_api import Page, Error as PlaywrightError
+     5→     5→from loguru import logger
+     6→     6→
+     7→     7→
+     8→     8→@retry(
+     9→     9→    stop=stop_after_attempt(3),
+    10→    10→    wait=wait_exponential(multiplier=1, min=2, max=10),
+    11→    11→    retry=retry_if_exception_type((PlaywrightError, TimeoutError, ConnectionError)),
+    12→    12→    before_sleep=lambda retry_state: logger.warning(
+    13→    13→        f"Navigation failed (attempt {retry_state.attempt_number}), retrying..."
+    14→    14→    ),
+    15→    15→    reraise=True,
+    16→    16→)
+    17→    17→async def retry_navigation(page: Page, url: str, **kwargs) -> None:
+    18→    18→    """Navigate to a URL with automatic retry on failure.
+    19→    19→
+    20→    20→    Args:
+    21→    21→        page: Playwright page instance
+    22→    22→        url: URL to navigate to
+    23→    23→        **kwargs: Additional arguments passed to page.goto()
+    24→    24→    """
+    25→    25→    await page.goto(url, **kwargs)
+    26→    26→

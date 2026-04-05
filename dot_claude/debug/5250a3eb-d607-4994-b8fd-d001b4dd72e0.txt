@@ -1,0 +1,413 @@
+2026-02-17T18:12:30.624Z [DEBUG] Getting matching hook commands for SessionEnd with query: clear
+2026-02-17T18:12:30.624Z [DEBUG] Found 0 hook matchers in settings
+2026-02-17T18:12:30.624Z [DEBUG] Matched 0 unique hooks for query "clear" (0 before deduplication)
+2026-02-17T18:12:30.624Z [DEBUG] Cleared all session hooks for session 851f4535-0f8b-4e3c-9040-45c5eea6b714
+2026-02-17T18:12:30.626Z [DEBUG] Getting matching hook commands for SessionStart with query: clear
+2026-02-17T18:12:30.626Z [DEBUG] Found 1 hook matchers in settings
+2026-02-17T18:12:30.626Z [DEBUG] Matched 1 unique hooks for query "clear" (1 before deduplication)
+2026-02-17T18:12:31.124Z [DEBUG] High write ratio: blit=0, write=143486 (100.0% writes), screen=1656x208
+2026-02-17T18:12:31.125Z [DEBUG] Full reset (scrollback changes): scrollbackRows=1599, firstChangeY=1070
+  prev: "✻ Churned for 10m 52s                                                                                                                                                                                           "
+  next: "✻ Baked for 10m 52s                                                                                                                                                                                             "
+2026-02-17T18:12:31.182Z [DEBUG] Detected Homebrew cask installation: /opt/homebrew/Caskroom/claude-code/2.1.44/claude
+2026-02-17T18:12:31.183Z [DEBUG] Started caffeinate to prevent sleep
+2026-02-17T18:12:31.188Z [DEBUG] AutoUpdaterWrapper: Installation type: package-manager
+2026-02-17T18:12:31.188Z [DEBUG] Plugin not available for MCP: superpowers@claude-plugins-official - error type: generic-error
+2026-02-17T18:12:31.188Z [DEBUG] Plugin not available for MCP: superpowers@claude-plugins-official - error type: generic-error
+2026-02-17T18:12:31.189Z [DEBUG] [claudeai-mcp] Checking gate (cached)...
+2026-02-17T18:12:31.189Z [DEBUG] [claudeai-mcp] Gate returned: false
+2026-02-17T18:12:31.189Z [DEBUG] [claudeai-mcp] Disabled via gate
+2026-02-17T18:12:31.228Z [DEBUG] Full reset (shrink->below): prevHeight=1656, nextHeight=15, viewport=59
+2026-02-17T18:12:34.423Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-02-17T18:12:34.423Z [DEBUG] Hook SessionStart:clear (SessionStart) success:
+]0;maimai-assistant: ready
+2026-02-17T18:12:34.424Z [DEBUG] FileHistory: Added snapshot for b1428d70-40f0-46e7-956b-195342ae1433, tracking 0 files
+2026-02-17T18:12:34.426Z [DEBUG] [useDeferredValue] Messages deferred by 5 (0→5)
+2026-02-17T18:12:34.443Z [DEBUG] [useDeferredValue] Messages deferred by 5 (0→5)
+2026-02-17T18:12:34.448Z [DEBUG] Stopped caffeinate, allowing sleep
+2026-02-17T18:12:36.595Z [ERROR] Error: EACCES: permission denied, open '/Users/zhouboli/.claude/telemetry/1p_failed_events.5250a3eb-d607-4994-b8fd-d001b4dd72e0.0e76708d-9d0b-4c0c-88a3-cb62836fa8a1.json'
+2026-02-17T18:12:36.596Z [ERROR] Error: Error: 1P event logging: 10 events failed to export (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)
+    at queueFailedEvents (/$bunfs/root/claude:2110:2350)
+    at async doExport (/$bunfs/root/claude:2110:1257)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T18:12:36.596Z [ERROR] Error: Error: {"message":"Failed to export 10 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)","originalLine":"2110","originalColumn":"1409","line":"2110","column":"1409","sourceURL":"/$bunfs/root/claude","stack":"Error: Failed to export 10 events (status=403, code=ERR_BAD_REQUEST, Request failed with status code 403)\n    at doExport (/$bunfs/root/claude:2110:1409)\n    at processTicksAndRejections (native:7:39)","name":"Error"}
+    at error (/$bunfs/root/claude:2153:25028)
+    at <anonymous> (/$bunfs/root/claude:2105:20180)
+    at dd7 (/$bunfs/root/claude:2105:20724)
+    at <anonymous> (/$bunfs/root/claude:2106:17366)
+    at processTicksAndRejections (native:7:39)
+2026-02-17T18:14:24.562Z [DEBUG] Failed to check metrics opt-out status: Auth error: No API key available
+2026-02-17T18:14:24.563Z [ERROR] Error: Error: Auth error: No API key available
+    at IWB (/$bunfs/root/claude:2153:25199)
+    at L78 (/$bunfs/root/claude:2153:25475)
+    at <anonymous> (/$bunfs/root/claude:62:19156)
+    at PYR (/$bunfs/root/claude:2153:26169)
+    at doExport (/$bunfs/root/claude:2153:26987)
+    at export (/$bunfs/root/claude:2153:26693)
+    at <anonymous> (/$bunfs/root/claude:2105:93164)
+    at <anonymous> (/$bunfs/root/claude:2105:93104)
+    at new Promise (native:1:11)
+    at Bl7 (/$bunfs/root/claude:2105:93081)
+2026-02-17T18:14:24.563Z [DEBUG] Metrics export disabled by organization setting
+2026-02-17T18:57:47.538Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.45
+2026-02-17T19:33:06.780Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-17T20:07:26.950Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-17T20:37:27.788Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.45
+2026-02-17T21:14:24.943Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-17T21:54:50.738Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-17T22:37:52.060Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-17T23:13:42.758Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-17T23:57:17.335Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T00:38:14.894Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T01:14:38.827Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T01:44:48.300Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.45
+2026-02-18T02:16:46.824Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T02:55:07.937Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.45
+2026-02-18T03:29:30.070Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T04:09:12.164Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T04:46:03.844Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T05:26:26.041Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T06:05:45.143Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T06:47:06.619Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T07:27:34.975Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T08:03:23.658Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T08:45:53.932Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T09:19:31.738Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T09:49:30.548Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.45
+2026-02-18T10:22:32.464Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T11:03:05.629Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T11:42:29.556Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T12:23:21.019Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T13:08:17.801Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T13:48:03.547Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T14:27:05.505Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T15:08:20.343Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T15:49:54.396Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T16:26:34.628Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T17:11:59.786Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T17:54:24.157Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T18:33:44.862Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T19:10:07.621Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T19:46:24.537Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T20:16:21.187Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.45
+2026-02-18T20:50:31.879Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T21:27:34.414Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T22:06:49.405Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T22:44:06.428Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T23:20:02.840Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-18T23:49:45.056Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T00:26:00.011Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T01:06:55.639Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T01:46:23.368Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T02:20:34.570Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T03:06:24.373Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T03:49:16.447Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T04:31:41.689Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T05:04:50.503Z [DEBUG] Failed to fetch latest from GCS: Error: ECONNREFUSED
+2026-02-19T05:49:20.304Z [DEBUG] Failed to fetch latest from GCS: Error: ECONNREFUSED
+2026-02-19T06:22:46.627Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T06:53:11.322Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T07:33:16.296Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T08:13:33.275Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T08:53:57.619Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T09:30:00.229Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T10:13:19.011Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T10:55:12.381Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T11:35:02.950Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T12:08:56.395Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T12:39:16.706Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T13:14:18.043Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T13:52:35.620Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T14:32:08.212Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T15:14:56.179Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T15:55:23.468Z [DEBUG] Failed to fetch latest from GCS: Error: ECONNREFUSED
+2026-02-19T16:29:43.159Z [DEBUG] Failed to fetch latest from GCS: Error: ECONNREFUSED
+2026-02-19T17:01:49.424Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T17:35:18.223Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T18:13:25.530Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T18:49:26.177Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T19:27:32.503Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T20:04:15.131Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T20:34:25.610Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T21:10:29.186Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T21:46:40.453Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T22:21:18.260Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.47
+2026-02-19T22:51:21.916Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-19T23:26:11.530Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T00:08:28.451Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T00:51:02.493Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T01:28:35.234Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T02:09:36.798Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T02:50:11.371Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T03:28:03.372Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T04:11:56.636Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T04:47:30.034Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T05:24:31.688Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T05:54:36.473Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T06:30:47.353Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T07:13:59.646Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T07:55:43.195Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T08:36:01.276Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T09:16:03.501Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T09:59:24.161Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T10:36:11.429Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T11:08:41.079Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T11:43:41.339Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T12:19:48.462Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T13:00:27.346Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T13:37:29.109Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T14:22:03.955Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T15:02:27.937Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T15:38:34.035Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T16:20:20.923Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T17:05:22.052Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T17:45:18.739Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T18:16:46.912Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T18:49:38.408Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T19:25:12.086Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T19:59:25.262Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T20:40:07.373Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T21:13:27.493Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T21:49:51.464Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T22:29:14.226Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-20T23:08:02.091Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-20T23:41:47.948Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.49
+2026-02-21T00:11:51.886Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T00:48:09.252Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T01:26:49.580Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T02:04:06.439Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T02:48:06.534Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T03:22:49.913Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T03:52:56.709Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T04:27:59.506Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T05:09:53.223Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T05:50:14.982Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T06:26:19.400Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T06:56:21.388Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T07:30:22.348Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T08:14:37.772Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T08:54:36.302Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T09:33:04.252Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T10:05:42.738Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T10:38:37.062Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T11:29:41.031Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T11:54:51.855Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T12:25:37.069Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T12:57:18.967Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T13:39:25.766Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T13:59:15.997Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T14:30:16.728Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T15:32:03.817Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T16:00:23.994Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T16:31:26.099Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T17:19:05.669Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T17:35:01.992Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T18:08:00.149Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T18:39:06.997Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T19:31:21.884Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T19:47:07.781Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T20:20:56.926Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T20:54:39.012Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T21:52:26.155Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T22:09:36.876Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T22:56:42.792Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-21T23:14:03.900Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-21T23:56:22.964Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T00:32:04.588Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T01:06:42.697Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T01:57:12.765Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T02:13:40.710Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T02:48:39.730Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T03:23:12.993Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T04:24:57.604Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T04:51:18.639Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T05:25:07.039Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T06:05:26.724Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T06:37:10.179Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T07:08:51.579Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T08:11:52.064Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T08:29:35.870Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T09:11:33.208Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T09:56:35.078Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T10:41:04.499Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T11:13:25.167Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T11:58:48.496Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T12:43:04.598Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T13:15:38.736Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T14:00:00.652Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T14:33:44.868Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T15:19:36.774Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T16:18:12.421Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T16:34:50.679Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T17:19:55.816Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T18:08:42.544Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T18:24:06.404Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T18:56:30.465Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T19:49:42.749Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T20:21:32.809Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T20:37:55.641Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T21:10:46.481Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T21:59:35.999Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-22T22:14:51.051Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T22:56:07.681Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-22T23:28:44.535Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T00:13:50.594Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T01:13:12.010Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T01:41:56.046Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T01:59:28.737Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T02:42:55.666Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T03:14:57.404Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T04:16:50.271Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T04:44:55.261Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T05:34:46.623Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T06:01:47.683Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T06:35:07.405Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T07:37:28.647Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T08:03:42.537Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T08:48:55.337Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T09:21:37.284Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T10:22:12.219Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T10:39:32.802Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T11:24:22.255Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T12:09:55.308Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T12:42:15.738Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T13:25:11.157Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T14:24:54.831Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T14:42:27.662Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T15:13:15.631Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T15:55:55.220Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T16:28:55.400Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T17:30:48.719Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T17:47:38.654Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T18:36:10.828Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T18:52:02.564Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T19:27:01.908Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T20:00:09.582Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T20:31:37.336Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T21:07:29.331Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T21:41:47.228Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T22:13:06.547Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-23T22:51:14.595Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-23T23:27:23.482Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-24T00:25:04.196Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T00:42:45.155Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-24T01:27:52.140Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.50
+2026-02-24T02:10:09.212Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.51
+2026-02-24T02:43:54.129Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.51
+2026-02-24T03:29:44.292Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.51
+2026-02-24T04:28:46.705Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T04:44:44.487Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.51
+2026-02-24T05:15:08.361Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.51
+2026-02-24T05:47:36.409Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.51
+2026-02-24T06:48:36.751Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T07:16:27.079Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T08:00:22.947Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T08:48:53.470Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T09:18:37.296Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T09:50:27.303Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T10:35:01.256Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T11:35:33.008Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T11:52:33.031Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T12:40:13.993Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T13:22:28.153Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T13:56:18.346Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T14:57:15.103Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T15:24:17.374Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T16:08:28.496Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T16:40:57.018Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T17:43:37.305Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T18:00:06.131Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T18:32:45.262Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T19:04:49.274Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T19:52:38.126Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T20:08:47.104Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T20:42:04.339Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T21:18:27.188Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T21:53:32.999Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T22:40:32.077Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-24T22:57:48.833Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.52
+2026-02-24T23:35:51.956Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T00:21:00.945Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.53
+2026-02-25T00:56:20.164Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.53
+2026-02-25T01:54:01.836Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T02:24:07.228Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.53
+2026-02-25T02:54:35.216Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.53
+2026-02-25T03:39:39.390Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.55
+2026-02-25T04:38:48.915Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T04:56:12.787Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.55
+2026-02-25T05:26:39.337Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.55
+2026-02-25T05:59:04.146Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.55
+2026-02-25T07:02:28.964Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T07:28:42.554Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T08:00:55.036Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T09:02:42.976Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T09:30:17.192Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T10:14:02.725Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T10:46:29.601Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T11:30:35.663Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T12:04:06.899Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T12:48:29.436Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T13:49:05.861Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T14:05:01.890Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T14:50:04.647Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T15:52:24.926Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T16:15:25.996Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T16:53:46.665Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T17:25:57.047Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T18:00:34.999Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T18:50:38.569Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T19:08:32.699Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.56
+2026-02-25T19:57:07.549Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T20:12:15.963Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.58
+2026-02-25T21:03:07.035Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T21:37:00.129Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-25T21:54:35.773Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.58
+2026-02-25T22:28:26.616Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.58
+2026-02-25T23:02:16.855Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.58
+2026-02-25T23:45:53.030Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.58
+2026-02-26T00:28:30.495Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T01:00:31.566Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T01:50:54.433Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T02:08:51.491Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T02:50:40.745Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T03:35:28.450Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T04:19:15.075Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T04:37:19.629Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T05:12:31.569Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T05:53:17.721Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T06:23:21.587Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T06:56:18.968Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T07:56:34.122Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T08:13:33.960Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T08:58:09.848Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T09:56:34.566Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T10:12:53.703Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T10:59:46.703Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T11:57:32.549Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T12:13:06.743Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T12:45:16.720Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T13:16:37.757Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T14:01:21.880Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T14:45:22.784Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T15:20:23.786Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T16:03:07.759Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T16:54:25.689Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T17:27:25.343Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T18:13:55.387Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T18:31:12.291Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T19:03:39.474Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T19:53:53.539Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T20:22:16.553Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T20:55:38.463Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T21:47:34.508Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-26T22:03:55.233Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.59
+2026-02-26T22:39:11.340Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.61
+2026-02-26T23:14:09.630Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.61
+2026-02-26T23:59:13.542Z [DEBUG] PackageManagerAutoUpdater: Update available 2.1.44 -> 2.1.61
+2026-02-27T00:55:54.167Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-27T01:16:23.912Z [DEBUG] Failed to fetch latest from GCS: Error: ECONNREFUSED
+2026-02-27T01:57:17.351Z [DEBUG] Failed to fetch latest from GCS: Error: ECONNREFUSED
+2026-02-27T02:33:15.536Z [DEBUG] Failed to fetch latest from GCS: AxiosError: timeout of 5000ms exceeded
+2026-02-27T02:56:51.988Z [DEBUG] Getting matching hook commands for SessionEnd with query: prompt_input_exit
+2026-02-27T02:56:51.988Z [DEBUG] Found 0 hook matchers in settings
+2026-02-27T02:56:51.988Z [DEBUG] Matched 0 unique hooks for query "prompt_input_exit" (0 before deduplication)

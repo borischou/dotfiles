@@ -1,0 +1,510 @@
+     1→#!/usr/bin/env python
+     2→"""Main CLI entry point for Maimai Assistant."""
+     3→
+     4→import sys
+     5→import asyncio
+     6→from pathlib import Path
+     7→
+     8→import click
+     9→from rich.console import Console
+    10→from rich.table import Table
+    11→
+    12→# Add src to path
+    13→sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    14→
+    15→from src.utils.logger import setup_logger
+    16→from src.utils.config import get_config
+    17→from src.utils.rate_limiter import get_rate_limiter
+    18→from src.utils.delays import reset_session as reset_delay_session
+    19→from src.exceptions.errors import MaimaiAssistantError
+    20→
+    21→console = Console()
+    22→
+    23→
+    24→def run_async(coro):
+    25→    """Run async function in sync context."""
+    26→    return asyncio.run(coro)
+    27→
+    28→
+    29→def _apply_cdp_endpoint(ctx):
+    30→    """Apply CDP endpoint override from CLI --cdp flag to browser manager."""
+    31→    cdp_endpoint = ctx.obj.get('cdp_endpoint') if ctx.obj else None
+    32→    if cdp_endpoint:
+    33→        from src.core.browser import get_browser_manager
+    34→        get_browser_manager().set_cdp_endpoint(cdp_endpoint)
+    35→
+    36→
+    37→@click.group()
+    38→@click.version_option(version='0.1.0')
+    39→@click.option('--cdp', 'cdp_endpoint', default=None, envvar='MAIMAI_CDP_ENDPOINT',
+    40→              help='CDP endpoint URL (default: http://localhost:9222)')
+    41→@click.pass_context
+    42→def cli(ctx, cdp_endpoint):
+    43→    """
+    44→    Maimai Semi-Automated Recruitment Assistant
+    45→
+    46→    Connects to your Chrome browser via CDP. Start Chrome with:
+    47→
+    48→        /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222
+    49→
+    50→    Then log in to Maimai manually before running commands.
+    51→    """
+    52→    try:
+    53→        # Initialize configuration and logging
+    54→        setup_logger()
+    55→        ctx.ensure_object(dict)
+    56→        ctx.obj['cdp_endpoint'] = cdp_endpoint
+    57→    except Exception as e:
+    58→        console.print(f"[red]Failed to initialize application: {e}[/red]")
+    59→        sys.exit(1)
+    60→
+    61→
+    62→@cli.command()
+    63→@click.pass_context
+    64→def login(ctx):
+    65→    """
+    66→    Verify login status via CDP connection.
+    67→
+    68→    Connects to your Chrome browser and checks if you're logged in to Maimai.
+    69→    If not, waits for you to log in manually in the browser.
+    70→
+    71→    First, start Chrome with remote debugging:
+    72→
+    73→        /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222
+    74→
+    75→    Then log in to Maimai in that Chrome window.
+    76→    """
+    77→    from src.modules.auth import login as do_login
+    78→    from src.core.browser import get_browser_manager
+    79→
+    80→    _apply_cdp_endpoint(ctx)
+    81→
+    82→    async def _login():
+    83→        browser = get_browser_manager()
+    84→        try:
+    85→            success = await do_login(browser)
+    86→            if success:
+    87→                console.print("[green]Login verified![/green]")
+    88→            else:
+    89→                console.print("[red]Login failed or timed out.[/red]")
+    90→                sys.exit(1)
+    91→        finally:
+    92→            await browser.close()
+    93→
+    94→    run_async(_login())
+    95→
+    96→
+    97→@cli.command()
+    98→@click.option('--keywords', '-k', required=True, multiple=True, help='Search keywords (can specify multiple times)')
+    99→@click.option('--company', '-c', multiple=True, help='Filter by company name (can specify multiple)')
+   100→@click.option('--location', '-l', help='Filter by location')
+   101→@click.option('--max-pages', '-p', type=int, default=1, help='Maximum pages to scrape per keyword')
+   102→@click.option('--mode', '-m', type=click.Choice(['search_center', 'enterprise']), default='search_center',
+   103→              help='Search mode: search_center (default) or enterprise')
+   104→@click.option('--export', '-e', help='Export results to file (Excel/CSV)')
+   105→@click.pass_context
+   106→def search(ctx, keywords, company, location, max_pages, mode, export):
+   107→    """
+   108→    Search for candidates with specified criteria.
+   109→
+   110→    Supports multiple keywords - each will be searched separately and results merged.
+   111→
+   112→    Use --mode enterprise to search via the enterprise recruitment tab.
+   113→
+   114→    Examples:\n
+   115→        maimai search -k "高级前端工程师" -c "阿里巴巴" --max-pages 3\n
+   116→        maimai search -k "前端工程师" -k "React开发" -k "Vue工程师" -p 2\n
+   117→        maimai search -k "研发" -m enterprise
+   118→    """
+   119→    from src.modules.export import export_candidates
+   120→    from src.core.browser import get_browser_manager
+   121→    from src.services.pipeline import search_all_keywords, search_all_keywords_enterprise
+   122→
+   123→    _apply_cdp_endpoint(ctx)
+   124→
+   125→    async def _search():
+   126→        reset_delay_session()
+   127→        browser = get_browser_manager()
+   128→        try:
+   129→            if mode == 'enterprise':
+   130→                all_candidates, seen_ids = await search_all_keywords_enterprise(
+   131→                    browser, keywords, company, max_pages
+   132→                )
+   133→            else:
+   134→                all_candidates, seen_ids = await search_all_keywords(
+   135→                    browser, keywords, company, location, max_pages
+   136→                )
+   137→
+   138→            # Display combined results
+   139→            if all_candidates:
+   140→                table = Table(title=f"Search Results ({len(all_candidates)} candidates total)")
+   141→                table.add_column("Name", style="cyan")
+   142→                table.add_column("Title", style="green")
+   143→                table.add_column("Company", style="yellow")
+   144→                table.add_column("Location", style="blue")
+   145→                table.add_column("ID", style="dim")
+   146→
+   147→                for c in all_candidates[:30]:  # Show first 30
+   148→                    table.add_row(c.name, c.title, c.company, c.location or '', c.maimai_id)
+   149→
+   150→                console.print(table)
+   151→
+   152→                if len(all_candidates) > 30:
+   153→                    console.print(f"[dim]... and {len(all_candidates) - 30} more[/dim]")
+   154→            else:
+   155→                console.print("[yellow]No candidates found for any keyword.[/yellow]")
+   156→
+   157→            # Export if requested
+   158→            if export and all_candidates:
+   159→                fmt = 'csv' if export.endswith('.csv') else 'excel'
+   160→                export_candidates(format=fmt, output_path=export)
+   161→
+   162→        finally:
+   163→            await browser.close()
+   164→
+   165→    run_async(_search())
+   166→
+   167→
+   168→@cli.command()
+   169→@click.argument('maimai_id')
+   170→@click.pass_context
+   171→def profile(ctx, maimai_id):
+   172→    """
+   173→    Extract detailed profile for a candidate.
+   174→
+   175→    Example:
+   176→        maimai profile abc123
+   177→    """
+   178→    from src.modules.profile import extract_profile
+   179→    from src.core.browser import get_browser_manager
+   180→
+   181→    _apply_cdp_endpoint(ctx)
+   182→
+   183→    async def _profile():
+   184→        browser = get_browser_manager()
+   185→        try:
+   186→            profile_data = await extract_profile(maimai_id, browser)
+   187→            # Profile display is handled in the module
+   188→        finally:
+   189→            await browser.close()
+   190→
+   191→    run_async(_profile())
+   192→
+   193→
+   194→@cli.command()
+   195→@click.argument('maimai_id')
+   196→@click.option('--template', '-t', required=True, help='Message template name')
+   197→@click.option('--preview', is_flag=True, help='Preview only, do not send')
+   198→@click.option('--var', '-v', multiple=True, help='Template variable (format: key=value)')
+   199→@click.option('--interactive', '-i', is_flag=True, help='Enable interactive selector discovery when auto-detection fails')
+   200→@click.pass_context
+   201→def message(ctx, maimai_id, template, preview, var, interactive):
+   202→    """
+   203→    Send message to a candidate (requires confirmation).
+   204→
+   205→    Example:
+   206→        maimai message abc123 -t greeting -v name=张三 -v recruiter_name=李四
+   207→        maimai message abc123 -t follow_up --preview
+   208→        maimai message abc123 -t greeting -i
+   209→    """
+   210→    from src.modules.message import send_message, preview_message
+   211→    from src.core.browser import get_browser_manager
+   212→
+   213→    # Parse variables
+   214→    variables = _parse_variables(var)
+   215→
+   216→    if preview:
+   217→        # Just preview, no send
+   218→        preview_message(template, variables)
+   219→        return
+   220→
+   221→    _apply_cdp_endpoint(ctx)
+   222→
+   223→    async def _message():
+   224→        browser = get_browser_manager()
+   225→        try:
+   226→            discovered_selectors = None
+   227→            if interactive:
+   228→                from src.modules.selector_discovery import DiscoveredSelectors
+   229→                discovered_selectors = DiscoveredSelectors()
+   230→
+   231→            success = await send_message(
+   232→                maimai_id=maimai_id,
+   233→                template_name=template,
+   234→                variables=variables,
+   235→                browser=browser,
+   236→                interactive=interactive,
+   237→                discovered_selectors=discovered_selectors,
+   238→            )
+   239→            if not success:
+   240→                sys.exit(1)
+   241→        finally:
+   242→            await browser.close()
+   243→
+   244→    run_async(_message())
+   245→
+   246→
+   247→@cli.command()
+   248→@click.option('--keywords', '-k', multiple=True, help='Search keywords (can specify multiple)')
+   249→@click.option('--template', '-t', help='Message template name')
+   250→@click.option('--var', '-v', multiple=True, help='Template variable (format: key=value)')
+   251→@click.option('--company', '-c', multiple=True, help='Filter by company name (can specify multiple)')
+   252→@click.option('--location', '-l', help='Filter by location')
+   253→@click.option('--max-pages', '-p', type=int, default=1, help='Max pages to scrape per keyword')
+   254→@click.option('--mode', '-m', type=click.Choice(['search_center', 'enterprise']), default='search_center',
+   255→              help='Search mode: search_center (default) or enterprise')
+   256→@click.option('--dry-run', is_flag=True, help='Search only, do not send messages')
+   257→@click.option('--skip-messaged/--no-skip-messaged', default=True, help='Skip already messaged candidates')
+   258→@click.option('--batch-pages', '-b', type=int, default=0, help='Send messages every N pages (0 = send after all pages)')
+   259→@click.option('--interactive', '-i', is_flag=True, help='Enable interactive selector discovery when auto-detection fails')
+   260→@click.option('--resume', is_flag=True, help='Resume from last checkpoint')
+   261→@click.pass_context
+   262→def pipeline(ctx, keywords, template, var, company, location, max_pages, mode, dry_run, skip_messaged, batch_pages, interactive, resume):
+   263→    """
+   264→    Search candidates and batch send messages in one command.
+   265→
+   266→    Combines multi-keyword search with batch messaging:
+   267→    search → preview → confirm → send.
+   268→
+   269→    Use --mode enterprise for the enterprise recruitment path with inline messaging.
+   270→
+   271→    Use --batch-pages to interleave search and messaging every N pages.
+   272→    Example: -p 10 --batch-pages 2 searches pages 1-2, sends messages,
+   273→    then pages 3-4, sends messages, etc.
+   274→
+   275→    Use --resume to continue from the last interrupted pipeline run.
+   276→
+   277→    Examples:\n
+   278→        maimai pipeline -k "前端工程师" -t greeting -v "recruiter_name=张三" -p 2\n
+   279→        maimai pipeline -k "前端" -k "后端" -t greeting -v "recruiter_name=张三" --dry-run\n
+   280→        maimai pipeline -k "前端" -t greeting -p 10 --batch-pages 2\n
+   281→        maimai pipeline -k "前端" -t greeting -p 1 -i\n
+   282→        maimai pipeline -k "研发" -t greeting -m enterprise -p 3\n
+   283→        maimai pipeline --resume
+   284→    """
+   285→    from src.core.browser import get_browser_manager
+   286→    from src.utils.checkpoint import CheckpointManager
+   287→    from src.services.pipeline import run_pipeline_default, run_pipeline_batched, SearchMode
+   288→
+   289→    # Handle resume mode
+   290→    if resume:
+   291→        ckpt = CheckpointManager.load_latest()
+   292→        if ckpt is None:
+   293→            console.print("[red]No checkpoint found to resume from.[/red]")
+   294→            return
+   295→
+   296→        from rich.panel import Panel
+   297→        console.print(Panel(ckpt.summary, title="Resuming Pipeline", border_style="cyan"))
+   298→
+   299→        p = ckpt.params
+   300→        keywords = tuple(p.get('keywords', []))
+   301→        template = p.get('template', template)
+   302→        variables = p.get('variables', {})
+   303→        company = tuple(p.get('company', []))
+   304→        location = p.get('location', location)
+   305→        max_pages = p.get('max_pages', max_pages)
+   306→        batch_pages = p.get('batch_pages', batch_pages)
+   307→        skip_messaged = p.get('skip_messaged', skip_messaged)
+   308→        interactive = p.get('interactive', interactive)
+   309→        mode = p.get('mode', mode)
+   310→    else:
+   311→        ckpt = None
+   312→        variables = _parse_variables(var)
+   313→
+   314→    if not keywords or not template:
+   315→        console.print("[red]--keywords (-k) and --template (-t) are required (or use --resume).[/red]")
+   316→        return
+   317→
+   318→    # Resolve SearchMode enum
+   319→    search_mode = SearchMode(mode)
+   320→
+   321→    if search_mode == SearchMode.ENTERPRISE and batch_pages > 0:
+   322→        console.print("[yellow]Note: --batch-pages with enterprise mode uses infinite scroll; "
+   323→                      "each batch opens a fresh enterprise search. Deduplication prevents re-messaging.[/yellow]")
+   324→
+   325→    _apply_cdp_endpoint(ctx)
+   326→
+   327→    async def _pipeline():
+   328→        from src.modules.auth import ensure_logged_in
+   329→
+   330→        reset_delay_session()
+   331→        browser = get_browser_manager()
+   332→        try:
+   333→            await ensure_logged_in(browser)
+   334→
+   335→            if batch_pages > 0:
+   336→                await run_pipeline_batched(
+   337→                    browser, keywords, company, location,
+   338→                    max_pages, batch_pages, template, variables,
+   339→                    dry_run, skip_messaged, interactive, ckpt,
+   340→                    mode=search_mode,
+   341→                )
+   342→            else:
+   343→                await run_pipeline_default(
+   344→                    browser, keywords, company, location,
+   345→                    max_pages, template, variables,
+   346→                    dry_run, skip_messaged, interactive,
+   347→                    mode=search_mode,
+   348→                )
+   349→        finally:
+   350→            await browser.close()
+   351→
+   352→    run_async(_pipeline())
+   353→
+   354→
+   355→@cli.command()
+   356→@click.option('--output', '-o', required=True, help='Output file path')
+   357→@click.option('--format', '-f', 'fmt', type=click.Choice(['xlsx', 'csv']), default='xlsx', help='Export format')
+   358→@click.option('--no-messages', is_flag=True, help='Exclude message history')
+   359→def export(output, fmt, no_messages):
+   360→    """
+   361→    Export candidate data to Excel or CSV.
+   362→
+   363→    Example:
+   364→        maimai export -o candidates_2026.xlsx
+   365→        maimai export -o data.csv -f csv --no-messages
+   366→    """
+   367→    from src.modules.export import export_candidates
+   368→
+   369→    format_map = {'xlsx': 'excel', 'csv': 'csv'}
+   370→    export_candidates(
+   371→        format=format_map[fmt],
+   372→        output_path=output,
+   373→        include_messages=not no_messages
+   374→    )
+   375→
+   376→
+   377→@cli.command()
+   378→def templates():
+   379→    """List all available message templates."""
+   380→    try:
+   381→        config = get_config()
+   382→        template_list = config.list_templates()
+   383→
+   384→        console.print("\n[bold cyan]Available Message Templates:[/bold cyan]\n")
+   385→
+   386→        table = Table()
+   387→        table.add_column("Name", style="green")
+   388→        table.add_column("Description")
+   389→        table.add_column("Variables", style="dim")
+   390→
+   391→        for name in template_list:
+   392→            template = config.get_template(name)
+   393→            variables = ', '.join(template.get('variables', []))
+   394→            table.add_row(
+   395→                name,
+   396→                template.get('description', 'No description'),
+   397→                variables
+   398→            )
+   399→
+   400→        console.print(table)
+   401→        console.print(f"\n[dim]Total: {len(template_list)} templates[/dim]\n")
+   402→
+   403→    except Exception as e:
+   404→        console.print(f"[red]Error loading templates: {e}[/red]")
+   405→
+   406→
+   407→@cli.command()
+   408→def status():
+   409→    """Show current rate limit status and quota."""
+   410→    try:
+   411→        rate_limiter = get_rate_limiter()
+   412→
+   413→        table = Table(title="Rate Limit Status")
+   414→        table.add_column("Action", style="cyan")
+   415→        table.add_column("Hourly Used", justify="right")
+   416→        table.add_column("Hourly Limit", justify="right")
+   417→        table.add_column("Daily Used", justify="right")
+   418→        table.add_column("Daily Limit", justify="right")
+   419→        table.add_column("Remaining", justify="right", style="green")
+   420→
+   421→        action_types = ['search', 'view_profile', 'send_message']
+   422→        action_names = {
+   423→            'search': 'Search',
+   424→            'view_profile': 'Profile View',
+   425→            'send_message': 'Send Message'
+   426→        }
+   427→
+   428→        for action_type in action_types:
+   429→            quota = rate_limiter.get_quota_status(action_type)
+   430→            hourly = quota['hourly']
+   431→            daily = quota['daily']
+   432→
+   433→            # Use minimum remaining
+   434→            remaining = min(hourly['remaining'], daily['remaining'])
+   435→
+   436→            table.add_row(
+   437→                action_names[action_type],
+   438→                str(hourly['used']),
+   439→                str(hourly['limit']),
+   440→                str(daily['used']),
+   441→                str(daily['limit']),
+   442→                str(remaining)
+   443→            )
+   444→
+   445→        console.print(table)
+   446→
+   447→        # Show adaptive throttle status
+   448→        throttle = rate_limiter.throttle_factor
+   449→        if throttle < 1.0:
+   450→            console.print(f"\n[yellow]Adaptive throttle active: {throttle:.0%} capacity (captcha/error detected recently)[/yellow]")
+   451→
+   452→        # Show session info
+   453→        from src.core.session import get_session_manager
+   454→        session_manager = get_session_manager()
+   455→        session_info = session_manager.get_session_info()
+   456→
+   457→        if session_info:
+   458→            console.print(f"\n[dim]Session age: {session_info['age']} | Cookies: {session_info['cookie_count']}[/dim]")
+   459→        else:
+   460→            console.print("\n[yellow]No saved session[/yellow]")
+   461→
+   462→    except Exception as e:
+   463→        console.print(f"[red]Error getting status: {e}[/red]")
+   464→
+   465→
+   466→@cli.command()
+   467→def logout():
+   468→    """Clear saved session and log out."""
+   469→    from src.core.session import get_session_manager
+   470→
+   471→    async def _logout():
+   472→        session_manager = get_session_manager()
+   473→        await session_manager.clear()
+   474→        console.print("[green]Session cleared. You will need to log in again.[/green]")
+   475→
+   476→    run_async(_logout())
+   477→
+   478→
+   479→def _parse_variables(var: tuple) -> dict:
+   480→    """Parse key=value variable pairs from CLI option."""
+   481→    variables = {}
+   482→    for v in var:
+   483→        if '=' in v:
+   484→            key, value = v.split('=', 1)
+   485→            variables[key.strip()] = value.strip()
+   486→    return variables
+   487→
+   488→
+   489→def main():
+   490→    """Main entry point."""
+   491→    try:
+   492→        cli()
+   493→    except MaimaiAssistantError as e:
+   494→        console.print(f"[red]Error: {e}[/red]")
+   495→        sys.exit(1)
+   496→    except KeyboardInterrupt:
+   497→        console.print("\n[yellow]Operation cancelled by user[/yellow]")
+   498→        sys.exit(0)
+   499→    except Exception as e:
+   500→        console.print(f"[red]Unexpected error: {e}[/red]")
+   501→        sys.exit(1)
+   502→
+   503→
+   504→if __name__ == '__main__':
+   505→    main()
+   506→
+
+<system-reminder>
+Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+</system-reminder>

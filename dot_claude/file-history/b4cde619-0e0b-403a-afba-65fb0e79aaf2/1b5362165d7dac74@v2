@@ -1,0 +1,11 @@
+#!/bin/bash
+# 卸载 TensorFlow 和相关依赖
+
+echo "开始卸载 TensorFlow..."
+
+# 卸载主要包
+/Library/Developer/CommandLineTools/usr/bin/python3 -m pip uninstall -y tensorflow keras tensorboard scipy h5py
+
+echo "卸载完成"
+echo "检查剩余包..."
+/Library/Developer/CommandLineTools/usr/bin/python3 -m pip list | grep -i "tensorflow\|keras"

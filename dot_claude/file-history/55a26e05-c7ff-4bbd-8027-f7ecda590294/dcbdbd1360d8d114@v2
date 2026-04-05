@@ -1,0 +1,115 @@
+"""Input validation utilities."""
+
+import re
+from typing import Dict, Any
+
+from src.exceptions.errors import ValidationError
+
+
+def validate_maimai_id(maimai_id: str) -> str:
+    """
+    Validate Maimai user ID format.
+
+    Args:
+        maimai_id: Maimai user ID to validate
+
+    Returns:
+        Validated and cleaned ID
+
+    Raises:
+        ValidationError: If ID format is invalid
+    """
+    if not maimai_id:
+        raise ValidationError("Maimai ID cannot be empty")
+
+    # Remove whitespace
+    maimai_id = str(maimai_id).strip()
+
+    # Check if it's alphanumeric
+    if not re.match(r'^[a-zA-Z0-9_-]+$', maimai_id):
+        raise ValidationError(f"Invalid Maimai ID format: {maimai_id}")
+
+    return maimai_id
+
+
+def validate_keywords(keywords: str) -> str:
+    """
+    Validate search keywords.
+
+    Args:
+        keywords: Search keywords
+
+    Returns:
+        Validated keywords
+
+    Raises:
+        ValidationError: If keywords are invalid
+    """
+    if not keywords or not keywords.strip():
+        raise ValidationError("Search keywords cannot be empty")
+
+    keywords = keywords.strip()
+
+    # Check length
+    if len(keywords) < 2:
+        raise ValidationError("Search keywords must be at least 2 characters")
+
+    if len(keywords) > 200:
+        raise ValidationError("Search keywords cannot exceed 200 characters")
+
+    return keywords
+
+
+def validate_template_variables(template: Dict[str, Any], variables: Dict[str, str]) -> None:
+    """
+    Validate that all required template variables are provided.
+
+    Args:
+        template: Template dictionary with 'variables' key
+        variables: Provided variables dictionary
+
+    Raises:
+        ValidationError: If required variables are missing
+    """
+    required_vars = template.get('variables', [])
+    provided_vars = set(variables.keys())
+    required_set = set(required_vars)
+
+    missing_vars = required_set - provided_vars
+
+    if missing_vars:
+        raise ValidationError(
+            f"Missing required template variables: {', '.join(missing_vars)}"
+        )
+
+
+def validate_template_rendering(template_content: str, variables: Dict[str, str], candidate: Dict[str, Any]) -> tuple[bool, list[str]]:
+    """
+    Validate that all placeholders in template can be filled.
+
+    Args:
+        template_content: Template string with {variable} placeholders
+        variables: Common variables dict
+        candidate: Candidate info dict
+
+    Returns:
+        Tuple of (is_valid, missing_variables)
+    """
+    # Extract all {variable} placeholders from template
+    placeholders = set(re.findall(r'\{(\w+)\}', template_content))
+
+    # Merge all available variables
+    all_vars = {**variables, **candidate}
+    provided = set(all_vars.keys())
+
+    # Find missing variables
+    missing = placeholders - provided
+
+    # Also check if any variable value is None or empty
+    empty_vars = [k for k in placeholders if k in all_vars and not all_vars[k]]
+
+    if missing or empty_vars:
+        return False, list(missing) + empty_vars
+
+    return True, []
+

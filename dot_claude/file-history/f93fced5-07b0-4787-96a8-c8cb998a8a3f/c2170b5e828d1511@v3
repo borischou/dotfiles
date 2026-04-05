@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block title %}Pipeline - Maimai Assistant{% endblock %}
+
+{% block content %}
+<!-- Status bar -->
+<div id="status-bar">
+    <div class="status-item">
+        <span class="dot" id="browser-dot"></span>
+        <span>Browser: <strong id="browser-status">--</strong></span>
+    </div>
+    <div class="status-item">
+        <span class="dot" id="login-dot"></span>
+        <span>Login: <strong id="login-status">--</strong></span>
+    </div>
+    <div class="status-item">
+        Queue: <strong id="queue-size">0</strong>
+    </div>
+</div>
+
+<!-- Unified form -->
+<form id="pipeline-form">
+    <div class="grid">
+        <label>
+            Keywords (one per line)
+            <textarea name="keywords" rows="3" placeholder="e.g. 前端工程师" required></textarea>
+        </label>
+        <label>
+            Company filter (one per line, optional)
+            <textarea name="company" rows="3" placeholder="e.g. 字节跳动"></textarea>
+        </label>
+    </div>
+    <div class="grid">
+        <label>
+            Location (optional)
+            <input type="text" name="location" placeholder="e.g. 北京">
+        </label>
+        <label>
+            Template
+            <select name="template" id="template-select">
+                <option value="">-- Search only --</option>
+            </select>
+        </label>
+        <label>
+            Pages
+            <input type="number" name="pages" value="1" min="1" max="50">
+        </label>
+    </div>
+    <div id="template-vars"></div>
+    <fieldset id="messaging-options" class="hidden">
+        <label>
+            <input type="checkbox" name="auto_send">
+            Auto-send (skip candidate confirmation)
+        </label>
+    </fieldset>
+    <button type="submit" id="submit-btn">Search</button>
+</form>
+
+<!-- Progress section -->
+<div id="pipeline-progress" hidden>
+    <article>
+        <header>
+            <span id="pipeline-status-text">Queued...</span>
+            <span id="pipeline-task-id" class="badge" style="float:right"></span>
+        </header>
+        <progress id="pipeline-progress-bar" value="0" max="100"></progress>
+        <p id="pipeline-detail"></p>
+        <div id="pipeline-log"></div>
+    </article>
+</div>
+
+<!-- Confirmation section (manual mode) -->
+<div id="pipeline-confirm" hidden>
+    <article>
+        <header>Select Candidates to Message</header>
+        <p>
+            <label>
+                <input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)">
+                Select All (<span id="confirm-count">0</span> candidates)
+            </label>
+        </p>
+        <div id="candidate-list"></div>
+        <footer>
+            <button onclick="confirmCandidates()" class="primary">Confirm & Send</button>
+            <button onclick="confirmCandidates(true)" class="secondary outline">Cancel</button>
+        </footer>
+    </article>
+</div>
+
+<!-- Search results (search-only mode) -->
+<div id="search-results" hidden>
+    <h3>Results (<span id="result-count">0</span> candidates)</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Title</th>
+                <th>Company</th>
+                <th>Location</th>
+            </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+    </table>
+    <button id="export-btn" class="outline" onclick="exportResults()">Export to Excel</button>
+</div>
+
+<!-- Pipeline results -->
+<div id="pipeline-results" hidden>
+    <article>
+        <header>Pipeline Complete</header>
+        <div id="results-summary"></div>
+    </article>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/pipeline.js"></script>
+<script>
+// --- Status bar auto-refresh ---
+async function refreshStatus() {
+    try {
+        const [authRes, statusRes] = await Promise.all([
+            fetch('/api/auth/status'),
+            fetch('/api/status'),
+        ]);
+        const auth = await authRes.json();
+        const status = await statusRes.json();
+
+        const bDot = document.getElementById('browser-dot');
+        const lDot = document.getElementById('login-dot');
+        document.getElementById('browser-status').textContent = auth.browser_connected ? 'Connected' : 'Disconnected';
+        bDot.dataset.ok = auth.browser_connected;
+        document.getElementById('login-status').textContent = auth.logged_in ? 'OK' : 'No';
+        lDot.dataset.ok = auth.logged_in;
+        document.getElementById('queue-size').textContent = status.queue.queue_size;
+
+        // Update connection badge in nav
+        const badge = document.getElementById('connection-badge');
+        if (auth.browser_connected && auth.logged_in) {
+            badge.textContent = 'Online';
+            badge.dataset.status = 'ok';
+        } else if (auth.browser_connected) {
+            badge.textContent = 'Not Logged In';
+            badge.dataset.status = 'warn';
+        } else {
+            badge.textContent = 'Offline';
+            badge.dataset.status = 'error';
+        }
+    } catch (e) {
+        console.error('Status refresh failed:', e);
+    }
+}
+refreshStatus();
+setInterval(refreshStatus, 10000);
+
+// --- Template loading & mode switching ---
+(async () => {
+    try {
+        const res = await fetch('/api/templates');
+        const templates = await res.json();
+        const select = document.getElementById('template-select');
+        // Append template options after the "Search only" default
+        select.innerHTML = '<option value="">-- Search only --</option>' +
+            templates.map(t =>
+                `<option value="${t.name}">${t.name} — ${t.description || 'No description'}</option>`
+            ).join('');
+
+        function onTemplateChange() {
+            const tpl = templates.find(t => t.name === select.value);
+            const msgOpts = document.getElementById('messaging-options');
+            const submitBtn = document.getElementById('submit-btn');
+            const varsDiv = document.getElementById('template-vars');
+
+            if (select.value) {
+                // Pipeline mode
+                msgOpts.classList.remove('hidden');
+                submitBtn.textContent = 'Start Pipeline';
+                if (tpl && tpl.variables.length) {
+                    const autoVars = ['name', 'company', 'position'];
+                    const manualVars = tpl.variables.filter(v => !autoVars.includes(v));
+                    if (manualVars.length) {
+                        varsDiv.innerHTML = '<fieldset><legend>Template Variables</legend>' +
+                            manualVars.map(v =>
+                                `<label>${v}<input type="text" name="var_${v}" placeholder="${v}"></label>`
+                            ).join('') + '</fieldset>';
+                    } else {
+                        varsDiv.innerHTML = '<small>Variables (name, company, position) will be auto-filled per candidate.</small>';
+                    }
+                } else {
+                    varsDiv.innerHTML = '';
+                }
+            } else {
+                // Search-only mode
+                msgOpts.classList.add('hidden');
+                submitBtn.textContent = 'Search';
+                varsDiv.innerHTML = '';
+            }
+        }
+
+        select.addEventListener('change', onTemplateChange);
+        onTemplateChange(); // init
+    } catch (e) {
+        console.error('Failed to load templates:', e);
+    }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,19 @@
+src/web/routes/candidates.py:73:            return HTMLResponse("<p>候选人未找到</p>", status_code=404)
+src/web/routes/candidates.py:118:        return HTMLResponse(
+src/web/routes/candidates.py:132:        return HTMLResponse(
+src/web/routes/candidates.py:136:        return HTMLResponse(f'<p><mark>抓取失败: {html.escape(str(e))}</mark></p>', status_code=500)
+src/web/routes/search.py:40:        return HTMLResponse(
+src/web/routes/search.py:56:        return HTMLResponse(f'<p><mark>{html.escape(msg)}</mark></p>', status_code=400)
+src/web/routes/search.py:79:        return HTMLResponse(f'<p><mark>搜索失败: {html.escape(str(e))}</mark></p>', status_code=500)
+src/web/routes/settings.py:35:        return HTMLResponse(
+src/web/routes/messages.py:26:        return HTMLResponse("")
+src/web/routes/messages.py:54:        return HTMLResponse(preview_html)
+src/web/routes/messages.py:57:        return HTMLResponse(f'<p><mark>预览失败: {html.escape(str(e))}</mark></p>')
+src/web/routes/messages.py:68:        return HTMLResponse(
+src/web/routes/messages.py:74:        return HTMLResponse('<p><mark>请选择消息模板</mark></p>', status_code=400)
+src/web/routes/messages.py:105:            return HTMLResponse('<p>消息发送成功！</p>')
+src/web/routes/messages.py:107:            return HTMLResponse('<p><mark>消息发送失败</mark></p>')
+src/web/routes/messages.py:110:        return HTMLResponse(f'<p><mark>发送失败: {html.escape(str(e))}</mark></p>', status_code=500)
+src/web/routes/pipeline.py:85:        return HTMLResponse(f'<p><mark>{html.escape(msg)}</mark></p>', status_code=400)
+src/web/routes/export.py:36:            return HTMLResponse('<p><mark>导出失败: 没有数据</mark></p>', status_code=400)
+src/web/routes/export.py:52:        return HTMLResponse(f'<p><mark>导出失败: {html.escape(str(e))}</mark></p>', status_code=500)

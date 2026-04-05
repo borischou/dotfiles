@@ -1,0 +1,40 @@
+{
+  "name": "local-skills",
+  "owner": {
+    "name": "Local User",
+    "email": "user@local"
+  },
+  "metadata": {
+    "description": "Local custom skills",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "yt-dlp",
+      "description": "Video and audio download tool supporting 1000+ platforms",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/yt-dlp"
+      ]
+    },
+    {
+      "name": "openspec",
+      "description": "Spec-driven development workflow for AI coding assistants",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/openspec"
+      ]
+    },
+    {
+      "name": "skill-inspector",
+      "description": "Tool to inspect and explore .skill file structure",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/skill-inspector"
+      ]
+    }
+  ]
+}

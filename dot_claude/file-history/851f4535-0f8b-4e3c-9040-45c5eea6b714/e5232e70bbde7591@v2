@@ -1,0 +1,30 @@
+"""Template listing endpoint — no browser needed."""
+
+import re
+from typing import List
+
+from fastapi import APIRouter
+
+from src.utils.config import get_config
+from src.web.schemas import TemplateResponse
+
+router = APIRouter()
+
+
+@router.get("/templates", response_model=List[TemplateResponse])
+async def list_templates():
+    """List all available message templates."""
+    config = get_config()
+    names = config.list_templates()
+    result = []
+    for name in names:
+        tpl = config.get_template(name)
+        # Extract variable placeholders from content
+        variables = re.findall(r'\{(\w+)\}', tpl.get('content', ''))
+        result.append(TemplateResponse(
+            name=name,
+            content=tpl.get('content', ''),
+            description=tpl.get('description'),
+            variables=list(set(variables)),
+        ))
+    return result

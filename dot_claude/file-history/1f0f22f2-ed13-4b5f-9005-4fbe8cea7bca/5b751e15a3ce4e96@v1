@@ -1,0 +1,65 @@
+"""Diagnostic script: verify search extraction finds user IDs via member_entry pattern."""
+import sys
+import asyncio
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.core.browser import get_browser_manager
+from src.utils.config import get_config
+from src.utils.logger import setup_logger
+from src.utils.retry import retry_navigation
+from src.modules.search import _extract_search_results
+
+setup_logger()
+
+SEARCH_URL = "https://maimai.cn/web/search_center?type=contact&query=%E5%BF%AB%E6%89%8B+iOS&highlight=true"
+
+
+async def diagnose():
+    browser = get_browser_manager()
+    config = get_config()
+    try:
+        await browser.start()
+        page = browser.page
+
+        await retry_navigation(page, SEARCH_URL, wait_until="domcontentloaded")
+        await asyncio.sleep(3)
+
+        # Click "人脉" tab
+        try:
+            renmai_tab = await page.query_selector('text="人脉"')
+            if renmai_tab:
+                await renmai_tab.click()
+                print("Clicked 人脉 tab")
+                await asyncio.sleep(3)
+        except Exception as e:
+            print(f"Could not click 人脉 tab: {e}")
+
+        await page.evaluate("window.scrollBy(0, 300)")
+        await asyncio.sleep(2)
+
+        candidates = await _extract_search_results(page, config)
+
+        print(f"\n{'='*80}")
+        print(f"EXTRACTION RESULTS: {len(candidates)} candidates")
+        print(f"{'='*80}")
+
+        with_url = 0
+        without_url = 0
+        for c in candidates:
+            has_url = bool(c.profile_url)
+            if has_url:
+                with_url += 1
+            else:
+                without_url += 1
+            print(f"  {'OK' if has_url else 'NO URL'} | {c.maimai_id:20s} | {c.name:10s} | {c.company[:20]:20s} | {c.title[:30]:30s} | {c.profile_url[:60] if c.profile_url else ''}")
+
+        print(f"\n  With URL: {with_url}/{len(candidates)}")
+        print(f"  Without URL: {without_url}/{len(candidates)}")
+
+    finally:
+        await browser.close()
+
+
+asyncio.run(diagnose())

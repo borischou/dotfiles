@@ -1,0 +1,38 @@
+"""HTML page routes served via Jinja2 templates."""
+
+from fastapi import APIRouter, Request
+from fastapi.responses import RedirectResponse
+
+router = APIRouter()
+
+
+@router.get("/")
+async def index(request: Request):
+    return request.app.state.templates.TemplateResponse("index.html", {"request": request})
+
+
+@router.get("/data")
+async def data_page(request: Request):
+    return request.app.state.templates.TemplateResponse("data.html", {"request": request})
+
+
+# --- Legacy URL redirects (301) ---
+
+@router.get("/search")
+async def search_redirect():
+    return RedirectResponse(url="/", status_code=301)
+
+
+@router.get("/pipeline")
+async def pipeline_redirect():
+    return RedirectResponse(url="/", status_code=301)
+
+
+@router.get("/candidates")
+async def candidates_redirect():
+    return RedirectResponse(url="/data", status_code=301)
+
+
+@router.get("/messages")
+async def messages_redirect():
+    return RedirectResponse(url="/data", status_code=301)

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Messages - Maimai Assistant{% endblock %}
+
+{% block content %}
+<h2>Message History</h2>
+
+<table id="messages-table">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Candidate</th>
+            <th>Template</th>
+            <th>Status</th>
+            <th>Content</th>
+            <th>Sent At</th>
+        </tr>
+    </thead>
+    <tbody id="messages-body">
+        <tr><td colspan="6">Loading...</td></tr>
+    </tbody>
+</table>
+
+<div id="msg-pagination" class="pagination-controls"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let msgPage = 1;
+const msgPageSize = 20;
+
+async function loadMessages(page = 1) {
+    msgPage = page;
+    try {
+        // Use candidates endpoint to get message data via DB
+        const res = await fetch(`/api/candidates?page=${page}&page_size=${msgPageSize}`);
+        const data = await res.json();
+
+        // We need a messages-specific endpoint. For now, query candidates with messages.
+        // TODO: Add /api/messages endpoint if needed
+        const tbody = document.getElementById('messages-body');
+
+        // Load messages directly from the messages list approach
+        const msgRes = await fetch(`/api/messages?page=${page}&page_size=${msgPageSize}`);
+        if (msgRes.ok) {
+            const msgData = await msgRes.json();
+            if (!msgData.items || !msgData.items.length) {
+                tbody.innerHTML = '<tr><td colspan="6">No messages yet</td></tr>';
+                return;
+            }
+            tbody.innerHTML = msgData.items.map((m, i) => `
+                <tr>
+                    <td>${(page-1) * msgPageSize + i + 1}</td>
+                    <td>${escapeHtml(m.candidate_name || m.candidate_maimai_id)}</td>
+                    <td>${escapeHtml(m.template_name || '--')}</td>
+                    <td><span class="badge" data-status="${m.status}">${m.status}</span></td>
+                    <td title="${escapeHtml(m.content)}">${escapeHtml(m.content.substring(0, 60))}${m.content.length > 60 ? '...' : ''}</td>
+                    <td>${m.sent_at ? new Date(m.sent_at).toLocaleString() : '--'}</td>
+                </tr>
+            `).join('');
+
+            // Pagination
+            const pag = document.getElementById('msg-pagination');
+            let html = '';
+            if (page > 1) html += `<button class="outline" onclick="loadMessages(${page-1})">Previous</button> `;
+            html += `<span>Page ${page} / ${msgData.total_pages} (${msgData.total} total)</span> `;
+            if (page < msgData.total_pages) html += `<button class="outline" onclick="loadMessages(${page+1})">Next</button>`;
+            pag.innerHTML = html;
+        } else {
+            tbody.innerHTML = '<tr><td colspan="6">Messages API not available</td></tr>';
+        }
+    } catch (e) {
+        console.error('Failed to load messages:', e);
+        document.getElementById('messages-body').innerHTML = '<tr><td colspan="6">Error loading messages</td></tr>';
+    }
+}
+
+loadMessages();
+</script>
+{% endblock %}

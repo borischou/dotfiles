@@ -1,0 +1,552 @@
+#!/usr/bin/env python3
+"""水下视频增强命令行工具
+
+针对深潜视频的蓝绿雾化、低对比度、色彩偏移等问题，
+使用传统 CV 算法进行逐帧增强处理。
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+import time
+
+import cv2
+import numpy as np
+
+# 导向滤波检测
+try:
+    _ = cv2.ximgproc.guidedFilter
+    HAS_GUIDED_FILTER = True
+except AttributeError:
+    HAS_GUIDED_FILTER = False
+    print("[警告] cv2.ximgproc 不可用，将使用双边滤波替代导向滤波。"
+          "建议安装 opencv-contrib-python 以获得更好效果。")
+
+# 预设参数
+PRESETS = {
+    "light": {
+        "white_balance": 0.4,
+        "dehaze": 0.5,
+        "clahe": 2.0,
+        "color_boost": 1.2,
+        "sharpen": 0.3,
+    },
+    "medium": {
+        "white_balance": 0.5,
+        "dehaze": 0.65,
+        "clahe": 2.8,
+        "color_boost": 1.3,
+        "sharpen": 0.5,
+    },
+    "heavy": {
+        "white_balance": 0.9,
+        "dehaze": 0.85,
+        "clahe": 3.5,
+        "color_boost": 1.5,
+        "sharpen": 0.6,
+    },
+}
+
+# 支持的文件扩展名
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".mts"}
+
+
+class UnderwaterEnhancer:
+    """水下图像增强器"""
+
+    def __init__(self, white_balance=0.6, dehaze_strength=0.7,
+                 clahe_clip=3.0, color_boost=1.4, sharpen_strength=0.5):
+        self.white_balance_strength = np.clip(white_balance, 0.0, 1.0)
+        self.dehaze_strength = np.clip(dehaze_strength, 0.0, 1.0)
+        self.clahe_clip = np.clip(clahe_clip, 1.0, 5.0)
+        self.color_boost = np.clip(color_boost, 1.0, 2.0)
+        self.sharpen_strength = np.clip(sharpen_strength, 0.0, 1.0)
+
+    def auto_white_balance(self, img, strength=None):
+        """水下白平衡校正（保守策略，保留蓝色基调）
+
+        三通道均值增益，strength 控制校正程度。
+        各通道增益上限：R=1.5, G=1.3, B=1.2
+        """
+        if strength is None:
+            strength = self.white_balance_strength
+
+        result = img.astype(np.float32)
+        b_mean = np.mean(result[:, :, 0])
+        g_mean = np.mean(result[:, :, 1])
+        r_mean = np.mean(result[:, :, 2])
+
+        max_mean = max(b_mean, g_mean, r_mean)
+        if max_mean == 0:
+            return img
+
+        # 计算增益
+        gain_b = max_mean / b_mean if b_mean > 0 else 1.0
+        gain_g = max_mean / g_mean if g_mean > 0 else 1.0
+        gain_r = max_mean / r_mean if r_mean > 0 else 1.0
+
+        # 应用增益上限（保守，保留蓝色基调）
+        gain_b = min(gain_b, 1.2)
+        gain_g = min(gain_g, 1.3)
+        gain_r = min(gain_r, 1.5)
+
+        # strength 混合（1.0 = 完全校正，0.0 = 不校正）
+        gain_b = 1.0 + (gain_b - 1.0) * strength
+        gain_g = 1.0 + (gain_g - 1.0) * strength
+        gain_r = 1.0 + (gain_r - 1.0) * strength
+
+        result[:, :, 0] *= gain_b
+        result[:, :, 1] *= gain_g
+        result[:, :, 2] *= gain_r
+
+        return np.clip(result, 0, 255).astype(np.uint8)
+
+    def dehaze(self, img, omega=None):
+        """基于暗通道先验的去雾
+
+        何凯明暗通道先验算法，导向滤波平滑透射率。
+        """
+        if omega is None:
+            omega = self.dehaze_strength
+
+        img_f = img.astype(np.float64) / 255.0
+        h, w, _ = img_f.shape
+        patch_size = 15
+
+        # 1. 计算暗通道
+        min_channel = np.min(img_f, axis=2)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT,
+                                           (patch_size, patch_size))
+        dark_channel = cv2.erode(min_channel, kernel)
+
+        # 2. 估计大气光（使用均值，比 max 更鲁棒，避免高光区域导致色偏）
+        num_pixels = h * w
+        num_brightest = max(int(num_pixels * 0.001), 1)
+        dark_flat = dark_channel.ravel()
+        indices = np.argsort(dark_flat)[-num_brightest:]
+
+        img_flat = img_f.reshape(-1, 3)
+        atm_light = np.mean(img_flat[indices], axis=0)
+        atm_light = np.clip(atm_light, 0.1, 1.0)
+
+        # 3. 估计透射率
+        norm_img = img_f / atm_light
+        norm_min = np.min(norm_img, axis=2)
+        norm_dark = cv2.erode(norm_min, kernel)
+        transmission = 1.0 - omega * norm_dark
+        transmission = np.clip(transmission, 0.15, 1.0)
+
+        # 4. 导向滤波平滑透射率
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+        trans_f32 = transmission.astype(np.float32)
+
+        if HAS_GUIDED_FILTER:
+            transmission = cv2.ximgproc.guidedFilter(
+                gray, trans_f32, radius=60, eps=1e-3)
+        else:
+            transmission = cv2.bilateralFilter(
+                trans_f32, d=9, sigmaColor=0.1, sigmaSpace=0.1)
+
+        transmission = np.clip(transmission.astype(np.float64), 0.15, 1.0)
+
+        # 5. 恢复无雾图像
+        result = np.zeros_like(img_f)
+        for c in range(3):
+            result[:, :, c] = (
+                (img_f[:, :, c] - atm_light[c]) / transmission + atm_light[c]
+            )
+        result = np.clip(result, 0, 1)
+
+        # 6. 伪影修复（双重保护）
+        # 策略A：色相偏移检测（对饱和度足够的区域有效）
+        result_8 = np.clip(result * 255, 0, 255).astype(np.uint8)
+        orig_8 = np.clip(img_f * 255, 0, 255).astype(np.uint8)
+        result_hsv = cv2.cvtColor(result_8, cv2.COLOR_BGR2HSV)
+        orig_hsv = cv2.cvtColor(orig_8, cv2.COLOR_BGR2HSV)
+
+        hue_diff = np.abs(result_hsv[:, :, 0].astype(np.int16)
+                          - orig_hsv[:, :, 0].astype(np.int16))
+        hue_diff = np.minimum(hue_diff, 180 - hue_diff)
+        hue_mask = np.clip((hue_diff.astype(np.float32) - 12) / 18, 0, 1)
+        hue_mask = cv2.GaussianBlur(hue_mask, (21, 21), 0)
+
+        # 策略B：亮度保护（高亮低饱和区域色相不可靠，直接用亮度遮罩）
+        original_lum = np.mean(img_f, axis=2)
+        bright_mask = np.clip((original_lum - 0.6) / 0.25, 0, 1)
+
+        # 取两种保护的最大值
+        combined_mask = np.maximum(hue_mask, bright_mask)
+        combined_mask = combined_mask[:, :, np.newaxis]
+        result = result * (1 - combined_mask) + img_f * combined_mask
+
+        return np.clip(result * 255, 0, 255).astype(np.uint8)
+
+    def denoise(self, img, strength='medium'):
+        """非局部均值降噪，保留边缘细节
+
+        strength: 'light' (h=4), 'medium' (h=8), 'heavy' (h=12)
+        参数更保守，避免过度模糊
+        """
+        h_map = {'light': 4, 'medium': 8, 'heavy': 12}
+        h = h_map.get(strength, 8)
+
+        # 减小搜索窗口，提升速度和细节保留
+        return cv2.fastNlMeansDenoisingColored(img, None, h, h, 5, 15)
+
+    def apply_clahe(self, img, clip_limit=None):
+        """LAB 空间 L 通道 CLAHE 对比度增强"""
+        if clip_limit is None:
+            clip_limit = self.clahe_clip
+
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l_channel = lab[:, :, 0]
+
+        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
+        lab[:, :, 0] = clahe.apply(l_channel)
+
+        return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+    def enhance_color(self, img, saturation_boost=None):
+        """HSV 空间饱和度增强"""
+        if saturation_boost is None:
+            saturation_boost = self.color_boost
+
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
+        hsv[:, :, 1] *= saturation_boost   # 饱和度
+        hsv[:, :, 2] *= 1.10               # 明度提升
+        hsv = np.clip(hsv, 0, 255).astype(np.uint8)
+
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+    def purify_blue(self, img):
+        """蓝色纯化：在蓝色水体区域抑制绿通道、提升蓝通道，让水色更纯净通透
+
+        参考效果图的水色是明亮纯净的青蓝色，原始水下画面常有绿色浑浊感。
+        通过在蓝色主导区域选择性调整通道比例，消除绿色杂质并增强蓝色纯度。
+        """
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+        # 蓝色-青色区域：OpenCV HSV hue 85-130（对应 170-260 度）
+        # 扩大饱和度范围，包括浅蓝色水体
+        blue_mask = ((h >= 85) & (h <= 130) & (s > 20)).astype(np.float32)
+        # 平滑遮罩边缘，避免突变
+        blue_mask = cv2.GaussianBlur(blue_mask, (31, 31), 0)
+
+        result = img.astype(np.float32)
+        # 在蓝色区域：降低绿通道 10%，提升蓝通道和明度
+        result[:, :, 1] -= blue_mask * result[:, :, 1] * 0.10  # G↓ 减少绿色
+        result[:, :, 0] += blue_mask * (255 - result[:, :, 0]) * 0.12  # B↑ 增强蓝色
+        # 针对蓝色水体区域提亮（让水更通透）
+        result += blue_mask[:, :, np.newaxis] * 8
+
+        return np.clip(result, 0, 255).astype(np.uint8)
+
+    def gamma_correct(self, img, gamma=0.75):
+        """Gamma 校正提亮中间调和暗部
+
+        gamma < 1 提亮，gamma > 1 压暗。默认 0.75 提升通透感（更强提亮）。
+        """
+        table = np.array([((i / 255.0) ** gamma) * 255
+                          for i in range(256)]).astype(np.uint8)
+        return cv2.LUT(img, table)
+
+    def exposure_compensation(self, img, amount=1.15):
+        """曝光补偿，整体提亮
+
+        amount > 1.0 提亮，< 1.0 压暗
+        """
+        result = img.astype(np.float32) * amount
+        return np.clip(result, 0, 255).astype(np.uint8)
+
+    def sharpen(self, img, strength=None):
+        """Unsharp Mask 锐化"""
+        if strength is None:
+            strength = self.sharpen_strength
+
+        blurred = cv2.GaussianBlur(img, (0, 0), sigmaX=3)
+        sharpened = cv2.addWeighted(img, 1.0 + strength, blurred, -strength, 0)
+        return np.clip(sharpened, 0, 255).astype(np.uint8)
+
+    def enhance(self, img):
+        """统一增强入口，按序执行全部处理步骤（优化版）"""
+        result = self.auto_white_balance(img)
+        result = self.dehaze(result)
+        # 仅在去雾后轻度降噪一次，避免过度模糊
+        result = self.denoise(result, strength='light')
+        result = self.apply_clahe(result)
+        result = self.enhance_color(result)
+        result = self.purify_blue(result)
+        # 曝光补偿 + gamma 双重提亮
+        result = self.exposure_compensation(result, amount=1.15)
+        result = self.gamma_correct(result, gamma=0.75)
+        result = self.sharpen(result)
+        return result
+
+
+def create_comparison(original, enhanced):
+    """生成左右对比图，中间白色分割线"""
+    h, w = original.shape[:2]
+    line_width = max(2, w // 400)
+    canvas = np.hstack([original, enhanced])
+    # 画白色分割线
+    canvas[:, w - line_width // 2: w + (line_width + 1) // 2] = 255
+    return canvas
+
+
+def process_image(input_path, output_path, enhancer, compare=False):
+    """处理单张图片"""
+    img = cv2.imread(input_path)
+    if img is None:
+        print(f"[错误] 无法读取图片: {input_path}")
+        return False
+
+    print(f"处理图片: {input_path} ({img.shape[1]}x{img.shape[0]})")
+    enhanced = enhancer.enhance(img)
+
+    if compare:
+        result = create_comparison(img, enhanced)
+        # 对比图输出路径
+        base, ext = os.path.splitext(output_path)
+        compare_path = f"{base}_compare{ext}"
+        cv2.imwrite(compare_path, result)
+        print(f"对比图已保存: {compare_path}")
+
+    cv2.imwrite(output_path, enhanced)
+    print(f"增强图已保存: {output_path}")
+    return True
+
+
+def process_video(input_path, output_path, enhancer, compare=False):
+    """处理视频（逐帧增强）"""
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        print(f"[错误] 无法打开视频: {input_path}")
+        return False
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
+    out_width = width * 2 if compare else width
+    temp_path = output_path + ".temp.mp4"
+
+    writer = cv2.VideoWriter(temp_path, fourcc, fps, (out_width, height))
+    if not writer.isOpened():
+        print("[错误] 无法创建视频写入器")
+        cap.release()
+        return False
+
+    print(f"处理视频: {input_path}")
+    print(f"分辨率: {width}x{height}, FPS: {fps:.1f}, 总帧数: {total_frames}")
+
+    start_time = time.time()
+    frame_idx = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        enhanced = enhancer.enhance(frame)
+
+        if compare:
+            out_frame = create_comparison(frame, enhanced)
+        else:
+            out_frame = enhanced
+
+        writer.write(out_frame)
+        frame_idx += 1
+
+        if frame_idx % 30 == 0:
+            elapsed = time.time() - start_time
+            fps_actual = frame_idx / elapsed if elapsed > 0 else 0
+            progress = frame_idx / total_frames * 100 if total_frames > 0 else 0
+            print(f"  进度: {frame_idx}/{total_frames} "
+                  f"({progress:.1f}%) - {fps_actual:.1f} fps")
+
+    cap.release()
+    writer.release()
+
+    elapsed = time.time() - start_time
+    print(f"帧处理完成: {frame_idx} 帧, 耗时 {elapsed:.1f}s")
+
+    # ffmpeg 重编码
+    ffmpeg_reencode(temp_path, output_path, input_path)
+    return True
+
+
+def ffmpeg_reencode(temp_path, final_path, audio_source):
+    """使用 ffmpeg 重编码为 H.265（hevc_videotoolbox 硬件加速）"""
+    print("FFmpeg 重编码中 (H.265 hevc_videotoolbox)...")
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", temp_path,
+        "-i", audio_source,
+        "-map", "0:v:0",
+        "-map", "1:a?",
+        "-c:v", "hevc_videotoolbox",
+        "-q:v", "65",
+        "-tag:v", "hvc1",
+        "-c:a", "copy",
+        final_path,
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"[警告] hevc_videotoolbox 失败，尝试 H.264...")
+            cmd_h264 = [
+                "ffmpeg", "-y",
+                "-i", temp_path,
+                "-i", audio_source,
+                "-map", "0:v:0",
+                "-map", "1:a?",
+                "-c:v", "h264_videotoolbox",
+                "-q:v", "65",
+                "-tag:v", "avc1",
+                "-c:a", "copy",
+                final_path,
+            ]
+            result = subprocess.run(cmd_h264, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"[错误] ffmpeg 编码失败: {result.stderr[-500:]}")
+                # 退而使用临时文件
+                os.rename(temp_path, final_path)
+                print("已使用 mp4v 编码的临时文件作为输出")
+                return
+    except FileNotFoundError:
+        print("[警告] ffmpeg 未安装，使用 mp4v 编码输出")
+        os.rename(temp_path, final_path)
+        return
+
+    # 删除临时文件
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+
+    print(f"输出视频已保存: {final_path}")
+
+
+def process_batch(input_dir, output_dir, enhancer, compare=False):
+    """批量处理目录下的图片和视频"""
+    if not os.path.isdir(input_dir):
+        print(f"[错误] 输入目录不存在: {input_dir}")
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    files = sorted(os.listdir(input_dir))
+    media_files = []
+    for f in files:
+        ext = os.path.splitext(f)[1].lower()
+        if ext in IMAGE_EXTS or ext in VIDEO_EXTS:
+            media_files.append(f)
+
+    if not media_files:
+        print(f"[警告] 目录中未找到支持的媒体文件: {input_dir}")
+        return
+
+    print(f"找到 {len(media_files)} 个文件待处理")
+
+    for i, filename in enumerate(media_files, 1):
+        ext = os.path.splitext(filename)[1].lower()
+        input_path = os.path.join(input_dir, filename)
+        output_path = os.path.join(output_dir, filename)
+
+        print(f"\n[{i}/{len(media_files)}] {filename}")
+
+        if ext in IMAGE_EXTS:
+            process_image(input_path, output_path, enhancer, compare)
+        elif ext in VIDEO_EXTS:
+            process_video(input_path, output_path, enhancer, compare)
+
+    print(f"\n批量处理完成，输出目录: {output_dir}")
+
+
+def build_enhancer(args):
+    """根据 CLI 参数构建 enhancer 实例"""
+    preset = PRESETS[args.preset]
+
+    # 自定义参数覆盖预设
+    wb = args.white_balance if args.white_balance is not None else preset["white_balance"]
+    dh = args.dehaze if args.dehaze is not None else preset["dehaze"]
+    cl = args.clahe if args.clahe is not None else preset["clahe"]
+    cb = args.color_boost if args.color_boost is not None else preset["color_boost"]
+    sh = args.sharpen if args.sharpen is not None else preset["sharpen"]
+
+    print(f"参数: preset={args.preset}, white_balance={wb}, dehaze={dh}, "
+          f"clahe={cl}, color_boost={cb}, sharpen={sh}")
+
+    return UnderwaterEnhancer(
+        white_balance=wb,
+        dehaze_strength=dh,
+        clahe_clip=cl,
+        color_boost=cb,
+        sharpen_strength=sh,
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="水下视频增强工具 — 针对深潜视频的蓝绿雾化、低对比度等问题")
+
+    subparsers = parser.add_subparsers(dest="command", help="处理模式")
+
+    # 公共参数
+    def add_common_args(p):
+        p.add_argument("-o", "--output", required=True, help="输出路径")
+        p.add_argument("--compare", action="store_true", help="生成处理前后对比")
+        p.add_argument("--preset", choices=["light", "medium", "heavy"],
+                       default="medium", help="参数预设 (默认: medium)")
+        p.add_argument("--white-balance", type=float, default=None,
+                       help="白平衡强度 (0.0-1.0)")
+        p.add_argument("--dehaze", type=float, default=None,
+                       help="去雾强度 (0.0-1.0)")
+        p.add_argument("--clahe", type=float, default=None,
+                       help="CLAHE clip_limit (1.0-5.0)")
+        p.add_argument("--color-boost", type=float, default=None,
+                       help="饱和度增强倍数 (1.0-2.0)")
+        p.add_argument("--sharpen", type=float, default=None,
+                       help="锐化强度 (0.0-1.0)")
+
+    # image 子命令
+    p_image = subparsers.add_parser("image", help="处理单张图片")
+    p_image.add_argument("input", help="输入图片路径")
+    add_common_args(p_image)
+
+    # video 子命令
+    p_video = subparsers.add_parser("video", help="处理视频")
+    p_video.add_argument("input", help="输入视频路径")
+    add_common_args(p_video)
+
+    # batch 子命令
+    p_batch = subparsers.add_parser("batch", help="批量处理目录")
+    p_batch.add_argument("input", help="输入目录路径")
+    add_common_args(p_batch)
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(1)
+
+    enhancer = build_enhancer(args)
+
+    if args.command == "image":
+        success = process_image(args.input, args.output, enhancer, args.compare)
+    elif args.command == "video":
+        success = process_video(args.input, args.output, enhancer, args.compare)
+    elif args.command == "batch":
+        process_batch(args.input, args.output, enhancer, args.compare)
+        success = True
+
+    sys.exit(0 if success else 1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,7 @@
+chore: add pre-commit-test hook to repo
+
+Auto-detect test framework (pytest/npm/make/cargo/go/bats) and run
+before commit. Source of truth now in this repo, symlinked back to
+~/.claude/hooks/ and each project's .git/hooks/pre-commit.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

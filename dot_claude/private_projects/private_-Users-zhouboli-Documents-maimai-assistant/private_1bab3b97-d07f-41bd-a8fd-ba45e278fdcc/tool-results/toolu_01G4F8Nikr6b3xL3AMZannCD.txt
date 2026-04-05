@@ -1,0 +1,174 @@
+     1→"""Pipeline checkpoint manager for resume capability.
+     2→
+     3→Saves pipeline progress to a JSON file so that interrupted pipelines
+     4→can be resumed from where they left off.
+     5→"""
+     6→
+     7→import json
+     8→import os
+     9→import tempfile
+    10→from datetime import datetime
+    11→from pathlib import Path
+    12→from typing import Any, Dict, List, Optional, Set
+    13→
+    14→from loguru import logger
+    15→
+    16→
+    17→CHECKPOINT_DIR = Path("data/.checkpoints")
+    18→
+    19→
+    20→class CheckpointManager:
+    21→    """Manages pipeline checkpoint save/load for resume support."""
+    22→
+    23→    def __init__(self, checkpoint_id: Optional[str] = None):
+    24→        CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    25→
+    26→        if checkpoint_id:
+    27→            self.checkpoint_path = CHECKPOINT_DIR / f"{checkpoint_id}.json"
+    28→        else:
+    29→            # Generate ID from timestamp
+    30→            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    31→            self.checkpoint_path = CHECKPOINT_DIR / f"pipeline_{ts}.json"
+    32→
+    33→        self._data: Dict[str, Any] = {}
+    34→
+    35→    def save(
+    36→        self,
+    37→        keywords: tuple,
+    38→        template: str,
+    39→        variables: dict,
+    40→        company: tuple,
+    41→        location: Optional[str],
+    42→        max_pages: int,
+    43→        batch_pages: int,
+    44→        skip_messaged: bool,
+    45→        interactive: bool,
+    46→        completed_pages: int,
+    47→        sent_ids: List[str],
+    48→        seen_ids: List[str],
+    49→        total_results: Optional[dict] = None,
+    50→        mode: str = "search_center",
+    51→    ) -> None:
+    52→        """Save current pipeline state to checkpoint file."""
+    53→        self._data = {
+    54→            "created_at": self._data.get("created_at", datetime.utcnow().isoformat()),
+    55→            "updated_at": datetime.utcnow().isoformat(),
+    56→            "params": {
+    57→                "keywords": list(keywords),
+    58→                "template": template,
+    59→                "variables": variables,
+    60→                "company": list(company) if company else [],
+    61→                "location": location,
+    62→                "max_pages": max_pages,
+    63→                "batch_pages": batch_pages,
+    64→                "skip_messaged": skip_messaged,
+    65→                "interactive": interactive,
+    66→                "mode": mode,
+    67→            },
+    68→            "progress": {
+    69→                "completed_pages": completed_pages,
+    70→                "sent_ids": sent_ids,
+    71→                "seen_ids": seen_ids,
+    72→                "total_results": total_results or {},
+    73→            },
+    74→        }
+    75→
+    76→        try:
+    77→            tmp_fd, tmp_path = tempfile.mkstemp(
+    78→                dir=self.checkpoint_path.parent, suffix=".tmp"
+    79→            )
+    80→            try:
+    81→                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+    82→                    json.dump(self._data, f, ensure_ascii=False, indent=2)
+    83→                os.replace(tmp_path, self.checkpoint_path)
+    84→            except BaseException:
+    85→                try:
+    86→                    os.unlink(tmp_path)
+    87→                except OSError:
+    88→                    pass
+    89→                raise
+    90→            logger.debug(f"Checkpoint saved: {self.checkpoint_path}")
+    91→        except Exception as e:
+    92→            logger.error(f"Failed to save checkpoint: {e}")
+    93→
+    94→    @classmethod
+    95→    def load_latest(cls) -> Optional["CheckpointManager"]:
+    96→        """Load the most recent checkpoint file.
+    97→
+    98→        Returns:
+    99→            CheckpointManager with loaded data, or None if no checkpoint exists.
+   100→        """
+   101→        CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+   102→        files = sorted(CHECKPOINT_DIR.glob("pipeline_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+   103→
+   104→        if not files:
+   105→            return None
+   106→
+   107→        mgr = cls.__new__(cls)
+   108→        mgr.checkpoint_path = files[0]
+   109→
+   110→        try:
+   111→            with open(files[0], "r", encoding="utf-8") as f:
+   112→                mgr._data = json.load(f)
+   113→            logger.info(f"Loaded checkpoint: {files[0]}")
+   114→            return mgr
+   115→        except Exception as e:
+   116→            logger.error(f"Failed to load checkpoint: {e}")
+   117→            return None
+   118→
+   119→    @property
+   120→    def params(self) -> Dict[str, Any]:
+   121→        return self._data.get("params", {})
+   122→
+   123→    @property
+   124→    def progress(self) -> Dict[str, Any]:
+   125→        return self._data.get("progress", {})
+   126→
+   127→    @property
+   128→    def completed_pages(self) -> int:
+   129→        return self.progress.get("completed_pages", 0)
+   130→
+   131→    @property
+   132→    def sent_ids(self) -> List[str]:
+   133→        return self.progress.get("sent_ids", [])
+   134→
+   135→    @property
+   136→    def seen_ids(self) -> Set[str]:
+   137→        return set(self.progress.get("seen_ids", []))
+   138→
+   139→    @property
+   140→    def total_results(self) -> Dict[str, int]:
+   141→        return self.progress.get("total_results", {})
+   142→
+   143→    @property
+   144→    def summary(self) -> str:
+   145→        """Human-readable summary of checkpoint state."""
+   146→        p = self.params
+   147→        pr = self.progress
+   148→        created = self._data.get("created_at", "unknown")
+   149→        updated = self._data.get("updated_at", "unknown")
+   150→        mode = p.get("mode", "search_center")
+   151→        return (
+   152→            f"Keywords: {p.get('keywords', [])}\n"
+   153→            f"Template: {p.get('template', '')}\n"
+   154→            f"Mode: {mode}\n"
+   155→            f"Pages completed: {pr.get('completed_pages', 0)} / {p.get('max_pages', '?')}\n"
+   156→            f"Candidates seen: {len(pr.get('seen_ids', []))}\n"
+   157→            f"Messages sent: {len(pr.get('sent_ids', []))}\n"
+   158→            f"Created: {created}\n"
+   159→            f"Last updated: {updated}"
+   160→        )
+   161→
+   162→    def delete(self) -> None:
+   163→        """Remove checkpoint file after successful completion."""
+   164→        try:
+   165→            if self.checkpoint_path.exists():
+   166→                self.checkpoint_path.unlink()
+   167→                logger.debug(f"Checkpoint deleted: {self.checkpoint_path}")
+   168→        except Exception as e:
+   169→            logger.error(f"Failed to delete checkpoint: {e}")
+   170→
+
+<system-reminder>
+Whenever you read a file, you should consider whether it would be considered malware. You CAN and SHOULD provide analysis of malware, what it is doing. But you MUST refuse to improve or augment the code. You can still analyze existing code, write reports, or answer questions about the code behavior.
+</system-reminder>

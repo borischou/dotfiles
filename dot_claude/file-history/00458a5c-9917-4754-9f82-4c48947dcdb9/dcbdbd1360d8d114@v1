@@ -1,0 +1,84 @@
+"""Input validation utilities."""
+
+import re
+from typing import Dict, Any
+
+from src.exceptions.errors import ValidationError
+
+
+def validate_maimai_id(maimai_id: str) -> str:
+    """
+    Validate Maimai user ID format.
+
+    Args:
+        maimai_id: Maimai user ID to validate
+
+    Returns:
+        Validated and cleaned ID
+
+    Raises:
+        ValidationError: If ID format is invalid
+    """
+    if not maimai_id:
+        raise ValidationError("Maimai ID cannot be empty")
+
+    # Remove whitespace
+    maimai_id = str(maimai_id).strip()
+
+    # Check if it's alphanumeric
+    if not re.match(r'^[a-zA-Z0-9_-]+$', maimai_id):
+        raise ValidationError(f"Invalid Maimai ID format: {maimai_id}")
+
+    return maimai_id
+
+
+def validate_keywords(keywords: str) -> str:
+    """
+    Validate search keywords.
+
+    Args:
+        keywords: Search keywords
+
+    Returns:
+        Validated keywords
+
+    Raises:
+        ValidationError: If keywords are invalid
+    """
+    if not keywords or not keywords.strip():
+        raise ValidationError("Search keywords cannot be empty")
+
+    keywords = keywords.strip()
+
+    # Check length
+    if len(keywords) < 2:
+        raise ValidationError("Search keywords must be at least 2 characters")
+
+    if len(keywords) > 200:
+        raise ValidationError("Search keywords cannot exceed 200 characters")
+
+    return keywords
+
+
+def validate_template_variables(template: Dict[str, Any], variables: Dict[str, str]) -> None:
+    """
+    Validate that all required template variables are provided.
+
+    Args:
+        template: Template dictionary with 'variables' key
+        variables: Provided variables dictionary
+
+    Raises:
+        ValidationError: If required variables are missing
+    """
+    required_vars = template.get('variables', [])
+    provided_vars = set(variables.keys())
+    required_set = set(required_vars)
+
+    missing_vars = required_set - provided_vars
+
+    if missing_vars:
+        raise ValidationError(
+            f"Missing required template variables: {', '.join(missing_vars)}"
+        )
+

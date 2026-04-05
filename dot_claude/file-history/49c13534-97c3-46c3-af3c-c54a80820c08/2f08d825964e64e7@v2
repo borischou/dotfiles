@@ -1,0 +1,69 @@
+"""Templates routes — list and edit message templates."""
+
+import json
+from pathlib import Path
+
+from fastapi import APIRouter, Request, Body
+from fastapi.responses import HTMLResponse, JSONResponse
+
+from src.web.app import templates
+from src.utils.config import get_config
+
+router = APIRouter()
+
+
+@router.get("/", response_class=HTMLResponse)
+async def templates_page(request: Request):
+    """List templates page, or return JSON list if format=json."""
+    config = get_config()
+    template_names = config.list_templates()
+
+    # Support JSON format for AJAX requests
+    if request.query_params.get("format") == "json":
+        result = []
+        for name in template_names:
+            tmpl = config.get_template(name)
+            result.append({
+                "name": name,
+                "display_name": tmpl.get("name", name),
+                "description": tmpl.get("description", ""),
+                "variables": tmpl.get("variables", []),
+            })
+        return JSONResponse(result)
+
+    template_list = []
+    for name in template_names:
+        tmpl = config.get_template(name)
+        template_list.append({
+            "name": name,
+            "display_name": tmpl.get("name", name),
+            "description": tmpl.get("description", ""),
+            "content": tmpl.get("content", ""),
+            "variables": tmpl.get("variables", []),
+        })
+
+    return templates.TemplateResponse("templates.html", {
+        "request": request,
+        "template_list": template_list,
+    })
+
+
+@router.put("/{name}")
+async def update_template(name: str, body: dict = Body(...)):
+    """Update a message template's content."""
+    config = get_config()
+
+    # Verify template exists
+    config.get_template(name)
+
+    # Update in-memory
+    config._message_templates[name]["content"] = body.get("content", "")
+    if "variables" in body:
+        config._message_templates[name]["variables"] = body["variables"]
+
+    # Persist to disk
+    templates_path = Path(config.config_dir) / "message_templates.json"
+    with open(templates_path, 'w', encoding='utf-8') as f:
+        json.dump(config._message_templates, f, ensure_ascii=False, indent=2)
+
+    return {"status": "ok", "message": f"Template '{name}' updated"}

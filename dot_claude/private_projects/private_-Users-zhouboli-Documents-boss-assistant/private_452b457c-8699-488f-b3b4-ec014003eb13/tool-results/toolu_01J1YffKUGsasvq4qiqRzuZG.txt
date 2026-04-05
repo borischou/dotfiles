@@ -1,0 +1,24 @@
+     1→{% extends "base.html" %}
+     2→{% block title %}导出 — Boss Assistant{% endblock %}
+     3→{% block header %}导出候选人数据{% endblock %}
+     4→
+     5→{% block content %}
+     6→<section>
+     7→    <form action="/export/download" method="post">
+     8→        <label for="fmt">导出格式
+     9→            <select name="fmt" id="fmt">
+    10→                <option value="excel">Excel (.xlsx)</option>
+    11→                <option value="csv">CSV (.csv)</option>
+    12→            </select>
+    13→        </label>
+    14→
+    15→        <label>
+    16→            <input type="checkbox" name="include_messages" value="true" checked>
+    17→            包含消息记录
+    18→        </label>
+    19→
+    20→        <button type="submit">导出下载</button>
+    21→    </form>
+    22→</section>
+    23→{% endblock %}
+    24→

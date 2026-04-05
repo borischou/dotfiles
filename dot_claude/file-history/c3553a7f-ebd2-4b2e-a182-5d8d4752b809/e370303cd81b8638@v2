@@ -1,0 +1,160 @@
+"""Session management for persistent browser sessions.
+
+Handles saving and loading browser sessions (cookies, localStorage)
+to enable resuming without re-login.
+"""
+
+import json
+import os
+import stat
+import tempfile
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import Optional
+
+from cryptography.fernet import Fernet
+from patchright.async_api import BrowserContext
+from loguru import logger
+
+from src.utils.config import get_config
+
+
+class SessionManager:
+    """Manages browser session persistence."""
+
+    def __init__(self, session_path: Optional[str] = None):
+        """
+        Initialize session manager.
+
+        Args:
+            session_path: Path to session file. Uses config default if None.
+        """
+        if session_path is None:
+            config = get_config()
+            session_path = config.get('data.session_path', 'data/.session/maimai_session.json')
+
+        self.session_path = Path(session_path)
+        self._key_path = self.session_path.parent / '.session_key'
+        self._fernet: Optional[Fernet] = None
+        self._ensure_session_dir()
+
+    def _ensure_session_dir(self) -> None:
+        """Ensure session directory exists with restrictive permissions."""
+        session_dir = self.session_path.parent
+        session_dir.mkdir(parents=True, exist_ok=True)
+        # Restrict directory to owner only (rwx------)
+        try:
+            os.chmod(session_dir, stat.S_IRWXU)
+        except OSError:
+            logger.warning("Could not set restrictive permissions on session directory")
+
+    def _get_fernet(self) -> Fernet:
+        """Get or create Fernet encryption instance."""
+        if self._fernet is not None:
+            return self._fernet
+
+        if self._key_path.exists():
+            key = self._key_path.read_bytes().strip()
+        else:
+            key = Fernet.generate_key()
+            # Write key with owner-only permissions
+            fd = os.open(str(self._key_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, key)
+            finally:
+                os.close(fd)
+
+        self._fernet = Fernet(key)
+        return self._fernet
+
+    def _decrypt_session_data(self) -> dict:
+        """Decrypt and parse the stored session file.
+
+        Returns:
+            Parsed session data dict.
+
+        Raises:
+            Exception: If decryption or JSON parsing fails.
+        """
+        encrypted = self.session_path.read_bytes()
+        plaintext = self._get_fernet().decrypt(encrypted)
+        return json.loads(plaintext.decode('utf-8'))
+
+    def _write_secure(self, path: Path, data: bytes) -> None:
+        """Atomically write data to file with owner-only permissions (0600).
+
+        Writes to a temp file first, then renames to target path so that
+        a crash mid-write never corrupts the existing file.
+        """
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            os.write(tmp_fd, data)
+            os.close(tmp_fd)
+            tmp_fd = -1  # mark as closed
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, str(path))
+        except BaseException:
+            if tmp_fd >= 0:
+                os.close(tmp_fd)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    async def save(self, context: BrowserContext) -> None:
+        """
+        Save browser session state.
+
+        Args:
+            context: Playwright browser context
+        """
+        try:
+            # Get storage state (cookies + localStorage)
+            storage_state = await context.storage_state()
+
+            # Add metadata
+            session_data = {
+                'saved_at': datetime.now(timezone.utc).isoformat(),
+                'storage_state': storage_state
+            }
+
+            # Encrypt and write with restrictive permissions
+            plaintext = json.dumps(session_data, ensure_ascii=False).encode('utf-8')
+            encrypted = self._get_fernet().encrypt(plaintext)
+            self._write_secure(self.session_path, encrypted)
+
+            logger.info(f"Session saved (encrypted) to {self.session_path}")
+
+        except Exception as e:
+            logger.error(f"Failed to save session: {e}")
+            raise
+
+    async def clear(self) -> None:
+        """Clear saved session and encryption key."""
+        if self.session_path.exists():
+            self.session_path.unlink()
+            logger.info("Session cleared")
+
+        # Also clear storage state file if exists
+        state_path = self.session_path.parent / 'storage_state.json'
+        if state_path.exists():
+            state_path.unlink()
+
+        # Remove encryption key so a fresh one is generated next time
+        if self._key_path.exists():
+            self._key_path.unlink()
+        self._fernet = None
+
+
+
+# Global session manager instance
+_session_manager = None
+
+
+def get_session_manager() -> SessionManager:
+    """Get global session manager instance."""
+    global _session_manager
+    if _session_manager is None:
+        _session_manager = SessionManager()
+    return _session_manager

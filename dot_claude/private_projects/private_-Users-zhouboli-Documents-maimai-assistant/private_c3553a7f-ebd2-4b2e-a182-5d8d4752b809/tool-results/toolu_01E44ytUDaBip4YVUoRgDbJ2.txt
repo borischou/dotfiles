@@ -1,0 +1,400 @@
+     1→"""Message module for sending messages to candidates.
+     2→
+     3→Handles message template rendering, interactive confirmation,
+     4→and message sending with full audit trail.
+     5→"""
+     6→
+     7→import asyncio
+     8→import json
+     9→import sys
+    10→import traceback
+    11→from dataclasses import dataclass
+    12→from datetime import datetime, timezone
+    13→from typing import Any, Awaitable, Callable, Dict, List, Optional
+    14→
+    15→import questionary
+    16→from patchright.async_api import Page
+    17→from loguru import logger
+    18→from rich.console import Console
+    19→from rich.panel import Panel
+    20→from rich.text import Text
+    21→
+    22→from src.core.browser import BrowserManager, get_browser_manager
+    23→from src.core.anti_detection import human_type, human_click
+    24→from src.modules.auth import ensure_logged_in
+    25→from src.utils.config import get_config
+    26→from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+    27→from src.utils.delays import async_random_delay
+    28→from src.utils.retry import retry_navigation
+    29→from src.utils.validators import (
+    30→    validate_maimai_id,
+    31→    validate_template_variables,
+    32→    validate_template_rendering,
+    33→)
+    34→from src.models.database import Candidate, Message, get_db_manager
+    35→from src.exceptions.errors import (
+    36→    PermanentFailureError,
+    37→    RateLimitExceededError,
+    38→    ValidationError,
+    39→    QuotaExhaustedError,
+    40→    LoginRequiredError,
+    41→)
+    42→
+    43→console = Console()
+    44→
+    45→
+    46→@dataclass
+    47→class CandidateSendResult:
+    48→    """Result of sending a message to a single candidate."""
+    49→
+    50→    success: bool
+    51→    status: str  # 'sent', 'failed', 'quota_exhausted', 'rate_limited'
+    52→    reason: str = ""
+    53→    attempts: int = 1
+    54→    content: str = ""
+    55→    abort_batch: bool = False  # True → stop remaining candidates
+    56→
+    57→
+    58→@dataclass
+    59→class BatchConfig:
+    60→    """Configuration for _send_message_batch_common()."""
+    61→
+    62→    mode_label: str  # "" / "Enterprise Inline" / "Talent Bank Inline"
+    63→    panel_title: str  # Rich Panel title
+    64→    progress_description: str  # Progress bar description
+    65→    pre_validate: bool = False
+    66→
+    67→
+    68→# Maimai chat URL - navigate directly to chat page
+    69→MAIMAI_CHAT_URL = (
+    70→    "https://maimai.cn/bizmember/uh_chat_pc?u2={user_id}&from=pc_web_search&fr=profile"
+    71→)
+    72→
+    73→
+    74→def _extract_user_id(profile_url: str) -> Optional[str]:
+    75→    """Extract dstu/user_id from a Maimai profile URL for direct chat navigation.
+    76→
+    77→    Only returns IDs that are known to work with the chat URL (u2= parameter).
+    78→    Query-param IDs (dstu, u2, egid) are reliable for chat navigation.
+    79→    Path-based IDs (/contact/detail/xxx) are NOT the same as chat user IDs
+    80→    and should not be used for direct chat URL construction.
+    81→    """
+    82→    from urllib.parse import urlparse, parse_qs
+    83→
+    84→    parsed = urlparse(profile_url)
+    85→    params = parse_qs(parsed.query)
+    86→    # Only use query parameter IDs — these are confirmed to work with uh_chat_pc
+    87→    for key in ("dstu", "u2", "egid"):
+    88→        if key in params:
+    89→            return params[key][0]
+    90→    return None
+    91→
+    92→
+    93→async def _navigate_to_chat(
+    94→    page: Page,
+    95→    profile_url: Optional[str],
+    96→    config,
+    97→    browser: BrowserManager,
+    98→    maimai_id: str,
+    99→    interactive: bool = False,
+   100→    discovered_selectors=None,
+   101→) -> bool:
+   102→    """Navigate to the chat page for a candidate.
+   103→
+   104→    Tries in order:
+   105→    1. Extract user_id from profile_url query params → direct chat URL
+   106→    2. Navigate to profile_url, extract user_id from redirected URL → direct chat URL
+   107→    3. Click chat button on profile page as fallback
+   108→
+   109→    If no profile_url is provided, looks up the candidate's profile_url from DB.
+   110→
+   111→    Args:
+   112→        page: Playwright page instance
+   113→        profile_url: Candidate's profile URL (may be None)
+   114→        config: Config instance
+   115→        browser: Browser manager instance
+   116→        maimai_id: Candidate's Maimai ID
+   117→        interactive: Enable interactive selector discovery
+   118→        discovered_selectors: Shared DiscoveredSelectors instance
+   119→
+   120→    Returns:
+   121→        True if successfully navigated to chat page
+   122→    """
+   123→    db_manager = get_db_manager()
+   124→
+   125→    # Resolve profile URL from DB if not provided
+   126→    if not profile_url:
+   127→        with db_manager.session_scope() as session:
+   128→            db_candidate = session.query(Candidate).filter_by(maimai_id=maimai_id).first()
+   129→            profile_url = db_candidate.profile_url if db_candidate else None
+   130→
+   131→        if not profile_url:
+   132→            raise PermanentFailureError(f"No profile URL for {maimai_id}")
+   133→
+   134→    # Try extracting user_id directly from profile URL
+   135→    user_id = _extract_user_id(profile_url)
+   136→    logger.debug(f"_navigate_to_chat: profile_url={profile_url!r}, extracted user_id={user_id}")
+   137→
+   138→    if user_id:
+   139→        chat_url = MAIMAI_CHAT_URL.format(user_id=user_id)
+   140→        await retry_navigation(page, chat_url, wait_until="domcontentloaded")
+   141→        await async_random_delay("page_load")
+   142→        return True
+   143→
+   144→    # Navigate to profile page, then try to extract user_id from resulting URL
+   145→    logger.debug(f"_navigate_to_chat: navigating to profile {profile_url}")
+   146→    await retry_navigation(page, profile_url, wait_until="domcontentloaded")
+   147→    await async_random_delay("page_load")
+   148→
+   149→    current_url = page.url
+   150→    logger.debug(f"_navigate_to_chat: landed on {current_url}")
+   151→    redirected_user_id = _extract_user_id(current_url)
+   152→    if redirected_user_id:
+   153→        logger.info(f"Extracted user_id={redirected_user_id} from page URL, redirecting to chat")
+   154→        chat_url = MAIMAI_CHAT_URL.format(user_id=redirected_user_id)
+   155→        await retry_navigation(page, chat_url, wait_until="domcontentloaded")
+   156→        await async_random_delay("page_load")
+   157→        return True
+   158→
+   159→    # Fallback: click chat button on profile page
+   160→    chat_button_found = await _click_chat_button(page, config)
+   161→    if chat_button_found:
+   162→        await async_random_delay("action")
+   163→        return True
+   164→
+   165→    # If interactive mode, trigger selector discovery
+   166→    if interactive and discovered_selectors is not None and not discovered_selectors.is_populated:
+   167→        from src.modules.selector_discovery import discover_chat_page
+   168→
+   169→        console.print(
+   170→            "[yellow]Chat button not found. Entering interactive discovery mode...[/yellow]"
+   171→        )
+   172→        result = await discover_chat_page(page, maimai_id, browser)
+   173→        if result.is_populated:
+   174→            discovered_selectors.chat_button = result.chat_button
+   175→            discovered_selectors.message_input = result.message_input
+   176→            discovered_selectors.send_button = result.send_button
+   177→            discovered_selectors.chat_url_pattern = result.chat_url_pattern
+   178→            discovered_selectors.skip_chat_button = result.skip_chat_button
+   179→            discovered_selectors.is_populated = True
+   180→            return True
+   181→
+   182→    console.print("[red]Could not find chat button[/red]")
+   183→    await browser.screenshot(f"message_error_{maimai_id}")
+   184→    return False
+   185→
+   186→
+   187→async def extract_contact_quota(page: Page) -> Optional[dict]:
+   188→    """Extract contact quota from Quick Contact page's embedded share_data.
+   189→
+   190→    The Quick Contact page server-renders ``window.share_data`` which includes
+   191→    ``mem_status.mem_info`` with remaining quotas for various member actions.
+   192→
+   193→    Args:
+   194→        page: Playwright page on a Quick Contact (极速联系) page
+   195→
+   196→    Returns:
+   197→        Dict with quota info, or None if data is unavailable::
+   198→
+   199→            {
+   200→                'uh_left': int,        # 极速联系 remaining
+   201→                'addfr_left': int,     # 加好友 remaining
+   202→                'dc_left': int,        # 直聊 remaining
+   203→                'expire_time': str,    # membership expiry
+   204→                'cost': int,           # vouchers consumed per contact
+   205→            }
+   206→    """
+   207→    try:
+   208→        quota = await page.evaluate(
+   209→            """() => {
+   210→            if (window.share_data && window.share_data.mem_status &&
+   211→                window.share_data.mem_status.mem_info) {
+   212→                const info = window.share_data.mem_status.mem_info;
+   213→                return {
+   214→                    uh_left: info.uh_left,
+   215→                    addfr_left: info.addfr_left,
+   216→                    dc_left: info.dc_left,
+   217→                    expire_time: info.expire_time || null,
+   218→                    cost: (window.share_data.fast_contact_pay_num || {}).final_num || 1,
+   219→                };
+   220→            }
+   221→            return null;
+   222→        }"""
+   223→        )
+   224→        return quota
+   225→    except Exception as e:
+   226→        logger.debug(f"Failed to extract contact quota: {e}")
+   227→        return None
+   228→
+   229→
+   230→async def fetch_contact_quota(browser: Optional["BrowserManager"] = None) -> Optional[dict]:
+   231→    """Fetch current contact quota by navigating to a Quick Contact page.
+   232→
+   233→    Uses a well-known user ID to load the Quick Contact page and extract
+   234→    ``window.share_data.mem_status.mem_info``. Useful for the ``status``
+   235→    command or any context where quota needs to be checked independently.
+   236→
+   237→    Args:
+   238→        browser: BrowserManager instance (uses global singleton if None)
+   239→
+   240→    Returns:
+   241→        Quota dict (see extract_contact_quota), or None on failure
+   242→    """
+   243→    if browser is None:
+   244→        browser = get_browser_manager()
+   245→
+   246→    page = browser.page
+   247→    # Use own user ID (u1 == u2 loads the page without actually creating a chat)
+   248→    probe_url = MAIMAI_CHAT_URL.format(user_id="1")
+   249→    try:
+   250→        await retry_navigation(page, probe_url, wait_until="domcontentloaded")
+   251→        await asyncio.sleep(2)
+   252→        return await extract_contact_quota(page)
+   253→    except Exception as e:
+   254→        logger.debug(f"Failed to fetch contact quota: {e}")
+   255→        return None
+   256→
+   257→
+   258→def _display_quota(quota: dict, just_sent: bool = True) -> None:
+   259→    """Display contact quota info to the console.
+   260→
+   261→    Args:
+   262→        quota: Quota dict from extract_contact_quota()
+   263→        just_sent: If True, subtract cost from uh_left for post-send display
+   264→    """
+   265→    uh_left = quota.get("uh_left", 0)
+   266→    cost = quota.get("cost", 1)
+   267→    if just_sent:
+   268→        uh_left = max(0, uh_left - cost)
+   269→    console.print(f"[dim]联系券剩余: {uh_left}[/dim]")
+   270→
+   271→
+   272→async def _handle_quick_contact(page: Page, content: str) -> Optional[bool]:
+   273→    """Handle Maimai's "极速联系" (Quick Contact) page.
+   274→
+   275→    This page appears instead of regular chat for some candidates. It has a
+   276→    category selector, a textarea, and a "提交" (Submit) button.
+   277→
+   278→    Submission works by manipulating the React component directly: setting
+   279→    the message via setState and calling the debounced send method (with
+   280→    flush) to trigger the POST to /bizmember/uh-chat/api/send_v2.
+   281→
+   282→    DOM-level textarea.fill() does NOT update React's controlled state, and
+   283→    DOM click on the submit button does NOT reliably trigger the send API.
+   284→
+   285→    Args:
+   286→        page: Playwright page instance
+   287→        content: Message content to send
+   288→
+   289→    Returns:
+   290→        True if message was sent via quick contact form,
+   291→        False if quick contact page was detected but sending failed,
+   292→        None if this is not a quick contact page (caller should continue normal flow)
+   293→    """
+   294→    try:
+   295→        # Detect quick contact page via page title or page content
+   296→        is_quick_contact = await page.evaluate(
+   297→            """() => {
+   298→            const title = document.title || '';
+   299→            const bodyText = document.body ? document.body.innerText : '';
+   300→            return title.includes('极速联系') || bodyText.includes('极速联系');
+   301→        }"""
+   302→        )
+   303→
+   304→        if not is_quick_contact:
+   305→            return None
+   306→
+   307→        logger.info("Detected '极速联系' (Quick Contact) page")
+   308→
+   309→        # Validate message length (Quick Contact enforces 10-300 chars)
+   310→        if len(content) < 10:
+   311→            logger.error(
+   312→                f"Quick contact: message too short ({len(content)} chars, "
+   313→                "minimum 10). Quick Contact requires 10-300 characters."
+   314→            )
+   315→            return False
+   316→        if len(content) > 300:
+   317→            logger.error(
+   318→                f"Quick contact: message too long ({len(content)} chars, "
+   319→                "maximum 300). Quick Contact requires 10-300 characters."
+   320→            )
+   321→            return False
+   322→
+   323→        # Extract quota info before submitting (share_data is available on page load)
+   324→        quota = await extract_contact_quota(page)
+   325→
+   326→        # Check if quota is exhausted
+   327→        if quota and quota.get("uh_left", 0) <= 0:
+   328→            raise QuotaExhaustedError(remaining=quota.get("uh_left", 0))
+   329→
+   330→        # Install XHR interceptor to capture the send_v2 response
+   331→        await page.evaluate(
+   332→            """() => {
+   333→            window.__sendV2Result = null;
+   334→            const origOpen = XMLHttpRequest.prototype.open;
+   335→            const origSend = XMLHttpRequest.prototype.send;
+   336→            XMLHttpRequest.prototype.open = function(m, u) {
+   337→                this.__url = u; this.__method = m;
+   338→                return origOpen.apply(this, arguments);
+   339→            };
+   340→            XMLHttpRequest.prototype.send = function(b) {
+   341→                if (this.__url && this.__url.includes('send_v2')) {
+   342→                    const xhr = this;
+   343→                    xhr.addEventListener('load', function() {
+   344→                        try {
+   345→                            window.__sendV2Result = {
+   346→                                status: xhr.status,
+   347→                                response: xhr.responseText,
+   348→                            };
+   349→                        } catch(e) {
+   350→                            window.__sendV2Result = {status: xhr.status, error: e.message};
+   351→                        }
+   352→                    });
+   353→                    xhr.addEventListener('error', function() {
+   354→                        window.__sendV2Result = {status: 0, error: 'network_error'};
+   355→                    });
+   356→                }
+   357→                return origSend.apply(this, arguments);
+   358→            };
+   359→        }"""
+   360→        )
+   361→
+   362→        # Submit via React component internals:
+   363→        # 1. Find the class component that owns the form state
+   364→        # 2. Set message + unlock push_type via setState
+   365→        # 3. Call the debounced send() method and flush() to execute immediately
+   366→        send_triggered = await page.evaluate(
+   367→            """(msg) => {
+   368→            const textarea = document.querySelector('textarea');
+   369→            if (!textarea) return {success: false, error: 'no textarea'};
+   370→            const keys = Object.keys(textarea);
+   371→            const fiberKey = keys.find(
+   372→                k => k.startsWith('__reactInternalInstance') || k.startsWith('__reactFiber')
+   373→            );
+   374→            if (!fiberKey) return {success: false, error: 'no React fiber'};
+   375→
+   376→            let fiber = textarea[fiberKey];
+   377→            while (fiber) {
+   378→                if (fiber.stateNode && fiber.stateNode.state
+   379→                    && 'message' in fiber.stateNode.state
+   380→                    && typeof fiber.stateNode.send === 'function') {
+   381→                    const component = fiber.stateNode;
+   382→                    // Set message and ensure push_type is not locked (true = sending lock)
+   383→                    component.setState({message: msg, push_type: false}, () => {
+   384→                        component.send();
+   385→                        if (typeof component.send.flush === 'function') {
+   386→                            component.send.flush();
+   387→                        }
+   388→                    });
+   389→                    return {success: true};
+   390→                }
+   391→                fiber = fiber.return;
+   392→            }
+   393→            return {success: false, error: 'React component not found'};
+   394→        }""",
+   395→            content,
+   396→        )
+   397→
+   398→        if not send_triggered.get("success"):
+   399→            logger.warning(
+   400→                f"Quick contact: failed to trigger send via React: "

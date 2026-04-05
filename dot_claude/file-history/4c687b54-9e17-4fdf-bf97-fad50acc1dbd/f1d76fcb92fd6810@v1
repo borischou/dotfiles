@@ -1,0 +1,356 @@
+"""Profile extraction module for Boss直聘.
+
+Extracts detailed candidate profile information from Boss直聘.
+Profile details are shown as a floating overlay (浮层) on the search page,
+not as a separate page. The extraction JS also supports standalone profile
+pages as a fallback.
+"""
+
+from typing import Optional, Dict, Any
+
+from loguru import logger
+from rich.console import Console
+from rich.panel import Panel
+
+from src.core.browser import BrowserManager, get_browser_manager
+from src.utils.delays import async_random_delay
+from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+from src.utils.captcha import check_captcha
+from src.utils.retry import retry_navigation
+from src.models.database import Candidate, get_db_manager
+from src.exceptions.errors import ExtractionError
+
+console = Console()
+
+
+# JavaScript extraction function for Boss直聘 profile pages
+EXTRACT_PROFILE_JS = """
+() => {
+    const result = {
+        name: '',
+        title: '',
+        company: '',
+        location: '',
+        salary_expect: '',
+        work_years: '',
+        education_level: '',
+        basic_info: {},
+        education: [],
+        work_experience: [],
+        skills: []
+    };
+
+    // Extract basic info from the profile header area
+    const nameEl = document.querySelector(
+        '[class*="geek-name"], [class*="name"], h1[class*="name"], .name'
+    );
+    result.name = nameEl ? nameEl.innerText.trim() : '';
+
+    const titleEl = document.querySelector(
+        '[class*="expect-position"], [class*="title"], [class*="position"]'
+    );
+    result.title = titleEl ? titleEl.innerText.trim() : '';
+
+    const companyEl = document.querySelector(
+        '[class*="company-name"], [class*="company"]'
+    );
+    result.company = companyEl ? companyEl.innerText.trim() : '';
+
+    const locationEl = document.querySelector(
+        '[class*="expect-area"], [class*="location"], [class*="city"]'
+    );
+    result.location = locationEl ? locationEl.innerText.trim() : '';
+
+    const salaryEl = document.querySelector(
+        '[class*="expect-salary"], [class*="salary"]'
+    );
+    result.salary_expect = salaryEl ? salaryEl.innerText.trim() : '';
+
+    // Extract info tags (work years, education, age, etc.)
+    const tagEls = document.querySelectorAll(
+        '[class*="info-tag"], [class*="base-info"] span, [class*="geek-tags"] span, ' +
+        '[class*="tag-item"], [class*="basic-info"] span'
+    );
+    const tags = Array.from(tagEls).map(el => el.innerText.trim()).filter(t => t);
+
+    for (const tag of tags) {
+        if (tag.includes('年') && (tag.includes('经验') || /^\\d/.test(tag))) {
+            result.work_years = tag;
+            result.basic_info.work_years = tag;
+        } else if (['博士', '硕士', '本科', '大专', '中专', '高中'].some(d => tag.includes(d))) {
+            result.education_level = tag;
+            result.basic_info.education = tag;
+        } else if (tag.includes('岁')) {
+            result.basic_info.age = tag;
+        } else if (tag.includes('求职') || tag.includes('状态')) {
+            result.basic_info.job_status = tag;
+        }
+    }
+
+    // Extract education details
+    const eduSection = document.querySelector(
+        '[class*="resume-education"], [class*="education-list"], [class*="edu-experience"]'
+    );
+    if (eduSection) {
+        const eduItems = eduSection.querySelectorAll(
+            '[class*="resume-item"], [class*="edu-item"], [class*="item"], li'
+        );
+        for (const item of eduItems) {
+            const text = item.innerText.trim();
+            if (!text) continue;
+            const lines = text.split('\\n').filter(l => l.trim());
+            const edu = {};
+            if (lines.length >= 1) edu.school = lines[0].trim();
+            if (lines.length >= 2) edu.degree = lines[1].trim();
+            if (lines.length >= 3) edu.major = lines[2].trim();
+            if (lines.length >= 4) edu.period = lines[3].trim();
+            result.education.push(edu);
+        }
+    }
+
+    // Extract work experience
+    const workSection = document.querySelector(
+        '[class*="resume-work"], [class*="work-list"], [class*="work-experience"]'
+    );
+    if (workSection) {
+        const workItems = workSection.querySelectorAll(
+            '[class*="resume-item"], [class*="work-item"], [class*="item"], li'
+        );
+        for (const item of workItems) {
+            const text = item.innerText.trim();
+            if (!text) continue;
+            const lines = text.split('\\n').filter(l => l.trim());
+            const work = {};
+            if (lines.length >= 1) work.company = lines[0].trim();
+            if (lines.length >= 2) work.title = lines[1].trim();
+            if (lines.length >= 3) work.period = lines[2].trim();
+            if (lines.length >= 4) work.description = lines.slice(3).join(' ').trim();
+            result.work_experience.push(work);
+        }
+    }
+
+    // Extract project experience (Boss直聘 specific)
+    const projectSection = document.querySelector(
+        '[class*="resume-project"], [class*="project-list"]'
+    );
+    if (projectSection) {
+        result.basic_info.has_project = true;
+    }
+
+    // Extract skills
+    const skillEls = document.querySelectorAll(
+        '[class*="skill-tag"], [class*="skill-item"], [class*="tag-item"], ' +
+        '[class*="skill"] span'
+    );
+    const skills = new Set();
+    for (const el of skillEls) {
+        const text = el.innerText.trim();
+        if (text && text.length < 30) {
+            skills.add(text);
+        }
+    }
+    result.skills = Array.from(skills);
+
+    // Extract advantages/self description
+    const advantageEl = document.querySelector(
+        '[class*="resume-advantage"], [class*="self-desc"], [class*="geek-advantage"]'
+    );
+    if (advantageEl) {
+        result.basic_info.self_description = advantageEl.innerText.trim();
+    }
+
+    return result;
+}
+"""
+
+
+async def extract_profile(
+    boss_id: str,
+    browser: Optional[BrowserManager] = None,
+) -> Dict[str, Any]:
+    """
+    Extract detailed profile for a candidate.
+
+    Args:
+        boss_id: Boss直聘 candidate ID (e.g., "zp_xxx")
+        browser: Browser manager instance
+
+    Returns:
+        Dictionary with profile data
+
+    Raises:
+        ExtractionError: If profile extraction fails
+    """
+    if browser is None:
+        browser = get_browser_manager()
+
+    page = browser.page
+    if not page:
+        page = await browser.start()
+
+    rate_limiter = get_rate_limiter()
+    db_manager = get_db_manager()
+
+    # Rate limit check
+    await async_check_rate_limit('view_profile')
+
+    # Boss直聘 shows profile as a floating overlay (浮层) on the search page.
+    # Strategy 1: Try to extract from an already-open overlay on the current page.
+    # Strategy 2: Navigate to profile URL as a fallback.
+    encrypt_id = boss_id.replace('zp_', '') if boss_id.startswith('zp_') else boss_id
+
+    # First check if we have a profile URL in the database
+    profile_url = None
+    with db_manager.session_scope() as session:
+        candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+        if candidate and candidate.profile_url:
+            profile_url = candidate.profile_url
+
+    if not profile_url:
+        profile_url = f"https://www.zhipin.com/web/geek/{encrypt_id}"
+
+    try:
+        # Strategy 1: Check if a profile overlay is already open on the current page
+        overlay_present = await page.evaluate("""
+            () => {
+                const overlay = document.querySelector(
+                    '[class*="dialog-wrap"].active, [class*="boss-popup__wrapper"],
+                     [class*="geek-detail"], [class*="resume-dialog"], [class*="profile-panel"]'
+                );
+                return overlay !== null;
+            }
+        """)
+
+        if not overlay_present:
+            # Strategy 2: Navigate to profile page
+            await retry_navigation(page, profile_url, wait_until='domcontentloaded')
+            await async_random_delay('page_load')
+
+            # Check for captcha
+            await check_captcha(page, report_to_rate_limiter=True)
+
+            # Wait for profile content to load
+            await page.wait_for_timeout(2000)
+
+        # Extract profile data via JavaScript (works on both overlay and standalone page)
+        profile_data = await page.evaluate(EXTRACT_PROFILE_JS)
+
+        if not profile_data or not profile_data.get('name'):
+            logger.warning(f"Could not extract profile for {boss_id}")
+            raise ExtractionError(f"Failed to extract profile data for {boss_id}")
+
+        # Log action
+        rate_limiter.log_action('view_profile', {'boss_id': boss_id})
+
+        # Update database
+        _update_profile_in_db(boss_id, profile_data, db_manager)
+
+        # Display profile
+        _display_profile(boss_id, profile_data)
+
+        return profile_data
+
+    except ExtractionError:
+        raise
+    except Exception as e:
+        logger.error(f"Error extracting profile for {boss_id}: {e}")
+        raise ExtractionError(f"Failed to extract profile for {boss_id}: {e}")
+
+
+def _update_profile_in_db(boss_id: str, profile_data: Dict, db_manager) -> None:
+    """Update candidate profile in the database."""
+    with db_manager.session_scope() as session:
+        candidate = session.query(Candidate).filter_by(boss_id=boss_id).first()
+
+        if not candidate:
+            # Create new candidate entry
+            candidate = Candidate(boss_id=boss_id)
+            session.add(candidate)
+
+        # Update fields
+        candidate.name = profile_data.get('name') or candidate.name
+        candidate.title = profile_data.get('title') or candidate.title
+        candidate.company = profile_data.get('company') or candidate.company
+        candidate.location = profile_data.get('location') or candidate.location
+        candidate.salary_expect = profile_data.get('salary_expect') or candidate.salary_expect
+        candidate.work_years = profile_data.get('work_years') or candidate.work_years
+        candidate.education_level = profile_data.get('education_level') or candidate.education_level
+        candidate.basic_info = profile_data.get('basic_info')
+        candidate.education = profile_data.get('education')
+        candidate.work_experience = profile_data.get('work_experience')
+        candidate.skills = profile_data.get('skills')
+
+
+def _display_profile(boss_id: str, profile_data: Dict) -> None:
+    """Display extracted profile in Rich format."""
+    name = profile_data.get('name', 'Unknown')
+    title = profile_data.get('title', '')
+    company = profile_data.get('company', '')
+    location = profile_data.get('location', '')
+    salary = profile_data.get('salary_expect', '')
+    work_years = profile_data.get('work_years', '')
+    education_level = profile_data.get('education_level', '')
+
+    # Header
+    header = f"[bold]{name}[/bold]"
+    if title:
+        header += f" - {title}"
+    if company:
+        header += f" @ {company}"
+
+    console.print(Panel(header, title=f"Profile: {boss_id}", border_style="green"))
+
+    # Basic info
+    info_parts = []
+    if location:
+        info_parts.append(f"Location: {location}")
+    if salary:
+        info_parts.append(f"Expected Salary: {salary}")
+    if work_years:
+        info_parts.append(f"Experience: {work_years}")
+    if education_level:
+        info_parts.append(f"Education: {education_level}")
+
+    if info_parts:
+        console.print("  " + " | ".join(info_parts))
+
+    # Education
+    education = profile_data.get('education', [])
+    if education:
+        console.print("\n  [cyan]Education:[/cyan]")
+        for edu in education:
+            parts = []
+            if edu.get('school'):
+                parts.append(edu['school'])
+            if edu.get('degree'):
+                parts.append(edu['degree'])
+            if edu.get('major'):
+                parts.append(edu['major'])
+            console.print(f"    - {' | '.join(parts)}")
+
+    # Work experience
+    work_exp = profile_data.get('work_experience', [])
+    if work_exp:
+        console.print("\n  [cyan]Work Experience:[/cyan]")
+        for work in work_exp:
+            line = ""
+            if work.get('company'):
+                line += work['company']
+            if work.get('title'):
+                line += f" - {work['title']}"
+            if work.get('period'):
+                line += f" ({work['period']})"
+            console.print(f"    - {line}")
+
+    # Skills
+    skills = profile_data.get('skills', [])
+    if skills:
+        console.print(f"\n  [cyan]Skills:[/cyan] {', '.join(skills)}")
+
+    # Self description
+    basic_info = profile_data.get('basic_info', {})
+    if basic_info.get('self_description'):
+        desc = basic_info['self_description'][:200]
+        console.print(f"\n  [cyan]Self Description:[/cyan]\n    {desc}")
+
+    console.print()

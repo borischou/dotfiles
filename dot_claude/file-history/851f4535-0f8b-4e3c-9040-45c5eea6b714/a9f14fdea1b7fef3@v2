@@ -1,0 +1,30 @@
+"""HTML page routes served via Jinja2 templates."""
+
+from fastapi import APIRouter, Request
+
+router = APIRouter()
+
+
+@router.get("/")
+async def index(request: Request):
+    return request.app.state.templates.TemplateResponse("index.html", {"request": request})
+
+
+@router.get("/search")
+async def search_page(request: Request):
+    return request.app.state.templates.TemplateResponse("search.html", {"request": request})
+
+
+@router.get("/pipeline")
+async def pipeline_page(request: Request):
+    return request.app.state.templates.TemplateResponse("pipeline.html", {"request": request})
+
+
+@router.get("/candidates")
+async def candidates_page(request: Request):
+    return request.app.state.templates.TemplateResponse("candidates.html", {"request": request})
+
+
+@router.get("/messages")
+async def messages_page(request: Request):
+    return request.app.state.templates.TemplateResponse("messages.html", {"request": request})

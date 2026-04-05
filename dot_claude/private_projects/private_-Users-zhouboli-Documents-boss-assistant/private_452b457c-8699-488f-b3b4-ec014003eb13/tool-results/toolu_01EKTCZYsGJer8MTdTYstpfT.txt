@@ -1,0 +1,42 @@
+     1→     1→     1→"""Logging configuration using Loguru."""
+     2→     2→     2→
+     3→     3→     3→import sys
+     4→     4→     4→from pathlib import Path
+     5→     5→     5→
+     6→     6→     6→from loguru import logger
+     7→     7→     7→
+     8→     8→     8→from src.utils.config import get_config
+     9→     9→     9→
+    10→    10→    10→
+    11→    11→    11→def setup_logger():
+    12→    12→    12→    """Configure Loguru logger with settings from config."""
+    13→    13→    13→    config = get_config()
+    14→    14→    14→
+    15→    15→    15→    logger.remove()
+    16→    16→    16→
+    17→    17→    17→    log_level = config.get('logging.level', 'INFO')
+    18→    18→    18→    log_format = config.get('logging.format')
+    19→    19→    19→    rotation = config.get('logging.rotation', '10 MB')
+    20→    20→    20→    retention = config.get('logging.retention', '30 days')
+    21→    21→    21→    log_dir = Path(config.get('data.log_dir', 'data/logs'))
+    22→    22→    22→
+    23→    23→    23→    log_dir.mkdir(parents=True, exist_ok=True)
+    24→    24→    24→
+    25→    25→    25→    logger.add(
+    26→    26→    26→        sys.stdout,
+    27→    27→    27→        format=log_format,
+    28→    28→    28→        level=log_level,
+    29→    29→    29→        colorize=True,
+    30→    30→    30→    )
+    31→    31→    31→
+    32→    32→    32→    logger.add(
+    33→    33→    33→        log_dir / "boss_assistant_{time:YYYY-MM-DD}.log",
+    34→    34→    34→        format=log_format,
+    35→    35→    35→        level=log_level,
+    36→    36→    36→        rotation=rotation,
+    37→    37→    37→        retention=retention,
+    38→    38→    38→        encoding='utf-8',
+    39→    39→    39→    )
+    40→    40→    40→
+    41→    41→    41→    logger.info(f"Logger initialized with level: {log_level}")
+    42→    42→    42→

@@ -1,0 +1,537 @@
+     1→     1→"""Candidate search module for Boss直聘.
+     2→     2→
+     3→     3→Handles searching for candidates on Boss直聘's talent search pages.
+     4→     4→Search page: /web/chat/search — candidates are inside iframe[name='searchFrame'].
+     5→     5→
+     6→     6→CRITICAL ARCHITECTURE NOTE:
+     7→     7→The search results live inside an iframe (searchFrame), NOT the main page DOM.
+     8→     8→All evaluate() calls must target the iframe frame, not page directly.
+     9→     9→Search uses "换一换" button to refresh results, not infinite scroll.
+    10→    10→Candidate IDs come from data-expect attribute on card links.
+    11→    11→"""
+    12→    12→
+    13→    13→import hashlib
+    14→    14→from dataclasses import dataclass, field
+    15→    15→from typing import List, Optional, Set
+    16→    16→
+    17→    17→from patchright.async_api import Page, Frame
+    18→    18→from loguru import logger
+    19→    19→from rich.console import Console
+    20→    20→from rich.table import Table
+    21→    21→
+    22→    22→from src.core.browser import BrowserManager, get_browser_manager
+    23→    23→from src.utils.delays import async_random_delay
+    24→    24→from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+    25→    25→from src.utils.captcha import check_captcha
+    26→    26→from src.utils.retry import retry_navigation
+    27→    27→from src.models.database import Candidate, SearchHistory, get_db_manager
+    28→    28→console = Console()
+    29→    29→
+    30→    30→
+    31→    31→@dataclass
+    32→    32→class CandidateBasic:
+    33→    33→    """Basic candidate info extracted from search results."""
+    34→    34→    boss_id: str
+    35→    35→    name: str
+    36→    36→    title: str
+    37→    37→    company: str
+    38→    38→    location: Optional[str] = None
+    39→    39→    salary_expect: Optional[str] = None
+    40→    40→    work_years: Optional[str] = None
+    41→    41→    education_level: Optional[str] = None
+    42→    42→    profile_url: Optional[str] = None
+    43→    43→    active_status: Optional[str] = None
+    44→    44→    school: Optional[str] = None
+    45→    45→    major: Optional[str] = None
+    46→    46→    job_status: Optional[str] = None
+    47→    47→    self_desc: Optional[str] = None
+    48→    48→    _score: int = field(default=0, init=False, repr=False)
+    49→    49→
+    50→    50→    def __hash__(self):
+    51→    51→        return hash(self.boss_id)
+    52→    52→
+    53→    53→    def __eq__(self, other):
+    54→    54→        if isinstance(other, CandidateBasic):
+    55→    55→            return self.boss_id == other.boss_id
+    56→    56→        return False
+    57→    57→
+    58→    58→
+    59→    59→# Non-R&D roles to filter out
+    60→    60→NON_RD_KEYWORDS = {
+    61→    61→    "销售", "产品经理", "市场", "运营", "行政", "人事", "财务",
+    62→    62→    "法务", "采购", "客服", "前台", "助理", "秘书",
+    63→    63→}
+    64→    64→
+    65→    65→
+    66→    66→def _is_non_rd_role(title: str) -> bool:
+    67→    67→    """Check if title indicates a non-R&D role."""
+    68→    68→    if not title:
+    69→    69→        return False
+    70→    70→    for keyword in NON_RD_KEYWORDS:
+    71→    71→        if keyword in title:
+    72→    72→            return True
+    73→    73→    return False
+    74→    74→
+    75→    75→
+    76→    76→def _generate_boss_id(name: str, company: str) -> str:
+    77→    77→    """Generate a fallback Boss ID from name + company hash."""
+    78→    78→    raw = f"{name}_{company}"
+    79→    79→    h = hashlib.sha256(raw.encode()).hexdigest()[:20]
+    80→    80→    return f"zp_{h}"
+    81→    81→
+    82→    82→
+    83→    83→async def _get_search_frame(page: Page) -> Optional[Frame]:
+    84→    84→    """Get the searchFrame iframe from the main page.
+    85→    85→
+    86→    86→    Boss直聘 search page loads candidates inside iframe[name='searchFrame'].
+    87→    87→    Returns the Frame object for executing JS inside the iframe.
+    88→    88→    """
+    89→    89→    frame = page.frame(name='searchFrame')
+    90→    90→    if frame:
+    91→    91→        return frame
+    92→    92→
+    93→    93→    # Fallback: find by URL pattern
+    94→    94→    for f in page.frames:
+    95→    95→        if 'frame/search' in (f.url or ''):
+    96→    96→            return f
+    97→    97→
+    98→    98→    return None
+    99→    99→
+   100→   100→
+   101→   101→# JavaScript extraction for candidates inside searchFrame iframe.
+   102→   102→# Targets: div.card-list > li.geek-info-card > a[data-expect]
+   103→   103→EXTRACT_CANDIDATES_JS = """
+   104→   104→() => {
+   105→   105→    const candidates = [];
+   106→   106→    const cards = document.querySelectorAll('.card-list .geek-info-card');
+   107→   107→
+   108→   108→    for (const card of cards) {
+   109→   109→        try {
+   110→   110→            const link = card.querySelector('a');
+   111→   111→            if (!link) continue;
+   112→   112→
+   113→   113→            // Candidate ID from data-expect attribute
+   114→   114→            const expectId = link.dataset.expect || '';
+   115→   115→            if (!expectId) continue;
+   116→   116→
+   117→   117→            const bossId = 'zp_' + expectId;
+   118→   118→
+   119→   119→            // Name (anonymized, e.g. "卿**")
+   120→   120→            const nameEl = card.querySelector('.name-label');
+   121→   121→            const name = nameEl ? nameEl.innerText.trim() : '';
+   122→   122→            if (!name) continue;
+   123→   123→
+   124→   124→            // Labels (e.g. "热搜")
+   125→   125→            const labelEls = card.querySelectorAll('.card-label');
+   126→   126→            const labels = Array.from(labelEls).map(el => el.innerText.trim()).filter(Boolean);
+   127→   127→
+   128→   128→            // Active status (e.g. "3日内活跃")
+   129→   129→            const activeEl = card.querySelector('.active-desc-text');
+   130→   130→            const activeStatus = activeEl ? activeEl.innerText.trim() : '';
+   131→   131→
+   132→   132→            // Info labels: age, work years, education, job status, salary
+   133→   133→            const infoLabels = card.querySelectorAll('.info-labels > .label-text');
+   134→   134→            const infoTexts = Array.from(infoLabels).map(el => el.innerText.trim());
+   135→   135→
+   136→   136→            let age = '', workYears = '', education = '', jobStatus = '', salary = '';
+   137→   137→            for (const text of infoTexts) {
+   138→   138→                if (text.includes('岁')) age = text;
+   139→   139→                else if (text.includes('年') && !text.includes('岁')) workYears = text;
+   140→   140→                else if (['博士', '硕士', '本科', '大专', '中专', '高中'].some(d => text.includes(d))) education = text;
+   141→   141→                else if (text.includes('在职') || text.includes('离职') || text.includes('求职')) jobStatus = text;
+   142→   142→                else if (text.includes('K') || text.includes('k') || text.includes('薪')) salary = text;
+   143→   143→            }
+   144→   144→
+   145→   145→            // Self description / detail
+   146→   146→            const detailEl = card.querySelector('.info-detail');
+   147→   147→            const selfDesc = detailEl ? detailEl.innerText.trim() : '';
+   148→   148→
+   149→   149→            // Expect city
+   150→   150→            const expectCityEls = card.querySelectorAll('.expect-exp-box .t-tooltip-slot');
+   151→   151→            const expectCity = Array.from(expectCityEls).map(el => el.innerText.trim()).filter(Boolean).join(' ');
+   152→   152→
+   153→   153→            // Work experience (company + title)
+   154→   154→            const workExpEls = card.querySelectorAll('.work-exp-box .t-tooltip-slot');
+   155→   155→            const workExpTexts = Array.from(workExpEls).map(el => el.innerText.trim()).filter(Boolean);
+   156→   156→            const company = workExpTexts[0] || '';
+   157→   157→            const title = workExpTexts[1] || '';
+   158→   158→
+   159→   159→            // Education (school + major)
+   160→   160→            const eduExpEls = card.querySelectorAll('.edu-exp-box .t-tooltip-slot');
+   161→   161→            const eduTexts = Array.from(eduExpEls).map(el => el.innerText.trim()).filter(Boolean);
+   162→   162→            const school = eduTexts[0] || '';
+   163→   163→            const major = eduTexts[1] || '';
+   164→   164→
+   165→   165→            // Contact button status
+   166→   166→            const contactBtn = card.querySelector('.btn-getcontact');
+   167→   167→            const contactText = contactBtn ? contactBtn.innerText.trim() : '';
+   168→   168→
+   169→   169→            // Elite/hot candidate flag
+   170→   170→            const isElite = link.dataset.elitegeek === '1';
+   171→   171→
+   172→   172→            candidates.push({
+   173→   173→                boss_id: bossId,
+   174→   174→                name: name,
+   175→   175→                title: title,
+   176→   176→                company: company,
+   177→   177→                location: expectCity,
+   178→   178→                salary_expect: salary,
+   179→   179→                work_years: workYears,
+   180→   180→                education_level: education,
+   181→   181→                active_status: activeStatus,
+   182→   182→                school: school,
+   183→   183→                major: major,
+   184→   184→                job_status: jobStatus,
+   185→   185→                self_desc: selfDesc,
+   186→   186→                age: age,
+   187→   187→                labels: labels,
+   188→   188→                is_elite: isElite,
+   189→   189→                contact_text: contactText,
+   190→   190→                profile_url: ''
+   191→   191→            });
+   192→   192→        } catch (e) {
+   193→   193→            console.error('Error extracting candidate:', e);
+   194→   194→        }
+   195→   195→    }
+   196→   196→
+   197→   197→    return candidates;
+   198→   198→}
+   199→   199→"""
+   200→   200→
+   201→   201→
+   202→   202→async def search_candidates(
+   203→   203→    keywords: List[str],
+   204→   204→    location: Optional[str] = None,
+   205→   205→    max_pages: int = 1,
+   206→   206→    experience: Optional[str] = None,
+   207→   207→    education: Optional[str] = None,
+   208→   208→    salary: Optional[str] = None,
+   209→   209→    browser: Optional[BrowserManager] = None,
+   210→   210→    start_page: int = 1,
+   211→   211→) -> List[CandidateBasic]:
+   212→   212→    """
+   213→   213→    Search for candidates on Boss直聘.
+   214→   214→
+   215→   215→    Navigates to search page, types keyword in iframe search input,
+   216→   216→    extracts candidates from card list, and optionally refreshes
+   217→   217→    via "换一换" button for more results.
+   218→   218→
+   219→   219→    Args:
+   220→   220→        keywords: List of search keywords
+   221→   221→        location: Location filter (e.g., "北京")
+   222→   222→        max_pages: Number of "换一换" refresh rounds per keyword
+   223→   223→        experience: Experience filter
+   224→   224→        education: Education filter
+   225→   225→        salary: Salary filter
+   226→   226→        browser: Browser manager instance
+   227→   227→        start_page: Starting refresh round (for resume)
+   228→   228→
+   229→   229→    Returns:
+   230→   230→        List of CandidateBasic instances
+   231→   231→    """
+   232→   232→    if browser is None:
+   233→   233→        browser = get_browser_manager()
+   234→   234→
+   235→   235→    page = browser.page
+   236→   236→    if not page:
+   237→   237→        page = await browser.start()
+   238→   238→
+   239→   239→    rate_limiter = get_rate_limiter()
+   240→   240→    db_manager = get_db_manager()
+   241→   241→
+   242→   242→    all_candidates: List[CandidateBasic] = []
+   243→   243→    seen_ids: Set[str] = set()
+   244→   244→    seen_dedup_keys: Set[str] = set()
+   245→   245→
+   246→   246→    for keyword in keywords:
+   247→   247→        console.print(f"\n[cyan]Searching for: {keyword}[/cyan]")
+   248→   248→
+   249→   249→        # Rate limit check
+   250→   250→        await async_check_rate_limit('search')
+   251→   251→
+   252→   252→        try:
+   253→   253→            # Navigate to search page (main page, iframe will load)
+   254→   254→            search_url = "https://www.zhipin.com/web/chat/search"
+   255→   255→            await retry_navigation(page, search_url, wait_until='domcontentloaded')
+   256→   256→            await async_random_delay('page_load')
+   257→   257→
+   258→   258→            # Check for captcha on main page
+   259→   259→            await check_captcha(page, report_to_rate_limiter=True)
+   260→   260→
+   261→   261→            # Get the search iframe
+   262→   262→            search_frame = await _get_search_frame(page)
+   263→   263→            if not search_frame:
+   264→   264→                logger.error("Could not find searchFrame iframe")
+   265→   265→                console.print("[red]Search iframe not found. Page structure may have changed.[/red]")
+   266→   266→                continue
+   267→   267→
+   268→   268→            # Wait for search input to be ready inside iframe
+   269→   269→            try:
+   270→   270→                await search_frame.wait_for_selector('input.search-input', timeout=10000)
+   271→   271→            except Exception:
+   272→   272→                logger.error("Search input not found in iframe")
+   273→   273→                continue
+   274→   274→
+   275→   275→            # Type keyword in search input
+   276→   276→            search_input = await search_frame.query_selector('input.search-input')
+   277→   277→            if search_input:
+   278→   278→                await search_input.click()
+   279→   279→                await page.wait_for_timeout(300)
+   280→   280→                # Clear and type
+   281→   281→                import sys
+   282→   282→                select_all_key = "Meta+a" if sys.platform == "darwin" else "Control+a"
+   283→   283→                await page.keyboard.press(select_all_key)
+   284→   284→                await search_input.fill(keyword)
+   285→   285→                await page.keyboard.press('Enter')
+   286→   286→                await async_random_delay('page_load')
+   287→   287→            else:
+   288→   288→                logger.error("Search input element not found")
+   289→   289→                continue
+   290→   290→
+   291→   291→            # Wait for card list to appear
+   292→   292→            try:
+   293→   293→                await search_frame.wait_for_selector('.card-list .geek-info-card', timeout=15000)
+   294→   294→            except Exception:
+   295→   295→                logger.warning(f"No candidate cards loaded for '{keyword}'")
+   296→   296→                continue
+   297→   297→
+   298→   298→            # Check for quota exhaustion
+   299→   299→            if await _check_quota_exhausted(search_frame):
+   300→   300→                console.print("[red]Daily contact quota exhausted. Stopping search.[/red]")
+   301→   301→                break
+   302→   302→
+   303→   303→            # Extract candidates from current results + refresh rounds
+   304→   304→            total_rounds = start_page + max_pages - 1
+   305→   305→            for refresh_round in range(start_page, total_rounds + 1):
+   306→   306→                if refresh_round > start_page:
+   307→   307→                    console.print(f"  [dim]Refresh round {refresh_round}/{total_rounds} (换一换)...[/dim]")
+   308→   308→                    await _refresh_search_results(search_frame)
+   309→   309→                    await async_random_delay('page_load')
+   310→   310→
+   311→   311→                # Extract candidates from current card list
+   312→   312→                raw_candidates = await search_frame.evaluate(EXTRACT_CANDIDATES_JS)
+   313→   313→
+   314→   314→                if not raw_candidates:
+   315→   315→                    logger.warning(f"No candidates found in round {refresh_round} for '{keyword}'")
+   316→   316→                    continue
+   317→   317→
+   318→   318→                # Process results
+   319→   319→                round_count = 0
+   320→   320→                for raw in raw_candidates:
+   321→   321→                    name = raw.get('name', '').strip()
+   322→   322→                    title = raw.get('title', '').strip()
+   323→   323→                    company = raw.get('company', '').strip()
+   324→   324→
+   325→   325→                    if not name:
+   326→   326→                        continue
+   327→   327→
+   328→   328→                    # Filter non-R&D roles
+   329→   329→                    if _is_non_rd_role(title):
+   330→   330→                        continue
+   331→   331→
+   332→   332→                    # Use boss_id from data-expect
+   333→   333→                    boss_id = raw.get('boss_id', '')
+   334→   334→                    if not boss_id:
+   335→   335→                        boss_id = _generate_boss_id(name, company)
+   336→   336→
+   337→   337→                    # Deduplicate
+   338→   338→                    if boss_id in seen_ids:
+   339→   339→                        continue
+   340→   340→
+   341→   341→                    dedup_key = f"{name}_{company}"
+   342→   342→                    if dedup_key in seen_dedup_keys:
+   343→   343→                        continue
+   344→   344→
+   345→   345→                    seen_ids.add(boss_id)
+   346→   346→                    seen_dedup_keys.add(dedup_key)
+   347→   347→
+   348→   348→                    candidate = CandidateBasic(
+   349→   349→                        boss_id=boss_id,
+   350→   350→                        name=name,
+   351→   351→                        title=title,
+   352→   352→                        company=company,
+   353→   353→                        location=raw.get('location', ''),
+   354→   354→                        salary_expect=raw.get('salary_expect', ''),
+   355→   355→                        work_years=raw.get('work_years', ''),
+   356→   356→                        education_level=raw.get('education_level', ''),
+   357→   357→                        profile_url=raw.get('profile_url', ''),
+   358→   358→                        active_status=raw.get('active_status', ''),
+   359→   359→                        school=raw.get('school', ''),
+   360→   360→                        major=raw.get('major', ''),
+   361→   361→                        job_status=raw.get('job_status', ''),
+   362→   362→                        self_desc=raw.get('self_desc', ''),
+   363→   363→                    )
+   364→   364→
+   365→   365→                    all_candidates.append(candidate)
+   366→   366→                    round_count += 1
+   367→   367→
+   368→   368→                console.print(f"  [green]Round {refresh_round}: {round_count} new candidates[/green]")
+   369→   369→
+   370→   370→            # Log action
+   371→   371→            rate_limiter.log_action('search', {
+   372→   372→                'keyword': keyword,
+   373→   373→                'refresh_rounds': max_pages,
+   374→   374→                'results': len([c for c in all_candidates]),
+   375→   375→            })
+   376→   376→
+   377→   377→            # Save search history
+   378→   378→            keyword_count = len([c for c in all_candidates if c.boss_id in seen_ids])
+   379→   379→            with db_manager.session_scope() as session:
+   380→   380→                history = SearchHistory(
+   381→   381→                    criteria={
+   382→   382→                        'keywords': keyword,
+   383→   383→                        'location': location,
+   384→   384→                        'refresh_rounds': max_pages,
+   385→   385→                        'experience': experience,
+   386→   386→                        'education': education,
+   387→   387→                        'salary': salary,
+   388→   388→                    },
+   389→   389→                    results_count=keyword_count,
+   390→   390→                )
+   391→   391→                session.add(history)
+   392→   392→
+   393→   393→        except Exception as e:
+   394→   394→            logger.error(f"Error searching for '{keyword}': {e}")
+   395→   395→            console.print(f"  [red]Error: {e}[/red]")
+   396→   396→            rate_limiter.report_error()
+   397→   397→
+   398→   398→    console.print(f"\n[green]Total unique candidates: {len(all_candidates)}[/green]")
+   399→   399→
+   400→   400→    # Save candidates to database
+   401→   401→    _save_candidates_to_db(all_candidates, keywords, db_manager)
+   402→   402→
+   403→   403→    # Display results summary
+   404→   404→    _display_results(all_candidates, keywords)
+   405→   405→
+   406→   406→    return all_candidates
+   407→   407→
+   408→   408→
+   409→   409→async def _refresh_search_results(frame: Frame) -> None:
+   410→   410→    """Click "换一换" button in the search iframe to load new candidates.
+   411→   411→
+   412→   412→    Boss直聘 search does NOT use infinite scroll. Instead it shows ~30 cards
+   413→   413→    and provides a "换一换" button to refresh the list with new candidates.
+   414→   414→    """
+   415→   415→    try:
+   416→   416→        refresh_btn = await frame.query_selector('.change-btn')
+   417→   417→        if refresh_btn and await refresh_btn.is_visible():
+   418→   418→            await refresh_btn.click()
+   419→   419→            # Wait for new cards to load
+   420→   420→            await frame.wait_for_timeout(2000)
+   421→   421→            return
+   422→   422→    except Exception as e:
+   423→   423→        logger.warning(f"Could not click refresh button: {e}")
+   424→   424→
+   425→   425→    # Fallback: scroll the iframe body to trigger any lazy loading
+   426→   426→    await frame.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+   427→   427→    await frame.wait_for_timeout(1500)
+   428→   428→
+   429→   429→
+   430→   430→async def _check_quota_exhausted(frame: Frame) -> bool:
+   431→   431→    """Check if Boss直聘 shows a quota exhaustion indicator."""
+   432→   432→    try:
+   433→   433→        result = await frame.evaluate("""
+   434→   434→            () => {
+   435→   435→                const bodyText = document.body ? document.body.innerText : '';
+   436→   436→                const quotaIndicators = [
+   437→   437→                    '今日沟通次数已用完',
+   438→   438→                    '沟通次数已达上限',
+   439→   439→                    '今日联系人数已满',
+   440→   440→                    '升级会员',
+   441→   441→                    '开通会员享更多沟通'
+   442→   442→                ];
+   443→   443→                for (const indicator of quotaIndicators) {
+   444→   444→                    if (bodyText.includes(indicator)) {
+   445→   445→                        return true;
+   446→   446→                    }
+   447→   447→                }
+   448→   448→                return false;
+   449→   449→            }
+   450→   450→        """)
+   451→   451→        return result
+   452→   452→    except Exception:
+   453→   453→        return False
+   454→   454→
+   455→   455→
+   456→   456→def _save_candidates_to_db(
+   457→   457→    candidates: List[CandidateBasic],
+   458→   458→    keywords: List[str],
+   459→   459→    db_manager,
+   460→   460→) -> None:
+   461→   461→    """Save or update candidates in the database."""
+   462→   462→    source = ', '.join(keywords)
+   463→   463→
+   464→   464→    with db_manager.session_scope() as session:
+   465→   465→        # Batch-fetch existing candidates to avoid N+1 queries
+   466→   466→        boss_ids = [c.boss_id for c in candidates]
+   467→   467→        existing_map = {}
+   468→   468→        for i in range(0, len(boss_ids), 500):
+   469→   469→            chunk = boss_ids[i:i + 500]
+   470→   470→            rows = session.query(Candidate).filter(
+   471→   471→                Candidate.boss_id.in_(chunk)
+   472→   472→            ).all()
+   473→   473→            for row in rows:
+   474→   474→                existing_map[row.boss_id] = row
+   475→   475→
+   476→   476→        for c in candidates:
+   477→   477→            existing = existing_map.get(c.boss_id)
+   478→   478→            if existing:
+   479→   479→                existing.name = c.name or existing.name
+   480→   480→                existing.title = c.title or existing.title
+   481→   481→                existing.company = c.company or existing.company
+   482→   482→                existing.location = c.location or existing.location
+   483→   483→                existing.salary_expect = c.salary_expect or existing.salary_expect
+   484→   484→                existing.work_years = c.work_years or existing.work_years
+   485→   485→                existing.education_level = c.education_level or existing.education_level
+   486→   486→                existing.profile_url = c.profile_url or existing.profile_url
+   487→   487→                if source and source not in (existing.source_search or ''):
+   488→   488→                    existing.source_search = f"{existing.source_search or ''}, {source}".strip(', ')
+   489→   489→            else:
+   490→   490→                new_candidate = Candidate(
+   491→   491→                    boss_id=c.boss_id,
+   492→   492→                    name=c.name,
+   493→   493→                    title=c.title,
+   494→   494→                    company=c.company,
+   495→   495→                    location=c.location,
+   496→   496→                    salary_expect=c.salary_expect,
+   497→   497→                    work_years=c.work_years,
+   498→   498→                    education_level=c.education_level,
+   499→   499→                    profile_url=c.profile_url,
+   500→   500→                    source_search=source,
+   501→   501→                )
+   502→   502→                session.add(new_candidate)
+   503→   503→
+   504→   504→
+   505→   505→def _display_results(candidates: List[CandidateBasic], keywords: List[str]) -> None:
+   506→   506→    """Display search results in a Rich table."""
+   507→   507→    if not candidates:
+   508→   508→        console.print("[yellow]No candidates found.[/yellow]")
+   509→   509→        return
+   510→   510→
+   511→   511→    table = Table(title=f"Search Results ({len(candidates)} candidates)")
+   512→   512→    table.add_column("Boss ID", style="dim", max_width=20)
+   513→   513→    table.add_column("Name", style="bold")
+   514→   514→    table.add_column("Title")
+   515→   515→    table.add_column("Company")
+   516→   516→    table.add_column("Education")
+   517→   517→    table.add_column("Salary")
+   518→   518→    table.add_column("Experience")
+   519→   519→    table.add_column("Active", style="green")
+   520→   520→
+   521→   521→    for c in candidates[:50]:
+   522→   522→        table.add_row(
+   523→   523→            c.boss_id[:20],
+   524→   524→            c.name,
+   525→   525→            c.title[:30] if c.title else "",
+   526→   526→            c.company[:20] if c.company else "",
+   527→   527→            c.education_level or "",
+   528→   528→            c.salary_expect or "",
+   529→   529→            c.work_years or "",
+   530→   530→            c.active_status or "",
+   531→   531→        )
+   532→   532→
+   533→   533→    console.print(table)
+   534→   534→
+   535→   535→    if len(candidates) > 50:
+   536→   536→        console.print(f"[dim]...and {len(candidates) - 50} more candidates[/dim]")
+   537→   537→

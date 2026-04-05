@@ -1,0 +1,297 @@
+     1→"""Interactive selector discovery for chat pages.
+     2→
+     3→When automatic selectors fail, this module pauses execution and lets
+     4→the user manually navigate to the correct chat page in the browser.
+     5→It then inspects the DOM to discover working selectors, which are
+     6→reused for all remaining candidates in the session.
+     7→"""
+     8→
+     9→import asyncio
+    10→from dataclasses import dataclass
+    11→from typing import Optional
+    12→
+    13→from patchright.async_api import Page
+    14→from loguru import logger
+    15→from rich.console import Console
+    16→from rich.panel import Panel
+    17→from rich.text import Text
+    18→
+    19→from src.core.anti_detection import human_type, human_click
+    20→from src.utils.delays import async_random_delay
+    21→
+    22→console = Console()
+    23→
+    24→# JavaScript to scan DOM for interactive elements
+    25→DISCOVER_ELEMENTS_JS = """
+    26→() => {
+    27→    const results = [];
+    28→
+    29→    // Find visible buttons
+    30→    const buttons = document.querySelectorAll('button, [role="button"], a[class*="btn"], div[class*="btn"]');
+    31→    buttons.forEach((el, i) => {
+    32→        const rect = el.getBoundingClientRect();
+    33→        if (rect.width > 0 && rect.height > 0) {
+    34→            const text = (el.textContent || '').trim().substring(0, 50);
+    35→            const tag = el.tagName.toLowerCase();
+    36→            const classes = el.className ? String(el.className).substring(0, 80) : '';
+    37→            const id = el.id || '';
+    38→            results.push({
+    39→                type: 'button',
+    40→                index: results.length,
+    41→                tag: tag,
+    42→                text: text,
+    43→                classes: classes,
+    44→                id: id,
+    45→                selector: id ? `#${id}` : (classes ? `${tag}.${String(el.className).split(' ')[0]}` : `${tag}:nth-of-type(${i+1})`),
+    46→            });
+    47→        }
+    48→    });
+    49→
+    50→    // Find visible textareas and contenteditable elements
+    51→    const inputs = document.querySelectorAll('textarea, [contenteditable="true"], input[type="text"]');
+    52→    inputs.forEach((el, i) => {
+    53→        const rect = el.getBoundingClientRect();
+    54→        if (rect.width > 0 && rect.height > 0) {
+    55→            const tag = el.tagName.toLowerCase();
+    56→            const classes = el.className ? String(el.className).substring(0, 80) : '';
+    57→            const id = el.id || '';
+    58→            const placeholder = el.getAttribute('placeholder') || '';
+    59→            const contenteditable = el.getAttribute('contenteditable') || '';
+    60→            results.push({
+    61→                type: 'input',
+    62→                index: results.length,
+    63→                tag: tag,
+    64→                text: placeholder,
+    65→                classes: classes,
+    66→                id: id,
+    67→                contenteditable: contenteditable,
+    68→                selector: id ? `#${id}` : (classes ? `${tag}.${String(el.className).split(' ')[0]}` : (contenteditable ? '[contenteditable="true"]' : `${tag}:nth-of-type(${i+1})`)),
+    69→            });
+    70→        }
+    71→    });
+    72→
+    73→    return results;
+    74→}
+    75→"""
+    76→
+    77→MAX_DISCOVERY_RETRIES = 3
+    78→
+    79→
+    80→@dataclass
+    81→class DiscoveredSelectors:
+    82→    """Session-scoped container for discovered chat page selectors."""
+    83→
+    84→    chat_button: Optional[str] = None
+    85→    message_input: Optional[str] = None
+    86→    send_button: Optional[str] = None
+    87→    chat_url_pattern: Optional[str] = None
+    88→    skip_chat_button: bool = False
+    89→    is_populated: bool = False
+    90→
+    91→
+    92→async def discover_chat_page(
+    93→    page: Page,
+    94→    maimai_id: str,
+    95→    browser,
+    96→) -> DiscoveredSelectors:
+    97→    """
+    98→    Interactive flow to discover chat page selectors.
+    99→
+   100→    Pauses execution and instructs the user to manually navigate to the
+   101→    chat page in the browser. Then inspects the DOM and lets the user
+   102→    select which elements are the message input and send button.
+   103→
+   104→    Args:
+   105→        page: Current Playwright page
+   106→        maimai_id: Current candidate's Maimai ID (used to derive URL pattern)
+   107→        browser: BrowserManager instance
+   108→
+   109→    Returns:
+   110→        Populated DiscoveredSelectors instance
+   111→    """
+   112→    discovered = DiscoveredSelectors()
+   113→    loop = asyncio.get_running_loop()
+   114→
+   115→    # Step 1: Instruct user to navigate to chat page
+   116→    instructions = Text()
+   117→    instructions.append("Automatic chat selectors not found.\n\n", style="bold red")
+   118→    instructions.append("Please do the following in the browser window:\n", style="bold")
+   119→    instructions.append("1. Navigate to the chat/message page for this candidate\n")
+   120→    instructions.append("2. Make sure the message input is visible on screen\n")
+   121→    instructions.append("3. Come back here and press Enter when ready\n\n")
+   122→    instructions.append(f"Candidate ID: ", style="dim")
+   123→    instructions.append(f"{maimai_id}", style="cyan")
+   124→
+   125→    console.print(Panel(
+   126→        instructions,
+   127→        title="Interactive Selector Discovery",
+   128→        border_style="yellow",
+   129→        padding=(1, 2),
+   130→    ))
+   131→
+   132→    for attempt in range(1, MAX_DISCOVERY_RETRIES + 1):
+   133→        await loop.run_in_executor(None, lambda: input("\nPress Enter when the chat page is ready..."))
+   134→
+   135→        # Step 2: Capture current URL and derive pattern
+   136→        current_url = page.url
+   137→        logger.debug(f"Current URL after user navigation: {current_url}")
+   138→
+   139→        if maimai_id in current_url:
+   140→            discovered.chat_url_pattern = current_url.replace(maimai_id, "{maimai_id}")
+   141→            console.print(f"[green]URL pattern detected:[/green] {discovered.chat_url_pattern}")
+   142→        else:
+   143→            console.print("[yellow]Could not derive URL pattern (maimai_id not found in URL).[/yellow]")
+   144→            console.print(f"[dim]Current URL: {current_url}[/dim]")
+   145→
+   146→        # Step 3: Scan DOM for elements
+   147→        elements = await page.evaluate(DISCOVER_ELEMENTS_JS)
+   148→
+   149→        if not elements:
+   150→            console.print(f"[yellow]No interactive elements found (attempt {attempt}/{MAX_DISCOVERY_RETRIES}).[/yellow]")
+   151→            if attempt < MAX_DISCOVERY_RETRIES:
+   152→                console.print("[dim]Make sure the chat page is fully loaded and try again.[/dim]")
+   153→                continue
+   154→            else:
+   155→                console.print("[red]Giving up after max retries. Selector discovery failed.[/red]")
+   156→                return discovered
+   157→
+   158→        # Step 4: Display discovered elements
+   159→        input_elements = [e for e in elements if e['type'] == 'input']
+   160→        button_elements = [e for e in elements if e['type'] == 'button']
+   161→
+   162→        # Select message input
+   163→        if input_elements:
+   164→            console.print("\n[bold cyan]Input elements found:[/bold cyan]")
+   165→            for i, el in enumerate(input_elements):
+   166→                label = el.get('text') or el.get('classes', '') or el['tag']
+   167→                console.print(f"  [{i}] {el['tag']} - {label} (selector: {el['selector']})")
+   168→
+   169→            choice = await loop.run_in_executor(
+   170→                None,
+   171→                lambda: input(f"\nSelect message input [0-{len(input_elements)-1}] (default 0): ").strip()
+   172→            )
+   173→            idx = int(choice) if choice.isdigit() and int(choice) < len(input_elements) else 0
+   174→            discovered.message_input = input_elements[idx]['selector']
+   175→            console.print(f"[green]Message input:[/green] {discovered.message_input}")
+   176→        else:
+   177→            console.print("[yellow]No input elements found.[/yellow]")
+   178→            if attempt < MAX_DISCOVERY_RETRIES:
+   179→                continue
+   180→            return discovered
+   181→
+   182→        # Select send button
+   183→        if button_elements:
+   184→            console.print("\n[bold cyan]Button elements found:[/bold cyan]")
+   185→            for i, el in enumerate(button_elements):
+   186→                label = el.get('text') or el.get('classes', '') or el['tag']
+   187→                console.print(f"  [{i}] {el['tag']} - \"{label}\" (selector: {el['selector']})")
+   188→
+   189→            choice = await loop.run_in_executor(
+   190→                None,
+   191→                lambda: input(f"\nSelect send button [0-{len(button_elements)-1}]: ").strip()
+   192→            )
+   193→            if choice.isdigit() and int(choice) < len(button_elements):
+   194→                discovered.send_button = button_elements[int(choice)]['selector']
+   195→                console.print(f"[green]Send button:[/green] {discovered.send_button}")
+   196→            else:
+   197→                console.print("[yellow]No send button selected.[/yellow]")
+   198→
+   199→        # Step 5: Ask about chat button
+   200→        needs_chat = await loop.run_in_executor(
+   201→            None,
+   202→            lambda: input("\nDoes reaching the chat page require clicking a button first? [y/N]: ").strip().lower()
+   203→        )
+   204→
+   205→        if needs_chat == 'y':
+   206→            console.print("\n[bold cyan]Select the chat button from the button list above:[/bold cyan]")
+   207→            choice = await loop.run_in_executor(
+   208→                None,
+   209→                lambda: input(f"Chat button index [0-{len(button_elements)-1}]: ").strip()
+   210→            )
+   211→            if choice.isdigit() and int(choice) < len(button_elements):
+   212→                discovered.chat_button = button_elements[int(choice)]['selector']
+   213→                console.print(f"[green]Chat button:[/green] {discovered.chat_button}")
+   214→        else:
+   215→            discovered.skip_chat_button = True
+   216→
+   217→        # Mark as populated if we have at least message_input
+   218→        if discovered.message_input:
+   219→            discovered.is_populated = True
+   220→            console.print(Panel(
+   221→                "[green]Selector discovery complete! These selectors will be reused for remaining candidates.[/green]",
+   222→                border_style="green",
+   223→            ))
+   224→            break
+   225→
+   226→    return discovered
+   227→
+   228→
+   229→async def apply_discovered_selectors(
+   230→    page: Page,
+   231→    maimai_id: str,
+   232→    discovered: DiscoveredSelectors,
+   233→    content: str,
+   234→) -> bool:
+   235→    """
+   236→    Send a message using previously discovered selectors.
+   237→
+   238→    Args:
+   239→        page: Playwright page instance
+   240→        maimai_id: Candidate's Maimai ID
+   241→        discovered: Previously discovered selectors
+   242→        content: Message content to send
+   243→
+   244→    Returns:
+   245→        True if message sent successfully
+   246→    """
+   247→    try:
+   248→        # Navigate to chat URL if pattern is available
+   249→        if discovered.chat_url_pattern:
+   250→            chat_url = discovered.chat_url_pattern.format(maimai_id=maimai_id)
+   251→            await page.goto(chat_url, wait_until='domcontentloaded')
+   252→            await async_random_delay('page_load')
+   253→
+   254→        # Click chat button if needed
+   255→        if not discovered.skip_chat_button and discovered.chat_button:
+   256→            try:
+   257→                await human_click(page, discovered.chat_button)
+   258→                await async_random_delay('action')
+   259→            except Exception as e:
+   260→                logger.warning(f"Failed to click chat button: {e}")
+   261→                return False
+   262→
+   263→        # Type message
+   264→        if discovered.message_input:
+   265→            try:
+   266→                await page.wait_for_selector(discovered.message_input, timeout=10000)
+   267→                await human_type(page, discovered.message_input, content)
+   268→                await async_random_delay('action')
+   269→            except Exception as e:
+   270→                logger.warning(f"Failed to type message: {e}")
+   271→                return False
+   272→
+   273→        # Click send
+   274→        if discovered.send_button:
+   275→            try:
+   276→                await human_click(page, discovered.send_button)
+   277→                await async_random_delay('action')
+   278→
+   279→                # Verify message was sent
+   280→                from src.modules.message import _verify_message_sent
+   281→                verified = await _verify_message_sent(page, content)
+   282→                if not verified:
+   283→                    logger.warning("Message send via discovered selectors could not be verified")
+   284→                    return False
+   285→                logger.debug("Message send via discovered selectors verified")
+   286→                return True
+   287→            except Exception as e:
+   288→                logger.warning(f"Failed to click send: {e}")
+   289→                return False
+   290→
+   291→        logger.warning("No send button selector available")
+   292→        return False
+   293→
+   294→    except Exception as e:
+   295→        logger.error(f"Error applying discovered selectors: {e}")
+   296→        return False
+   297→

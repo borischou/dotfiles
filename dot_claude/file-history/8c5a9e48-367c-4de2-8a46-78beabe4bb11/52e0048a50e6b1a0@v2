@@ -1,0 +1,134 @@
+{
+  "version": "2.1.0",
+  "last_updated": "2026-03-04",
+  "note": "Verified selectors from live DOM inspection. CRITICAL: search results are inside iframe[name=searchFrame], recommend results are inside iframe[name=recommendFrame]. Chat input is #boss-chat-editor-input (not #boss-chat-global-input). Resume overlay is wasm-rendered (empty DOM). Search uses '换一换' button, not infinite scroll.",
+  "architecture": {
+    "search_page": "https://www.zhipin.com/web/chat/search",
+    "search_iframe": "iframe[name='searchFrame'] -> /web/frame/search/",
+    "recommend_page": "https://www.zhipin.com/web/chat/recommend",
+    "recommend_iframe": "iframe[name='recommendFrame'] -> /web/frame/recommend/",
+    "resume_iframe": "/web/frame/c-resume/?source=search (wasm-rendered, DOM empty)",
+    "chat_page": "https://www.zhipin.com/web/chat/index",
+    "candidate_id_source_search": "a[data-expect] on search cards",
+    "candidate_id_source_recommend": "data-geek / data-geekid on .card-inner"
+  },
+  "urls": {
+    "search_page": "https://www.zhipin.com/web/chat/search",
+    "search_iframe": "https://www.zhipin.com/web/frame/search/",
+    "recommend_page": "https://www.zhipin.com/web/chat/recommend",
+    "recommend_iframe": "https://www.zhipin.com/web/frame/recommend/",
+    "chat_page": "https://www.zhipin.com/web/chat/index",
+    "job_list": "https://www.zhipin.com/web/chat/job/list",
+    "base": "https://www.zhipin.com"
+  },
+  "selectors": {
+    "navigation": {
+      "search_tab": "text=\"搜索\"",
+      "recommend_tab": "text=\"推荐牛人\"",
+      "chat_tab": "text=\"沟通\"",
+      "job_management_tab": "text=\"职位管理\""
+    },
+    "search": {
+      "_context": "All selectors below are INSIDE iframe[name='searchFrame']",
+      "iframe_name": "searchFrame",
+      "search_input": "input.search-input",
+      "card_list": "div.card-list",
+      "candidate_card": "li.geek-info-card",
+      "card_link": "li.geek-info-card > a",
+      "card_link_id_attr": "data-expect",
+      "card_link_job_attr": "data-jid",
+      "candidate_name": "span.name-label",
+      "candidate_labels": "span.card-label",
+      "candidate_active": "span.active-desc-text",
+      "candidate_info_labels": "div.info-labels > span.label-text",
+      "candidate_detail": "div.info-detail",
+      "candidate_expect_city": "ul.expect-exp-box .t-tooltip-slot",
+      "candidate_work_exp": "ul.work-exp-box .t-tooltip-slot",
+      "candidate_edu": "ul.edu-exp-box .t-tooltip-slot",
+      "contact_button": "button.btn-getcontact",
+      "contact_button_chat": "button.btn-getcontact.btn-chat",
+      "refresh_button": "div.change-btn",
+      "filter_area": ".check-params-options-content",
+      "not_interested": "div.suitable-tip"
+    },
+    "profile": {
+      "_context": "Resume overlay is wasm-rendered. Profile data must be extracted from search cards, not from resume DOM.",
+      "dialog": ".dialog-wrap.active",
+      "dialog_resume_class": "dialog-lib-resume",
+      "resume_layout": ".resume-layout-wrap",
+      "resume_center": ".resume-center-side",
+      "resume_detail_wrap": ".resume-detail-wrap",
+      "resume_right": ".resume-right-side",
+      "chat_history": ".chat-history-process",
+      "resume_footer": ".resume-footer-wrap",
+      "position_name": "span.position-name",
+      "close_button": "span.iboss-close",
+      "close_popup": ".boss-popup__close"
+    },
+    "message": {
+      "_context": "Chat page at /web/chat/index. Input is contenteditable div.",
+      "chat_input": "#boss-chat-editor-input",
+      "send_button": "div.submit",
+      "conversation_list": "div.user-list",
+      "conversation_item": "div.geek-item",
+      "conversation_item_id_attr": "data-id",
+      "conversation_box": "div.chat-conversation",
+      "message_list": ".chat-message-list",
+      "message_item": ".message-item",
+      "chat_filter": ".chat-filter-container",
+      "job_select": ".job-select"
+    },
+    "search_contact": {
+      "_context": "Contact button flow from search page",
+      "contact_button_in_card": "button.btn-getcontact",
+      "contact_button_in_dialog": ".resume-footer button.btn-getcontact",
+      "buy_card_dialog": ".buy-search-chat-card",
+      "discount_dialog": ".prop-sale-discounts-dialog-v3"
+    },
+    "recommend": {
+      "_context": "All selectors below are INSIDE iframe[name='recommendFrame']. Candidate IDs use data-geek/data-geekid (not data-expect).",
+      "iframe_name": "recommendFrame",
+      "tabs": {
+        "tab_list": "ul.tab-list",
+        "tab_item": "li.tab-item",
+        "tab_recommend": "li.tab-item[data-status='0']",
+        "tab_curated": "li.tab-item[data-status='3']",
+        "tab_latest": "li.tab-item[data-status='1']",
+        "tab_active_class": "curr"
+      },
+      "job_selector": {
+        "wrapper": ".job-selecter-wrap",
+        "label": ".job-selecter-wrap .ui-dropmenu-label",
+        "list": "ul.job-list",
+        "item": "li.job-item",
+        "item_active_class": "curr",
+        "item_value_attr": "value",
+        "search_input": "input.ipt.chat-job-search"
+      },
+      "filter": {
+        "wrapper": ".recommend-filter.op-filter",
+        "label": ".filter-label-wrap",
+        "label_text": ".filter-label",
+        "area_wrapper": ".check-area-warp",
+        "area_city": ".check-city-left .area-item",
+        "area_district": ".check-district-center .area-item",
+        "area_confirm": ".check-area-bottom-right button.btn-sure",
+        "area_clear": ".check-area-bottom-right button.clear-btn"
+      },
+      "card_list": "ul.card-list",
+      "candidate_card": "li.card-item",
+      "card_inner": ".card-inner.common-wrap",
+      "card_id_attr": "data-geek",
+      "card_id_attr_alt": "data-geekid",
+      "candidate_name": ".name-wrap .name",
+      "candidate_active": "span.active-text",
+      "candidate_base_info": ".join-text-wrap.base-info",
+      "candidate_expect": ".expect-wrap",
+      "candidate_salary": ".salary-wrap span",
+      "candidate_avatar": ".avatar-wrap img.avatar",
+      "greet_button_wrap": "div.button-chat-wrap.button-chat",
+      "greet_button": "button.btn.btn-greet",
+      "chat_history_icon": ".tooltip-wrap.chat-history"
+    }
+  }
+}

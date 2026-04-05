@@ -1,0 +1,267 @@
+# Boss Assistant
+
+Boss直聘半自动招聘助手 —— 面向招聘方（Boss端）的效率工具。
+
+通过浏览器自动化搜索候选人、提取 Profile、批量发送模板消息，支持 Web 可视化界面和 CLI 两种操作方式。
+
+## 功能
+
+- **候选人搜索** — 多关键词搜索、自动翻页、去重
+- **推荐牛人** — 按岗位浏览推荐候选人，支持筛选、一键打招呼
+- **Profile 提取** — 从 Boss直聘页面提取候选人详细信息（教育、工作经历、技能）
+- **智能评分** — 基于 JD 的多维度打分（资历、公司、学历、技能匹配），可选 LLM 辅助评分
+- **模板消息** — 变量替换、预览、单发/批量发送
+- **Pipeline 自动化** — 搜索 → 评分 → 发消息一键流水线，支持断点续传
+- **Web 可视化** — 浏览器操作界面，SSE 实时进度，Pipeline 控制面板
+- **安全防护** — 自适应限速、验证码检测暂停、拟人化延迟
+
+## 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| Web 服务 | FastAPI + Jinja2 + HTMX + Simple.css |
+| 实时通信 | SSE (Server-Sent Events) |
+| CLI | Click + Rich |
+| 浏览器自动化 | Patchright (Playwright fork) + Chrome CDP |
+| 反检测 | Emunium（拟人交互）+ 对数正态延迟 |
+| 数据库 | SQLAlchemy + SQLite |
+| 评分 | 规则引擎 + Ollama LLM（可选） |
+
+## 安装
+
+### 前置要求
+
+- Python 3.9+
+- Google Chrome 浏览器
+
+### 步骤
+
+```bash
+# 克隆项目
+git clone https://github.com/borischou/boss-assistant.git
+cd boss-assistant
+
+# 创建虚拟环境（推荐）
+python -m venv venv
+source venv/bin/activate  # macOS/Linux
+# venv\Scripts\activate   # Windows
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+## 快速开始
+
+### Web 模式（推荐）
+
+```bash
+python run_web.py
+```
+
+打开浏览器访问 `http://localhost:8080`。
+
+Web 服务会自动启动 Chrome（headed 模式），登录态通过 `--user-data-dir` 持久化，首次使用需要在弹出的 Chrome 窗口中手动登录 Boss直聘。
+
+```bash
+# 自定义端口
+python run_web.py --port 9000
+
+# 开发模式（热重载）
+python run_web.py --reload
+```
+
+### CLI 模式
+
+CLI 需要先手动启动 Chrome：
+
+```bash
+# 1. 启动 Chrome（保持终端打开）
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+
+# 2. 在 Chrome 中登录 Boss直聘
+
+# 3. 执行命令
+python -m src.cli.main login          # 检查登录状态
+python -m src.cli.main search -k "前端工程师" -p 3
+python -m src.cli.main pipeline -k "前端" -t greeting --dry-run
+```
+
+## Web 界面说明
+
+| 页面 | 路径 | 说明 |
+|------|------|------|
+| Dashboard | `/` | 系统状态总览、今日统计、快捷入口 |
+| 搜索 | `/search` | 搜索表单，HTMX 局部更新结果 |
+| 候选人 | `/candidates` | 列表 + 筛选 + 分页 |
+| 候选人详情 | `/candidates/{id}` | Profile 详情、消息记录、发消息 |
+| Pipeline | `/pipeline` | 启动/取消 Pipeline，SSE 实时进度 |
+| 模板 | `/templates` | 消息模板查看和在线编辑 |
+| 导出 | `/export` | 导出 Excel/CSV |
+| 设置 | `/settings` | 在线编辑 settings.json |
+| 状态 | `/status` | Rate Limit 配额仪表盘 |
+
+### Pipeline 运行说明
+
+Pipeline 运行期间浏览器被独占（因为只有一个 Chrome 实例），搜索和发消息按钮会自动禁用。Pipeline 页面通过 SSE 实时展示进度：
+
+1. **搜索阶段** — 按关键词搜索，翻页加载（支持搜索页和推荐牛人两种入口）
+2. **评分阶段** — 多维度打分排序
+3. **发送阶段** — 逐一发送消息，跳过已发送
+4. **验证码** — 检测到验证码时推送通知，在 Chrome 窗口手动处理即可
+
+## CLI 命令参考
+
+```
+boss-assistant CLI
+
+Commands:
+  login      检查登录状态，未登录则等待手动登录
+  search     搜索候选人
+  profile    提取候选人详细 Profile
+  message    发送模板消息
+  pipeline   搜索→评分→发消息 一键流水线
+  export     导出候选人数据（Excel/CSV）
+  templates  查看消息模板列表
+  status     查看 Rate Limit 配额
+  logout     清除保存的 Session
+```
+
+### 常用示例
+
+```bash
+# 搜索 — 多关键词，3轮滚动
+python -m src.cli.main search -k "前端" -k "React" -p 3
+
+# 搜索 — 指定城市和学历
+python -m src.cli.main search -k "前端工程师" -l "北京" --education "本科"
+
+# Pipeline — dry run（仅模拟不发送）
+python -m src.cli.main pipeline -k "前端" -k "React" -t greeting --dry-run
+
+# Pipeline — 非交互模式，每2页发送一批
+python -m src.cli.main pipeline -k "前端" -t greeting --no-interactive --batch-pages 2
+
+# Pipeline — 断点续传
+python -m src.cli.main pipeline -k "前端" -t greeting --resume
+
+# 发送单条消息
+python -m src.cli.main message zp_abc123 -t greeting -v "recruiter_name=周博立" -v "salary_range=30-50K"
+
+# 导出
+python -m src.cli.main export -f excel -o candidates.xlsx
+```
+
+## 配置
+
+### config/settings.json
+
+```jsonc
+{
+  "browser": {
+    "cdp_endpoint": "http://127.0.0.1:9222",  // Chrome CDP 地址
+    "timeout": 30000                             // 页面超时（ms）
+  },
+  "rate_limits": {
+    "search_per_hour": 15,        // 每小时搜索次数
+    "search_per_day": 80,         // 每日搜索次数
+    "message_per_hour": 20,       // 每小时发消息次数
+    "message_per_day": 80,        // 每日发消息次数
+    "min_interval_seconds": 35    // 最小操作间隔（秒）
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "chrome_auto_launch": true,           // 自动启动 Chrome
+    "chrome_user_data_dir": "data/.chrome-profile",  // Chrome 用户数据目录
+    "chrome_debug_port": 9222
+  },
+  "scoring": {
+    "jd": {
+      "title": "前端工程师",
+      "required_skills": ["JavaScript", "TypeScript", "React", "Vue"],
+      "min_experience_years": 3
+    }
+  }
+}
+```
+
+### config/message_templates.json
+
+消息模板支持 `{variable}` 变量替换。内置模板：
+
+| 模板名 | 说明 | 变量 |
+|--------|------|------|
+| `greeting` | 初次问候 | name, recruiter_name, company, position, target_position, salary_range |
+| `follow_up` | 跟进消息 | name, target_position |
+| `simple_hello` | 简单问候 | 无 |
+| `hello` | 最简问候 | 无 |
+
+可通过 Web 界面 `/templates` 页面在线编辑，或直接修改 JSON 文件。
+
+## 项目结构
+
+```
+boss-assistant/
+├── run_web.py                    # Web 服务入口
+├── config/
+│   ├── settings.json             # 主配置
+│   ├── selectors.json            # CSS 选择器
+│   └── message_templates.json    # 消息模板
+├── src/
+│   ├── web/                      # Web 服务层
+│   │   ├── app.py                # FastAPI 应用工厂 + lifespan
+│   │   ├── routes/               # 路由（10个模块）
+│   │   ├── services/
+│   │   │   ├── chrome_manager.py # Chrome 进程管理
+│   │   │   └── task_manager.py   # Pipeline 后台任务
+│   │   ├── templates/            # Jinja2 模板
+│   │   └── static/               # CSS + JS
+│   ├── cli/main.py               # Click CLI
+│   ├── core/
+│   │   ├── browser.py            # BrowserManager (CDP 单例)
+│   │   ├── session.py            # Session 加密存储
+│   │   └── anti_detection.py     # 反检测
+│   ├── modules/
+│   │   ├── auth.py               # 登录检测
+│   │   ├── search.py             # 候选人搜索
+│   │   ├── profile.py            # Profile 提取
+│   │   ├── message.py            # 消息发送
+│   │   └── export.py             # 数据导出
+│   ├── services/pipeline.py      # Pipeline 编排
+│   ├── models/database.py        # SQLAlchemy ORM
+│   ├── utils/                    # 工具模块
+│   └── exceptions/errors.py      # 异常层级
+├── tests/                        # 单元测试
+├── data/                         # 运行时数据（gitignored）
+│   ├── boss.db                   # SQLite 数据库
+│   ├── .chrome-profile/          # Chrome 用户数据
+│   ├── exports/                  # 导出文件
+│   └── logs/                     # 日志
+└── requirements.txt
+```
+
+## 注意事项
+
+- **headed 模式必须** — Boss直聘反爬较严，Chrome 必须以可见窗口运行（不支持 headless）
+- **手动登录** — 首次使用需在 Chrome 中手动登录 Boss直聘，登录态通过 `--user-data-dir` 持久化
+- **验证码** — 触发验证码时工具会自动暂停，在 Chrome 窗口手动完成验证后自动继续
+- **限速保护** — 内置自适应限速，检测到验证码或错误会自动收紧频率
+- **单浏览器** — 同时只支持一个浏览器操作（Pipeline 运行时其他操作排队）
+- **数据安全** — 数据库和 Chrome profile 存储在本地 `data/` 目录，已 gitignore
+
+## 开发
+
+```bash
+# 运行测试
+pytest tests/ -v
+
+# 代码格式化
+black src/ tests/
+
+# Lint
+ruff check src/ tests/
+```
+
+## License
+
+Private project. All rights reserved.

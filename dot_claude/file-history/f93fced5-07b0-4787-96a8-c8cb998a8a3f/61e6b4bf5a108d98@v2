@@ -1,0 +1,228 @@
+/* Maimai Assistant - Custom Styles */
+
+/* Connection badge */
+.badge {
+    display: inline-block;
+    padding: 0.2em 0.6em;
+    font-size: 0.75em;
+    font-weight: 600;
+    border-radius: 1em;
+    background: var(--pico-secondary-background);
+    color: var(--pico-secondary);
+}
+
+.badge[data-status="ok"],
+.badge[data-status="completed"],
+.badge[data-status="sent"] {
+    background: #d4edda;
+    color: #155724;
+}
+
+.badge[data-status="warn"],
+.badge[data-status="running"],
+.badge[data-status="in_progress"],
+.badge[data-status="queued"] {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.badge[data-status="error"],
+.badge[data-status="failed"],
+.badge[data-status="cancelled"] {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.badge[data-status="awaiting_confirmation"] {
+    background: #cce5ff;
+    color: #004085;
+}
+
+/* Status bar */
+#status-bar {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+    padding: 0.4rem 0.8rem;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    font-size: 0.85em;
+    margin-bottom: 1.5rem;
+}
+
+#status-bar .status-item {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+#status-bar .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--pico-muted-color);
+}
+
+#status-bar .dot[data-ok="true"] { background: #28a745; }
+#status-bar .dot[data-ok="false"] { background: #dc3545; }
+
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--pico-muted-border-color);
+    margin-bottom: 1.5rem;
+}
+
+.tabs .tab {
+    padding: 0.6rem 1.2rem;
+    cursor: pointer;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    color: var(--pico-muted-color);
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+    font-size: 1em;
+}
+
+.tabs .tab:hover {
+    color: var(--pico-color);
+}
+
+.tabs .tab.active {
+    color: var(--pico-primary);
+    border-bottom-color: var(--pico-primary);
+}
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Messaging options (hidden when search-only) */
+#messaging-options.hidden { display: none; }
+
+/* Nav spacing */
+nav {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+}
+
+nav ul li a {
+    font-size: 0.9em;
+}
+
+/* Article cards */
+article {
+    margin-bottom: 1rem;
+}
+
+article header {
+    font-weight: 600;
+}
+
+/* Table tweaks */
+table {
+    font-size: 0.9em;
+}
+
+table td, table th {
+    padding: 0.5em 0.75em;
+}
+
+/* Candidate checkboxes in pipeline confirm */
+#candidate-list {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: 0.5rem;
+}
+
+#candidate-list label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    margin-bottom: 0;
+}
+
+#candidate-list label:last-child {
+    border-bottom: none;
+}
+
+#candidate-list .candidate-info {
+    flex: 1;
+    display: flex;
+    gap: 1rem;
+}
+
+#candidate-list .candidate-name {
+    font-weight: 600;
+    min-width: 80px;
+}
+
+#candidate-list .candidate-title {
+    color: var(--pico-muted-color);
+    flex: 1;
+}
+
+#candidate-list .candidate-company {
+    color: var(--pico-primary);
+}
+
+/* Pagination controls */
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.pagination-controls button {
+    width: auto;
+    margin: 0;
+}
+
+/* Progress bar animations */
+progress {
+    transition: value 0.3s ease;
+}
+
+/* Results summary */
+#results-summary .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+#results-summary .stat {
+    text-align: center;
+    padding: 0.5rem;
+    border-radius: var(--pico-border-radius);
+    background: var(--pico-card-background-color);
+}
+
+#results-summary .stat .value {
+    font-size: 1.5em;
+    font-weight: 700;
+}
+
+#results-summary .stat .label {
+    font-size: 0.8em;
+    color: var(--pico-muted-color);
+}
+
+/* Footer */
+footer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--pico-muted-border-color);
+    text-align: center;
+    color: var(--pico-muted-color);
+}

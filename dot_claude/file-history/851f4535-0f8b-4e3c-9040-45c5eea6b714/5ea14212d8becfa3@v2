@@ -1,0 +1,129 @@
+/**
+ * WebSocket client with auto-reconnect for Maimai Assistant.
+ */
+
+class MaimaiWS {
+    constructor(path, options = {}) {
+        this.path = path;
+        this.options = options;
+        this.ws = null;
+        this.reconnectDelay = 1000;
+        this.maxReconnectDelay = 30000;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = options.maxReconnect || 50;
+        this.closed = false;
+    }
+
+    connect() {
+        if (this.closed) return;
+
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const url = `${protocol}//${location.host}${this.path}`;
+
+        this.ws = new WebSocket(url);
+
+        this.ws.onopen = () => {
+            this.reconnectAttempts = 0;
+            this.reconnectDelay = 1000;
+            if (this.options.onOpen) this.options.onOpen();
+            this._updateStatus('connected');
+        };
+
+        this.ws.onmessage = (event) => {
+            if (event.data === 'pong') return;
+
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.event === 'keepalive') return;
+                if (this.options.onMessage) this.options.onMessage(msg);
+            } catch (e) {
+                console.warn('WS parse error:', e);
+            }
+        };
+
+        this.ws.onclose = () => {
+            this._updateStatus('disconnected');
+            if (!this.closed) this._reconnect();
+        };
+
+        this.ws.onerror = (err) => {
+            console.error('WS error:', err);
+        };
+    }
+
+    send(data) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(typeof data === 'string' ? data : JSON.stringify(data));
+        }
+    }
+
+    close() {
+        this.closed = true;
+        if (this.ws) this.ws.close();
+    }
+
+    _reconnect() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.warn('WS max reconnect attempts reached');
+            return;
+        }
+
+        this.reconnectAttempts++;
+        const delay = Math.min(
+            this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1),
+            this.maxReconnectDelay
+        );
+
+        setTimeout(() => this.connect(), delay);
+    }
+
+    _updateStatus(status) {
+        const el = document.getElementById('ws-status');
+        if (el) {
+            el.textContent = `WebSocket: ${status}`;
+        }
+    }
+}
+
+// Global WebSocket for dashboard updates
+let globalWS = null;
+
+function initGlobalWS() {
+    globalWS = new MaimaiWS('/ws/global', {
+        onMessage(msg) {
+            // Global event handler — can be overridden per page
+            if (window.onGlobalWSMessage) {
+                window.onGlobalWSMessage(msg);
+            }
+        },
+    });
+    globalWS.connect();
+}
+
+/**
+ * Connect a task-specific WebSocket.
+ * Returns the MaimaiWS instance. Options:
+ *   onEvent(msg)    — called for progress events
+ *   onComplete(msg) — called when task completes
+ *   onError(msg)    — called when task fails
+ */
+function connectTaskWS(taskId, options = {}) {
+    const ws = new MaimaiWS(`/ws/task/${taskId}`, {
+        onMessage(msg) {
+            if (msg.event === 'completed') {
+                if (options.onComplete) options.onComplete(msg);
+                ws.close();
+            } else if (msg.event === 'failed') {
+                if (options.onError) options.onError(msg);
+                ws.close();
+            } else {
+                if (options.onEvent) options.onEvent(msg);
+            }
+        },
+    });
+    ws.connect();
+    return ws;
+}
+
+// Auto-init global WS when DOM is ready
+document.addEventListener('DOMContentLoaded', initGlobalWS);

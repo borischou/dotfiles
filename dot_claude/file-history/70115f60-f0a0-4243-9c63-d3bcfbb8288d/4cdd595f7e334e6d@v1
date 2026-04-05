@@ -1,0 +1,48 @@
+# Maimai Assistant - Project Memory
+
+## Architecture
+- **Dual search paths**: search_center (Path A, existing) and enterprise (Path B, added Feb 2026)
+- Enterprise path opens a new tab via "招聘" button, uses inline chat (no separate chat page)
+- BrowserManager has multi-tab support: `wait_for_new_tab()`, `switch_to_primary_tab()`, `close_current_tab()`, `tab_count`
+- `SearchMode` enum in `src/services/pipeline.py`: `SEARCH_CENTER` | `ENTERPRISE`
+- Checkpoint saves/restores `mode` field for resume support
+
+## Key Patterns
+- `_extract_search_results` 的 JS 提取逻辑易受脉脉页面结构变化影响：name 正则需覆盖括号注释，`isSkippable()` 需随页面新增社交标签/活动标签更新
+- `browser.page` returns the active tab; all existing modules work unchanged
+- Enterprise search: opens new tab, extracts candidates, optionally keeps tab open for inline messaging
+- `keep_tab_open=True` parameter on `search_candidates_enterprise()` keeps enterprise tab for `send_message_batch_enterprise()`
+- Enterprise tab is closed between keyword searches to avoid tab accumulation (except the last keyword when messaging follows)
+- Always `switch_to_primary_tab()` before navigating to homepage to avoid destructively changing user's original tab
+
+## Config
+- `config/selectors.json` v1.2.0: has `enterprise` and `search_center` sections with real selectors from recorded browser actions
+- Enterprise selectors: `text='招聘'`, `text='添加关键词'`, `text='立即沟通'`, `text='发送后留在此页'`, etc.
+
+## CLI
+- `--mode/-m search_center|enterprise` on `search` and `pipeline` commands (default: search_center)
+- `--batch-pages` with enterprise mode warns user about infinite-scroll incompatibility
+- Resume flow reads mode from checkpoint params
+
+## 待修复遗留项（下次 review 时提醒用户）
+5 个跨多次审查的架构级问题，需独立 PR 重构：
+
+1. **批量发送重复代码**（Review #1-5 遗留）
+   - `src/modules/message.py` 中 `send_message_batch()` 和 `send_message_batch_enterprise()` 约 100 行重复逻辑
+   - 应提取为带回调的通用批量编排函数
+
+2. **循环依赖 message↔selector_discovery**（Review #1-5 遗留）
+   - `message.py` 和 `selector_discovery.py` 互相 deferred import
+   - 运行时正常但影响静态分析和可维护性，需提取公共模块解耦
+
+3. **测试覆盖率低**（Review #2-5 遗留）
+   - 仅 test_config + test_validators（13 个测试）
+   - scoring/delays/rate_limiter/checkpoint 等纯逻辑模块需补单元测试
+   - Web 层（routers/task_queue/progress）零测试，需集成测试
+
+4. **emit_progress 可靠性**（Review #3-5 遗留）
+   - fire-and-forget 无送达保证，长期应考虑 ACK 或缓冲机制
+
+5. **queue.current_task 竞态**（Review #3-5 遗留）
+   - pipeline confirm 端点通过 `queue.current_task` 访问任务，无同步保护
+   - 应改为通过 task_id 直接查找（`queue.get_task(task_id)`）而非依赖 current_task

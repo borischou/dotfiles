@@ -1,0 +1,500 @@
+   550→                    maimai_id=data.get('maimai_id', ''),
+   551→                    name=data.get('name', ''),
+   552→                    title=data.get('title', ''),
+   553→                    company=data.get('company', ''),
+   554→                    location=data.get('location', ''),
+   555→                    profile_url=data.get('profile_url', '')
+   556→                ))
+   557→
+   558→        # For candidates missing profile_url, try extracting from contactcard DOM
+   559→        missing_url = [c for c in candidates if not c.profile_url]
+   560→        if missing_url:
+   561→            logger.info(f"{len(missing_url)} candidates missing profile_url, searching contactcard DOM")
+   562→            for c in missing_url:
+   563→                try:
+   564→                    profile_url = await _click_avatar_for_profile_url(page, c.name, c.company)
+   565→                    if profile_url:
+   566→                        c.profile_url = profile_url
+   567→                except Exception as e:
+   568→                    logger.debug(f"Contactcard lookup failed for '{c.name}': {e}")
+   569→
+   570→        # Fallback: Strategy 1 - Find all profile links directly
+   571→        if not candidates:
+   572→            profile_links = await page.query_selector_all('a[href*="/contact/"], a[href*="/u/"], a[href*="egid="], a[href*="profile"]')
+   573→        else:
+   574→            profile_links = []
+   575→
+   576→        if profile_links and not candidates:
+   577→            logger.debug(f"Found {len(profile_links)} profile links")
+   578→
+   579→            seen_ids = set()
+   580→            for link in profile_links:
+   581→                try:
+   582→                    href = await link.get_attribute('href')
+   583→                    if not href:
+   584→                        continue
+   585→
+   586→                    # Extract maimai_id from URL
+   587→                    maimai_id = None
+   588→                    if '/contact/detail/' in href:
+   589→                        maimai_id = href.split('/contact/detail/')[-1].split('?')[0].split('/')[0]
+   590→                    elif '/u/' in href:
+   591→                        maimai_id = href.split('/u/')[-1].split('?')[0].split('/')[0]
+   592→
+   593→                    if not maimai_id or maimai_id in seen_ids:
+   594→                        continue
+   595→                    seen_ids.add(maimai_id)
+   596→
+   597→                    # Get name from link text
+   598→                    name = await link.inner_text()
+   599→                    name = name.strip()
+   600→                    if not name or len(name) > 50:  # Skip if no name or too long (probably not a name)
+   601→                        continue
+   602→
+   603→                    # Try to get parent container for more info
+   604→                    parent = await link.evaluate_handle('el => el.closest("div, li, article") || el.parentElement.parentElement')
+   605→
+   606→                    title = ""
+   607→                    company = ""
+   608→
+   609→                    if parent:
+   610→                        # Get all text content and try to parse
+   611→                        try:
+   612→                            full_text = await parent.inner_text()
+   613→                            lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+   614→
+   615→                            # Usually: name, then title/company info
+   616→                            for line in lines:
+   617→                                if line == name:
+   618→                                    continue
+   619→                                if '好友' in line or '关注' in line:
+   620→                                    continue
+   621→                                if not title and len(line) < 50:
+   622→                                    title = line
+   623→                                elif not company and len(line) < 50:
+   624→                                    company = line
+   625→                                    break
+   626→                        except Exception:
+   627→                            pass  # Best-effort text parsing; proceed with partial data
+   628→
+   629→                    profile_url = href if href.startswith('http') else f"https://maimai.cn{href}"
+   630→
+   631→                    candidates.append(CandidateBasic(
+   632→                        maimai_id=maimai_id,
+   633→                        name=name,
+   634→                        title=title,
+   635→                        company=company,
+   636→                        profile_url=profile_url
+   637→                    ))
+   638→
+   639→                except Exception as e:
+   640→                    logger.debug(f"Failed to extract from link: {e}")
+   641→                    continue
+   642→
+   643→        # Strategy 2: If no links found, try button-based detection
+   644→        if not candidates:
+   645→            logger.debug("Trying button-based detection")
+   646→            buttons = await page.query_selector_all('button:has-text("好友"), button:has-text("关注")')
+   647→
+   648→            for button in buttons:
+   649→                try:
+   650→                    parent = await button.evaluate_handle('el => el.closest("div, li, article")')
+   651→                    if not parent:
+   652→                        continue
+   653→
+   654→                    # Find link in parent
+   655→                    link = await parent.query_selector('a[href*="/contact"], a[href*="/u/"]')
+   656→                    if link:
+   657→                        href = await link.get_attribute('href')
+   658→                        name = await link.inner_text()
+   659→
+   660→                        maimai_id = None
+   661→                        if '/contact/detail/' in href:
+   662→                            maimai_id = href.split('/contact/detail/')[-1].split('?')[0]
+   663→                        elif '/u/' in href:
+   664→                            maimai_id = href.split('/u/')[-1].split('?')[0]
+   665→
+   666→                        if maimai_id and name:
+   667→                            candidates.append(CandidateBasic(
+   668→                                maimai_id=maimai_id,
+   669→                                name=name.strip(),
+   670→                                title="",
+   671→                                company="",
+   672→                                profile_url=href
+   673→                            ))
+   674→                except Exception:
+   675→                    continue
+   676→
+   677→        # Filter out premium placeholder profiles
+   678→        before_filter = len(candidates)
+   679→        candidates = [c for c in candidates if c.name not in PREMIUM_PLACEHOLDER_NAMES]
+   680→        filtered_count = before_filter - len(candidates)
+   681→        if filtered_count > 0:
+   682→            logger.info(f"Filtered out {filtered_count} premium placeholder profiles")
+   683→
+   684→        logger.info(f"Extracted {len(candidates)} candidates from page")
+   685→
+   686→    except Exception as e:
+   687→        logger.error(f"Error extracting search results: {e}")
+   688→        console.print(f"[yellow]Warning: Search result extraction failed: {e}[/yellow]")
+   689→
+   690→    return candidates
+   691→
+   692→
+   693→def _save_candidates_to_db(db_manager, candidates: List[CandidateBasic], source_search: str) -> None:
+   694→    """
+   695→    Save or update candidates in database.
+   696→
+   697→    Args:
+   698→        db_manager: Database manager instance
+   699→        candidates: List of candidates to save
+   700→        source_search: Search keywords that found these candidates
+   701→    """
+   702→    try:
+   703→        with db_manager.session_scope() as session:
+   704→            # Batch pre-fetch existing candidates to avoid N+1 queries
+   705→            maimai_ids = [c.maimai_id for c in candidates]
+   706→            existing_by_id = {
+   707→                row.maimai_id: row
+   708→                for row in session.query(Candidate).filter(
+   709→                    Candidate.maimai_id.in_(maimai_ids)
+   710→                ).all()
+   711→            }
+   712→
+   713→            # Also batch-fetch by name+company for dedup
+   714→            name_company_pairs = [(c.name, c.company) for c in candidates]
+   715→            from sqlalchemy import tuple_
+   716→            existing_by_name = {}
+   717→            if name_company_pairs:
+   718→                for row in session.query(Candidate).filter(
+   719→                    tuple_(Candidate.name, Candidate.company).in_(name_company_pairs)
+   720→                ).all():
+   721→                    existing_by_name[(row.name, row.company)] = row
+   722→
+   723→            for c in candidates:
+   724→                existing = existing_by_id.get(c.maimai_id)
+   725→                if not existing:
+   726→                    existing = existing_by_name.get((c.name, c.company))
+   727→
+   728→                if existing:
+   729→                    existing.name = c.name
+   730→                    existing.title = c.title
+   731→                    existing.company = c.company
+   732→                    existing.location = c.location
+   733→                    existing.profile_url = c.profile_url
+   734→                else:
+   735→                    candidate = Candidate(
+   736→                        maimai_id=c.maimai_id,
+   737→                        name=c.name,
+   738→                        title=c.title,
+   739→                        company=c.company,
+   740→                        location=c.location,
+   741→                        profile_url=c.profile_url,
+   742→                        source_search=source_search
+   743→                    )
+   744→                    session.add(candidate)
+   745→
+   746→            logger.debug(f"Saved {len(candidates)} candidates to database")
+   747→
+   748→    except Exception as e:
+   749→        logger.error(f"Failed to save candidates to database: {e}")
+   750→        raise
+   751→
+   752→
+   753→def _log_search_history(
+   754→    db_manager,
+   755→    keywords: str,
+   756→    company: Optional[tuple],
+   757→    location: Optional[str],
+   758→    pages: int,
+   759→    results_count: int
+   760→) -> None:
+   761→    """Log search to history table."""
+   762→    try:
+   763→        with db_manager.session_scope() as session:
+   764→            history = SearchHistory(
+   765→                criteria={
+   766→                    'keywords': keywords,
+   767→                    'company': list(company) if company else None,
+   768→                    'location': location,
+   769→                    'pages': pages
+   770→                },
+   771→                results_count=results_count
+   772→            )
+   773→            session.add(history)
+   774→    except Exception as e:
+   775→        logger.error(f"Failed to log search history: {e}")
+   776→
+   777→
+   778→async def _click_avatar_for_profile_url(page: Page, name: str, company: str) -> Optional[str]:
+   779→    """Try to extract profile URL for a candidate from the DOM contactcard pattern.
+   780→
+   781→    Searches the current page for a contactcard element whose parent card
+   782→    contains the candidate's name (and optionally company), then constructs
+   783→    the profile URL from the extracted user ID.
+   784→
+   785→    Args:
+   786→        page: Playwright page on the search results
+   787→        name: Candidate name to match
+   788→        company: Candidate company to help disambiguate
+   789→
+   790→    Returns:
+   791→        Profile URL string, or None if not found
+   792→    """
+   793→    try:
+   794→        user_id = await page.evaluate('''(args) => {
+   795→            const { name, company } = args;
+   796→            // Check contactcard_{numeric_id} ancestors
+   797→            const ccElements = document.querySelectorAll('[id^="contactcard_"]');
+   798→            for (const el of ccElements) {
+   799→                const text = el.textContent || '';
+   800→                if (!text.includes(name)) continue;
+   801→                if (company && !text.includes(company)) continue;
+   802→                const match = el.id.match(/^contactcard_(\\d+)$/);
+   803→                if (match) return match[1];
+   804→            }
+   805→            // Check member_entry_{numeric_id} descendants
+   806→            const meElements = document.querySelectorAll('[id^="member_entry_"]');
+   807→            for (const el of meElements) {
+   808→                // Walk up to find the card containing this member_entry
+   809→                let card = el.parentElement;
+   810→                for (let i = 0; i < 8 && card; i++) {
+   811→                    const text = card.textContent || '';
+   812→                    if (text.includes(name) && (!company || text.includes(company))) {
+   813→                        const match = el.id.match(/^member_entry_(\\d+)$/);
+   814→                        if (match) return match[1];
+   815→                    }
+   816→                    card = card.parentElement;
+   817→                }
+   818→            }
+   819→            return null;
+   820→        }''', {'name': name, 'company': company})
+   821→
+   822→        if user_id:
+   823→            profile_url = f"https://maimai.cn/contact/detail/{user_id}?dstu={user_id}"
+   824→            logger.info(f"Resolved profile_url for '{name}' via contactcard: {profile_url}")
+   825→            return profile_url
+   826→
+   827→        logger.debug(f"No contactcard found for '{name}'")
+   828→        return None
+   829→
+   830→    except Exception as e:
+   831→        logger.debug(f"_click_avatar_for_profile_url error for '{name}': {e}")
+   832→        return None
+   833→
+   834→
+   835→# ---------------------------------------------------------------------------
+   836→# Enterprise recruitment path (Path B)
+   837→# ---------------------------------------------------------------------------
+   838→
+   839→MAIMAI_HOME_URL = "https://maimai.cn"
+   840→ENTERPRISE_URL_MARKER = "ent/talents/discover"
+   841→
+   842→
+   843→async def search_candidates_enterprise(
+   844→    keywords: str,
+   845→    company: Optional[tuple] = None,
+   846→    pages: int = 1,
+   847→    browser: Optional[BrowserManager] = None,
+   848→    keep_tab_open: bool = False,
+   849→) -> List[CandidateBasic]:
+   850→    """Search for candidates via the enterprise recruitment path.
+   851→
+   852→    Flow:
+   853→    1. Switch to primary tab -> navigate to homepage -> click "招聘" tab (opens new tab)
+   854→    2. Wait for enterprise page to load
+   855→    3. Add keyword filter -> submit
+   856→    4. Optionally add company filter
+   857→    5. Extract candidates from enterprise card layout
+   858→    6. For additional pages, scroll to trigger infinite scroll
+   859→    7. Close enterprise tab unless keep_tab_open is True
+   860→
+   861→    Args:
+   862→        keywords: Search keywords
+   863→        company: Filter by company names (optional)
+   864→        pages: Number of scroll-pages to extract
+   865→        browser: Browser manager instance
+   866→        keep_tab_open: If True, leave enterprise tab open (for inline messaging)
+   867→
+   868→    Returns:
+   869→        List of CandidateBasic objects
+   870→    """
+   871→    validate_keywords(keywords)
+   872→
+   873→    if browser is None:
+   874→        browser = get_browser_manager()
+   875→
+   876→    config = get_config()
+   877→    rate_limiter = get_rate_limiter()
+   878→    db_manager = get_db_manager()
+   879→
+   880→    await ensure_logged_in(browser)
+   881→
+   882→    all_candidates: List[CandidateBasic] = []
+   883→    enterprise_tab_opened = False
+   884→
+   885→    with Progress(
+   886→        SpinnerColumn(),
+   887→        TextColumn("[progress.description]{task.description}"),
+   888→        console=console,
+   889→    ) as progress:
+   890→        task = progress.add_task("Opening enterprise recruitment...", total=None)
+   891→
+   892→        try:
+   893→            await async_check_rate_limit("search")
+   894→
+   895→            # Always start from the primary tab to avoid navigating user's open content
+   896→            browser.switch_to_primary_tab()
+   897→            page = browser.page
+   898→
+   899→            # Step 1: Navigate to homepage and click 招聘 tab
+   900→            await retry_navigation(page, MAIMAI_HOME_URL, wait_until="domcontentloaded")
+   901→            await async_random_delay("page_load")
+   902→
+   903→            sel = config.get_selector("enterprise.recruitment_tab")
+   904→            recruitment_tab = await page.wait_for_selector(sel, timeout=5000)
+   905→            if not recruitment_tab:
+   906→                raise SelectorNotFoundError(f"Could not find recruitment tab: {sel}")
+   907→
+   908→            # Click opens a new tab — use BrowserManager API
+   909→            await recruitment_tab.click()
+   910→            page = await browser.wait_for_new_tab(timeout=15000)
+   911→            enterprise_tab_opened = True
+   912→
+   913→            progress.update(task, description="Enterprise page loaded")
+   914→
+   915→            # Wait for the enterprise page URL
+   916→            try:
+   917→                await page.wait_for_url(
+   918→                    lambda url: ENTERPRISE_URL_MARKER in url,
+   919→                    timeout=15000,
+   920→                )
+   921→            except Exception:
+   922→                logger.warning(f"Enterprise URL marker not found, current URL: {page.url}")
+   923→
+   924→            await async_random_delay("action")
+   925→
+   926→            # Step 2: Add keyword
+   927→            progress.update(task, description=f"Adding keyword: {keywords}")
+   928→
+   929→            add_kw_sel = config.get_selector("enterprise.add_keyword_button")
+   930→            add_kw_btn = await page.wait_for_selector(add_kw_sel, timeout=5000)
+   931→            if add_kw_btn:
+   932→                await add_kw_btn.click()
+   933→                await async_random_delay("action")
+   934→
+   935→            kw_input_sel = config.get_selector("enterprise.keyword_input")
+   936→            await page.wait_for_selector(kw_input_sel, timeout=5000)
+   937→            await human_type(page, kw_input_sel, keywords)
+   938→            await async_random_delay("action")
+   939→
+   940→            kw_submit_sel = config.get_selector("enterprise.keyword_submit")
+   941→            submit_btn = await page.wait_for_selector(kw_submit_sel, timeout=3000)
+   942→            if submit_btn:
+   943→                await submit_btn.click()
+   944→                await async_random_delay("page_load")
+   945→
+   946→            # Step 3: Add company filter if specified
+   947→            if company:
+   948→                progress.update(task, description="Adding company filter...")
+   949→                add_co_sel = config.get_selector("enterprise.add_company_button")
+   950→                add_co_btn = await page.wait_for_selector(add_co_sel, timeout=5000)
+   951→                if add_co_btn:
+   952→                    await add_co_btn.click()
+   953→                    await async_random_delay("action")
+   954→
+   955→                co_input_sel = config.get_selector("enterprise.company_input")
+   956→                for co_name in company:
+   957→                    await page.wait_for_selector(co_input_sel, timeout=5000)
+   958→                    await human_type(page, co_input_sel, co_name)
+   959→                    await async_random_delay("action")
+   960→
+   961→                    # Click suggestion dropdown item
+   962→                    try:
+   963→                        suggestion = await page.wait_for_selector(
+   964→                            f"text='{co_name}'", timeout=3000
+   965→                        )
+   966→                        if suggestion:
+   967→                            await suggestion.click()
+   968→                            await async_random_delay("action")
+   969→                    except Exception:
+   970→                        logger.debug(f"Company suggestion not found for: {co_name}")
+   971→
+   972→            # Step 4: Wait for results and extract
+   973→            await page.wait_for_timeout(3000)
+   974→            await check_captcha(page, report_to_rate_limiter=True)
+   975→
+   976→            for page_num in range(1, pages + 1):
+   977→                progress.update(task, description=f"Extracting page {page_num}/{pages}...")
+   978→
+   979→                candidates = await _extract_enterprise_results(page)
+   980→
+   981→                if not candidates:
+   982→                    logger.info(f"No enterprise results on page {page_num}")
+   983→                    break
+   984→
+   985→                # Filter non-R&D roles
+   986→                before_filter = len(candidates)
+   987→                candidates = [c for c in candidates if not _is_non_rd_title(c.title)]
+   988→                filtered = before_filter - len(candidates)
+   989→                if filtered > 0:
+   990→                    logger.info(f"Filtered out {filtered} non-R&D candidates")
+   991→
+   992→                all_candidates.extend(candidates)
+   993→                progress.update(task, description=f"Page {page_num}: Found {len(candidates)} candidates")
+   994→
+   995→                rate_limiter.log_action("search", {
+   996→                    "keywords": keywords,
+   997→                    "page": page_num,
+   998→                    "results": len(candidates),
+   999→                    "mode": "enterprise",
+  1000→                })
+  1001→
+  1002→                try:
+  1003→                    _save_candidates_to_db(db_manager, candidates, keywords)
+  1004→                except Exception as e:
+  1005→                    console.print(f"[yellow]Warning: Failed to save candidates to DB: {e}[/yellow]")
+  1006→
+  1007→                # Scroll for next page (infinite scroll)
+  1008→                if page_num < pages:
+  1009→                    await human_scroll(page, "down", distance=800)
+  1010→                    await async_random_delay("page_load")
+  1011→                    await page.wait_for_timeout(2000)
+  1012→
+  1013→        except Exception as e:
+  1014→            logger.error(f"Enterprise search error: {e}")
+  1015→            await browser.screenshot("enterprise_search_error")
+  1016→            progress.update(task, description=f"Error: {str(e)[:40]}")
+  1017→        finally:
+  1018→            # Close the enterprise tab unless caller wants it open for inline messaging
+  1019→            if enterprise_tab_opened and not keep_tab_open:
+  1020→                try:
+  1021→                    await browser.close_current_tab()
+  1022→                except Exception:
+  1023→                    pass  # Best-effort cleanup; tab may already be closed
+  1024→
+  1025→    _log_search_history(db_manager, keywords, company, None, pages, len(all_candidates))
+  1026→
+  1027→    console.print(f"[green]Enterprise search complete. Found {len(all_candidates)} candidates.[/green]")
+  1028→    return all_candidates
+  1029→
+  1030→
+  1031→async def _extract_enterprise_results(page: Page) -> List[CandidateBasic]:
+  1032→    """Extract candidate information from enterprise recruitment results page.
+  1033→
+  1034→    The enterprise UI has a different card layout from search_center.
+  1035→    Uses JS-based extraction tailored to the enterprise talent cards.
+  1036→
+  1037→    Args:
+  1038→        page: Playwright page instance on the enterprise results page
+  1039→
+  1040→    Returns:
+  1041→        List of CandidateBasic objects
+  1042→    """
+  1043→    candidates = []
+  1044→
+  1045→    try:
+  1046→        await page.wait_for_load_state("networkidle", timeout=10000)
+  1047→    except Exception:
+  1048→        pass  # Continue even if networkidle times out
+  1049→

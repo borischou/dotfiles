@@ -1,0 +1,840 @@
+diff --git a/requirements.txt b/requirements.txt
+index 7873ca4..43eaab7 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -9,10 +9,7 @@ pandas==2.2.0
+ openpyxl==3.1.2
+ sqlalchemy==2.0.25
+ loguru==0.7.2
+-pydantic==2.5.3
+ tenacity==8.2.3
+-python-dotenv==1.0.0
+-faker==22.0.0
+ httpx==0.26.0
+ jieba>=0.42.1
+ 
+diff --git a/scripts/recorder.py b/scripts/recorder.py
+index c0b59a9..ffa5d81 100644
+--- a/scripts/recorder.py
++++ b/scripts/recorder.py
+@@ -200,10 +200,10 @@ class ActionRecorder:
+             "",
+             "",
+             "async def replay(cdp_url='http://localhost:9222'):",
+-            "    async with async_playwright() as p:",
+-            "        browser = await p.chromium.connect_over_cdp(cdp_url)",
+-            "        context = browser.contexts[0]",
+-            "        page = context.pages[0] if context.pages else await context.new_page()",
++            "    p = await async_playwright().start()",
++            "    browser = await p.chromium.connect_over_cdp(cdp_url)",
++            "    context = browser.contexts[0]",
++            "    page = context.pages[0] if context.pages else await context.new_page()",
+             "",
+         ]
+ 
+@@ -302,7 +302,7 @@ class ActionRecorder:
+ 
+             # Save
+             self._save()
+-            browser.close
++            await browser.close()
+ 
+     async def _on_frame_navigated(self, page, frame):
+         """Re-inject recorder after navigation."""
+diff --git a/scripts/setup_db.py b/scripts/setup_db.py
+index d2b8fe3..406dc89 100644
+--- a/scripts/setup_db.py
++++ b/scripts/setup_db.py
+@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
+ 
+ from src.utils.config import get_config
+ from src.utils.logger import setup_logger
++from sqlalchemy import text
+ from src.models.database import get_db_manager
+ from loguru import logger
+ 
+@@ -31,7 +32,7 @@ def main():
+         db_manager = get_db_manager()
+         with db_manager.engine.connect() as conn:
+             result = conn.execute(
+-                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
++                text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+             )
+             tables = [row[0] for row in result]
+ 
+diff --git a/src/cli/main.py b/src/cli/main.py
+index 0e4ea04..8d51e2c 100644
+--- a/src/cli/main.py
++++ b/src/cli/main.py
+@@ -14,13 +14,9 @@ Provides Click-based commands for Boss直聘 recruitment automation:
+ 
+ import sys
+ import asyncio
+-from pathlib import Path
+-from typing import Optional, Tuple
+-
+ import click
+ from rich.console import Console
+ from rich.table import Table
+-from rich.panel import Panel
+ 
+ console = Console()
+ 
+diff --git a/src/core/browser.py b/src/core/browser.py
+index 2be556a..fd278b3 100644
+--- a/src/core/browser.py
++++ b/src/core/browser.py
+@@ -6,6 +6,7 @@ for workflows that open new tabs.
+ """
+ 
+ import asyncio
++import threading
+ from pathlib import Path
+ from typing import List, Optional
+ from datetime import datetime
+@@ -28,13 +29,15 @@ class BrowserManager:
+     """
+ 
+     _instance: Optional['BrowserManager'] = None
+-    _lock: asyncio.Lock = None
++    _lock: Optional[asyncio.Lock] = None
++    _init_lock: threading.Lock = threading.Lock()
+ 
+     def __new__(cls, **kwargs):
+-        if cls._instance is None:
+-            cls._instance = super().__new__(cls)
+-            cls._instance._initialized = False
+-        return cls._instance
++        with cls._init_lock:
++            if cls._instance is None:
++                cls._instance = super().__new__(cls)
++                cls._instance._initialized = False
++            return cls._instance
+ 
+     def __init__(
+         self,
+@@ -74,7 +77,13 @@ class BrowserManager:
+     @classmethod
+     def _ensure_lock(cls):
+         """Lazily create the asyncio.Lock inside a running event loop."""
+-        if cls._lock is None:
++        # Always recreate the lock for the current event loop to avoid
++        # "attached to a different event loop" errors
++        try:
++            loop = asyncio.get_running_loop()
++        except RuntimeError:
++            loop = None
++        if cls._lock is None or (loop and hasattr(cls._lock, '_loop') and getattr(cls._lock, '_loop', None) is not loop):
+             cls._lock = asyncio.Lock()
+ 
+     def set_cdp_endpoint(self, endpoint: str) -> None:
+diff --git a/src/models/database.py b/src/models/database.py
+index ea5261f..100760b 100644
+--- a/src/models/database.py
++++ b/src/models/database.py
+@@ -9,8 +9,7 @@ from sqlalchemy import (
+     Column, Integer, String, Text, DateTime, JSON,
+     ForeignKey, create_engine, Index, CheckConstraint
+ )
+-from sqlalchemy.ext.declarative import declarative_base
+-from sqlalchemy.orm import sessionmaker, relationship
++from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+ from sqlalchemy.pool import StaticPool
+ from loguru import logger
+ 
+@@ -170,3 +169,9 @@ def get_db_manager() -> DatabaseManager:
+     if _db_manager is None:
+         _db_manager = DatabaseManager()
+     return _db_manager
++
++
++def reset_db_manager() -> None:
++    """Reset global database manager (for testing)."""
++    global _db_manager
++    _db_manager = None
+diff --git a/src/modules/export.py b/src/modules/export.py
+index 4ebb4d3..6cf5093 100644
+--- a/src/modules/export.py
++++ b/src/modules/export.py
+@@ -111,16 +111,43 @@ def _get_candidates_data(db_manager, include_messages: bool) -> List[Dict[str, A
+             skills = candidate.skills or []
+             record['skills'] = ', '.join(skills) if skills else ''
+ 
+-            # Get message info if requested
+-            if include_messages:
+-                messages = session.query(Message).filter_by(
+-                    candidate_boss_id=candidate.boss_id
+-                ).order_by(Message.created_at.desc()).all()
+-
+-                record['message_count'] = len(messages)
++            data.append(record)
+ 
+-                if messages:
+-                    latest_msg = messages[0]
++        # Batch-fetch message info to avoid N+1 queries
++        if include_messages and data:
++            from sqlalchemy import func
++
++            boss_ids = [r['boss_id'] for r in data]
++            # Get message counts and latest message per candidate in bulk
++            msg_counts = {}
++            latest_msgs = {}
++
++            # Count messages per candidate
++            count_rows = session.query(
++                Message.candidate_boss_id,
++                func.count(Message.id).label('cnt')
++            ).filter(
++                Message.candidate_boss_id.in_(boss_ids)
++            ).group_by(Message.candidate_boss_id).all()
++
++            for row in count_rows:
++                msg_counts[row.candidate_boss_id] = row.cnt
++
++            # Get latest message per candidate using a subquery
++            from sqlalchemy import desc
++            all_msgs = session.query(Message).filter(
++                Message.candidate_boss_id.in_(boss_ids)
++            ).order_by(Message.candidate_boss_id, desc(Message.created_at)).all()
++
++            for msg in all_msgs:
++                if msg.candidate_boss_id not in latest_msgs:
++                    latest_msgs[msg.candidate_boss_id] = msg
++
++            for record in data:
++                bid = record['boss_id']
++                record['message_count'] = msg_counts.get(bid, 0)
++                latest_msg = latest_msgs.get(bid)
++                if latest_msg:
+                     record['last_message_status'] = latest_msg.status
+                     record['last_message_date'] = latest_msg.sent_at or latest_msg.created_at
+                     record['last_message_template'] = latest_msg.template_name
+@@ -129,8 +156,6 @@ def _get_candidates_data(db_manager, include_messages: bool) -> List[Dict[str, A
+                     record['last_message_date'] = None
+                     record['last_message_template'] = ''
+ 
+-            data.append(record)
+-
+         return data
+ 
+ 
+diff --git a/src/modules/message.py b/src/modules/message.py
+index ea95d0b..452cc57 100644
+--- a/src/modules/message.py
++++ b/src/modules/message.py
+@@ -18,7 +18,6 @@ Key differences from Maimai:
+ - Main page URL: /web/chat/search
+ """
+ 
+-import asyncio
+ from datetime import datetime, timezone
+ from typing import Dict, List, Optional
+ 
+@@ -26,12 +25,10 @@ from patchright.async_api import Page
+ from loguru import logger
+ from rich.console import Console
+ from rich.panel import Panel
+-from rich.table import Table
+ 
+ import questionary
+ 
+ from src.core.browser import BrowserManager, get_browser_manager
+-from src.core.anti_detection import human_click, human_type, human_scroll
+ from src.utils.config import get_config
+ from src.utils.delays import async_random_delay
+ from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+@@ -39,7 +36,6 @@ from src.utils.captcha import check_captcha
+ from src.utils.validators import validate_template_variables
+ from src.models.database import Candidate, Message, get_db_manager
+ from src.exceptions.errors import (
+-    ExtractionError,
+     BrowserError,
+     PermanentFailureError,
+     SelectorNotFoundError,
+@@ -52,6 +48,9 @@ def render_template(template: Dict, variables: Dict[str, str]) -> str:
+     """
+     Render a message template with variable substitution.
+ 
++    Uses a single-pass approach to avoid recursive replacement issues
++    (e.g., variable values containing {other_var} patterns).
++
+     Args:
+         template: Template dict with 'content' and 'variables' keys
+         variables: Variable name-value pairs
+@@ -59,9 +58,17 @@ def render_template(template: Dict, variables: Dict[str, str]) -> str:
+     Returns:
+         Rendered message string
+     """
++    import re
++
+     content = template['content']
+-    for var_name, var_value in variables.items():
+-        content = content.replace(f"{{{var_name}}}", str(var_value))
++
++    def replacer(match):
++        var_name = match.group(1)
++        if var_name in variables:
++            return str(variables[var_name])
++        return match.group(0)  # Keep original if no matching variable
++
++    content = re.sub(r'\{(\w+)\}', replacer, content)
+     return content
+ 
+ 
+@@ -281,6 +288,7 @@ async def send_message_batch(
+                     stats['sent'] += 1
+                     console.print(f"  [green]Sent![/green]")
+                 else:
++                    _save_message_to_db(boss_id, template_name, message_content, 'failed', db_manager)
+                     stats['failed'] += 1
+                     console.print(f"  [red]Failed to open chat[/red]")
+ 
+@@ -441,8 +449,10 @@ async def _type_and_send_message(page: Page, message: str) -> None:
+     await input_element.click()
+     await page.wait_for_timeout(300)
+ 
+-    # Clear any existing content
+-    await page.keyboard.press("Control+a")
++    # Clear any existing content (use Meta+a on macOS, Control+a elsewhere)
++    import sys
++    select_all_key = "Meta+a" if sys.platform == "darwin" else "Control+a"
++    await page.keyboard.press(select_all_key)
+     await page.keyboard.press("Backspace")
+     await page.wait_for_timeout(200)
+ 
+diff --git a/src/modules/profile.py b/src/modules/profile.py
+index aae3446..231e494 100644
+--- a/src/modules/profile.py
++++ b/src/modules/profile.py
+@@ -6,17 +6,14 @@ not as a separate page. The extraction JS also supports standalone profile
+ pages as a fallback.
+ """
+ 
+-import asyncio
+-from typing import Optional, Dict, Any, List
++from typing import Optional, Dict, Any
+ 
+ from patchright.async_api import Page
+ from loguru import logger
+ from rich.console import Console
+ from rich.panel import Panel
+-from rich.table import Table
+ 
+ from src.core.browser import BrowserManager, get_browser_manager
+-from src.utils.config import get_config
+ from src.utils.delays import async_random_delay
+ from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+ from src.utils.captcha import check_captcha
+@@ -191,7 +188,6 @@ async def extract_profile(
+     if not page:
+         page = await browser.start()
+ 
+-    config = get_config()
+     rate_limiter = get_rate_limiter()
+     db_manager = get_db_manager()
+ 
+diff --git a/src/modules/search.py b/src/modules/search.py
+index d05c79a..13669c1 100644
+--- a/src/modules/search.py
++++ b/src/modules/search.py
+@@ -10,9 +10,9 @@ CSS selectors for better reliability against page structure changes.
+ 
+ import asyncio
+ import hashlib
+-import re
+-from dataclasses import dataclass, field
++from dataclasses import dataclass
+ from typing import List, Optional, Set
++from urllib.parse import urlencode
+ 
+ from patchright.async_api import Page
+ from loguru import logger
+@@ -21,13 +21,10 @@ from rich.table import Table
+ 
+ from src.core.browser import BrowserManager, get_browser_manager
+ from src.core.anti_detection import human_scroll
+-from src.utils.config import get_config
+ from src.utils.delays import async_random_delay
+ from src.utils.rate_limiter import get_rate_limiter, async_check_rate_limit
+ from src.utils.captcha import check_captcha
+ from src.models.database import Candidate, SearchHistory, get_db_manager
+-from src.exceptions.errors import ExtractionError, BrowserError
+-
+ console = Console()
+ 
+ 
+@@ -71,9 +68,13 @@ def _is_non_rd_role(title: str) -> bool:
+ 
+ 
+ def _generate_boss_id(name: str, company: str) -> str:
+-    """Generate a fallback Boss ID from name + company hash."""
++    """Generate a fallback Boss ID from name + company hash.
++
++    Uses SHA-256 with 20 hex chars to reduce collision probability
++    compared to MD5 with 12 chars.
++    """
+     raw = f"{name}_{company}"
+-    h = hashlib.md5(raw.encode()).hexdigest()[:12]
++    h = hashlib.sha256(raw.encode()).hexdigest()[:20]
+     return f"zp_{h}"
+ 
+ 
+@@ -273,7 +274,6 @@ async def search_candidates(
+     if not page:
+         page = await browser.start()
+ 
+-    config = get_config()
+     rate_limiter = get_rate_limiter()
+     db_manager = get_db_manager()
+ 
+@@ -410,27 +410,26 @@ def _build_search_url(
+     salary: Optional[str] = None,
+ ) -> str:
+     """Build Boss直聘 search URL with query parameters."""
+-    # Base URL for Boss直聘 talent search
+     base_url = "https://www.zhipin.com/web/chat/search"
+ 
+-    params = [f"query={keyword}"]
++    params = {"query": keyword}
+ 
+     if location:
+-        params.append(f"city={location}")
++        params["city"] = location
+ 
+     if page > 1:
+-        params.append(f"page={page}")
++        params["page"] = str(page)
+ 
+     if experience:
+-        params.append(f"experience={experience}")
++        params["experience"] = experience
+ 
+     if education:
+-        params.append(f"degree={education}")
++        params["degree"] = education
+ 
+     if salary:
+-        params.append(f"salary={salary}")
++        params["salary"] = salary
+ 
+-    url = f"{base_url}?{'&'.join(params)}"
++    url = f"{base_url}?{urlencode(params)}"
+     return url
+ 
+ 
+@@ -515,10 +514,21 @@ def _save_candidates_to_db(
+     source = ', '.join(keywords)
+ 
+     with db_manager.session_scope() as session:
++        # Batch-fetch existing candidates to avoid N+1 queries
++        boss_ids = [c.boss_id for c in candidates]
++        existing_map = {}
++        # Query in chunks of 500 to avoid SQLite variable limit
++        for i in range(0, len(boss_ids), 500):
++            chunk = boss_ids[i:i + 500]
++            rows = session.query(Candidate).filter(
++                Candidate.boss_id.in_(chunk)
++            ).all()
++            for row in rows:
++                existing_map[row.boss_id] = row
++
+         for c in candidates:
+-            existing = session.query(Candidate).filter_by(boss_id=c.boss_id).first()
++            existing = existing_map.get(c.boss_id)
+             if existing:
+-                # Update existing candidate
+                 existing.name = c.name or existing.name
+                 existing.title = c.title or existing.title
+                 existing.company = c.company or existing.company
+@@ -530,7 +540,6 @@ def _save_candidates_to_db(
+                 if source and source not in (existing.source_search or ''):
+                     existing.source_search = f"{existing.source_search or ''}, {source}".strip(', ')
+             else:
+-                # Insert new candidate
+                 new_candidate = Candidate(
+                     boss_id=c.boss_id,
+                     name=c.name,
+diff --git a/src/services/pipeline.py b/src/services/pipeline.py
+index 51768e1..115af50 100644
+--- a/src/services/pipeline.py
++++ b/src/services/pipeline.py
+@@ -6,9 +6,6 @@ Search candidates → Score → Confirm → Batch send messages
+ Supports checkpoint-based resume for interrupted pipelines.
+ """
+ 
+-import asyncio
+-from datetime import datetime
+-from pathlib import Path
+ from typing import Any, Dict, List, Optional, Set
+ 
+ from loguru import logger
+@@ -18,12 +15,11 @@ from rich.table import Table
+ 
+ from src.core.browser import BrowserManager, get_browser_manager
+ from src.modules.search import search_candidates, CandidateBasic
+-from src.modules.message import send_message_batch, render_template
++from src.modules.message import send_message_batch
+ from src.utils.config import get_config
+ from src.utils.scoring import sort_candidates_by_score
+ from src.utils.checkpoint import CheckpointManager
+ from src.utils.delays import reset_session
+-from src.models.database import get_db_manager
+ 
+ console = Console()
+ 
+@@ -310,14 +306,29 @@ async def run_pipeline(
+     if resume:
+         checkpoint = CheckpointManager.load_latest()
+         if checkpoint:
+-            console.print(Panel(
+-                checkpoint.summary,
+-                title="Resuming Pipeline",
+-                border_style="yellow"
+-            ))
+-            start_page = checkpoint.completed_pages + 1
+-            sent_ids = checkpoint.sent_ids
+-            seen_ids = checkpoint.seen_ids
++            # Validate that checkpoint parameters match current run
++            cp_params = checkpoint.params
++            cp_keywords = tuple(cp_params.get('keywords', []))
++            cp_template = cp_params.get('template', '')
++            if cp_keywords != keywords or cp_template != template_name:
++                console.print(Panel(
++                    f"[yellow]Checkpoint mismatch:[/yellow]\n"
++                    f"  Checkpoint: keywords={cp_keywords}, template={cp_template}\n"
++                    f"  Current:    keywords={keywords}, template={template_name}\n"
++                    f"[bold]Starting fresh instead of resuming.[/bold]",
++                    title="Checkpoint Mismatch",
++                    border_style="red"
++                ))
++                checkpoint = None
++            else:
++                console.print(Panel(
++                    checkpoint.summary,
++                    title="Resuming Pipeline",
++                    border_style="yellow"
++                ))
++                start_page = checkpoint.completed_pages + 1
++                sent_ids = checkpoint.sent_ids
++                seen_ids = checkpoint.seen_ids
+         else:
+             console.print("[yellow]No checkpoint found, starting fresh.[/yellow]")
+ 
+@@ -388,10 +399,12 @@ async def run_pipeline(
+             for key in total_stats:
+                 total_stats[key] += batch_stats.get(key, 0)
+ 
+-            # Update sent IDs
++            # Track processed candidate IDs for checkpoint
++            sent_id_set = set(sent_ids)
+             for c in batch_candidates:
+-                if c.boss_id not in [s for s in sent_ids]:
++                if c.boss_id not in sent_id_set:
+                     sent_ids.append(c.boss_id)
++                    sent_id_set.add(c.boss_id)
+ 
+             # Save checkpoint
+             checkpoint.save(
+@@ -457,76 +470,3 @@ async def run_pipeline(
+         'candidates_found': len(all_candidates),
+         **total_stats,
+     }
+-
+-
+-def generate_pipeline_report(
+-    candidates: List[CandidateBasic],
+-    stats: Dict[str, int],
+-    keywords: tuple,
+-    output_path: Optional[str] = None,
+-) -> str:
+-    """
+-    Generate an Excel report for the pipeline run.
+-
+-    Args:
+-        candidates: List of candidates found
+-        stats: Send statistics
+-        keywords: Search keywords
+-        output_path: Output file path
+-
+-    Returns:
+-        Path to the report file
+-    """
+-    from openpyxl import Workbook
+-    from openpyxl.styles import Font, PatternFill
+-
+-    if output_path is None:
+-        export_dir = Path("data/exports")
+-        export_dir.mkdir(parents=True, exist_ok=True)
+-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+-        output_path = str(export_dir / f"pipeline_report_{timestamp}.xlsx")
+-
+-    wb = Workbook()
+-
+-    # Overview sheet
+-    ws_overview = wb.active
+-    ws_overview.title = "Overview"
+-    ws_overview.append(["Pipeline Report"])
+-    ws_overview.append(["Keywords", ", ".join(keywords)])
+-    ws_overview.append(["Candidates Found", len(candidates)])
+-    ws_overview.append(["Messages Sent", stats.get('sent', 0)])
+-    ws_overview.append(["Failed", stats.get('failed', 0)])
+-    ws_overview.append(["Skipped", stats.get('skipped', 0)])
+-    ws_overview.append(["Generated At", datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
+-
+-    # Results sheet
+-    ws_results = wb.create_sheet("Candidates")
+-    headers = ["Boss ID", "Name", "Title", "Company", "Location",
+-               "Salary Expect", "Experience", "Education", "Score"]
+-    ws_results.append(headers)
+-
+-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+-    header_font = Font(bold=True, color="FFFFFF")
+-    for cell in ws_results[1]:
+-        cell.fill = header_fill
+-        cell.font = header_font
+-
+-    for c in candidates:
+-        score = getattr(c, '_score', 0)
+-        ws_results.append([
+-            c.boss_id,
+-            c.name,
+-            c.title,
+-            c.company,
+-            c.location or "",
+-            c.salary_expect or "",
+-            c.work_years or "",
+-            c.education_level or "",
+-            score,
+-        ])
+-
+-    wb.save(output_path)
+-    logger.info(f"Pipeline report saved to: {output_path}")
+-    console.print(f"[green]Report saved: {output_path}[/green]")
+-
+-    return output_path
+diff --git a/src/utils/captcha.py b/src/utils/captcha.py
+index c5ba708..328bf66 100644
+--- a/src/utils/captcha.py
++++ b/src/utils/captcha.py
+@@ -4,6 +4,7 @@ Detects captcha elements on page and pauses for manual resolution.
+ Boss直聘 may use Geetest slider captcha or similar mechanisms.
+ """
+ 
++import asyncio
+ import sys
+ 
+ from patchright.async_api import Page
+@@ -24,6 +25,12 @@ CAPTCHA_SELECTORS = [
+ ]
+ 
+ 
++async def _async_input() -> str:
++    """Read a line from stdin without blocking the event loop."""
++    loop = asyncio.get_running_loop()
++    return await loop.run_in_executor(None, sys.stdin.readline)
++
++
+ async def check_captcha(page: Page, report_to_rate_limiter: bool = False) -> None:
+     """Detect captcha elements on page and pause for manual resolution."""
+     for selector in CAPTCHA_SELECTORS:
+@@ -37,7 +44,7 @@ async def check_captcha(page: Page, report_to_rate_limiter: bool = False) -> Non
+ 
+                 console.print("[bold red]Captcha detected! Please solve it in the browser window.[/bold red]")
+                 console.print("[dim]Press Enter here after solving the captcha...[/dim]")
+-                sys.stdin.readline()
++                await _async_input()
+                 await page.wait_for_timeout(2000)
+                 return
+         except Exception:
+diff --git a/src/utils/checkpoint.py b/src/utils/checkpoint.py
+index 799bbe9..48413aa 100644
+--- a/src/utils/checkpoint.py
++++ b/src/utils/checkpoint.py
+@@ -3,7 +3,7 @@
+ import json
+ import os
+ import tempfile
+-from datetime import datetime
++from datetime import datetime, timezone
+ from pathlib import Path
+ from typing import Any, Dict, List, Optional, Set
+ 
+@@ -22,7 +22,7 @@ class CheckpointManager:
+         if checkpoint_id:
+             self.checkpoint_path = CHECKPOINT_DIR / f"{checkpoint_id}.json"
+         else:
+-            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
++            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+             self.checkpoint_path = CHECKPOINT_DIR / f"pipeline_{ts}.json"
+ 
+         self._data: Dict[str, Any] = {}
+@@ -46,8 +46,8 @@ class CheckpointManager:
+         dry_run: bool = False,
+     ) -> None:
+         self._data = {
+-            "created_at": self._data.get("created_at", datetime.utcnow().isoformat()),
+-            "updated_at": datetime.utcnow().isoformat(),
++            "created_at": self._data.get("created_at", datetime.now(timezone.utc).isoformat()),
++            "updated_at": datetime.now(timezone.utc).isoformat(),
+             "params": {
+                 "keywords": list(keywords),
+                 "template": template,
+diff --git a/src/utils/config.py b/src/utils/config.py
+index 8e9625c..7e7c039 100644
+--- a/src/utils/config.py
++++ b/src/utils/config.py
+@@ -12,7 +12,10 @@ from src.exceptions.errors import ConfigurationError
+ class Config:
+     """Configuration manager for Boss Assistant."""
+ 
+-    def __init__(self, config_dir: str = "config"):
++    def __init__(self, config_dir: str = None):
++        if config_dir is None:
++            # Use project root (where this source file lives) to find config/
++            config_dir = str(Path(__file__).resolve().parent.parent.parent / "config")
+         self.config_dir = Path(config_dir)
+         self._settings: Dict[str, Any] = {}
+         self._selectors: Dict[str, Any] = {}
+@@ -85,3 +88,9 @@ def get_config() -> Config:
+     if _config_instance is None:
+         _config_instance = Config()
+     return _config_instance
++
++
++def reset_config() -> None:
++    """Reset global config instance (for testing)."""
++    global _config_instance
++    _config_instance = None
+diff --git a/src/utils/delays.py b/src/utils/delays.py
+index c7d8f87..9bc6370 100644
+--- a/src/utils/delays.py
++++ b/src/utils/delays.py
+@@ -99,9 +99,3 @@ def get_random_delay(delay_type: str = 'action') -> float:
+ async def async_random_delay(delay_type: str = 'action'):
+     delay = get_random_delay(delay_type)
+     await asyncio.sleep(delay)
+-
+-
+-def get_retry_delay(attempt: int, base_delay: float = 1.0, max_delay: float = 60.0) -> float:
+-    delay = min(base_delay * (2 ** attempt), max_delay)
+-    jitter = delay * random.uniform(-0.25, 0.25)
+-    return max(0, delay + jitter)
+diff --git a/src/utils/rate_limiter.py b/src/utils/rate_limiter.py
+index f2c1593..287c0e9 100644
+--- a/src/utils/rate_limiter.py
++++ b/src/utils/rate_limiter.py
+@@ -1,7 +1,7 @@
+ """Rate limiter for preventing account bans."""
+ 
+ import asyncio
+-from datetime import datetime, timedelta
++from datetime import datetime, timedelta, timezone
+ from typing import Tuple, Optional
+ 
+ from loguru import logger
+@@ -29,7 +29,7 @@ class RateLimiter:
+         self._pruned: bool = False
+ 
+     def report_captcha(self) -> None:
+-        now = datetime.utcnow()
++        now = datetime.now(timezone.utc)
+         self._captcha_timestamps.append(now)
+         cutoff = now - timedelta(minutes=30)
+         self._captcha_timestamps = [t for t in self._captcha_timestamps if t >= cutoff]
+@@ -56,7 +56,7 @@ class RateLimiter:
+             )
+ 
+     def _refresh_throttle(self) -> None:
+-        cutoff = datetime.utcnow() - timedelta(minutes=30)
++        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+         self._captcha_timestamps = [t for t in self._captcha_timestamps if t >= cutoff]
+         self._error_timestamps = [t for t in self._error_timestamps if t >= cutoff]
+         self._update_throttle_factor()
+@@ -112,7 +112,7 @@ class RateLimiter:
+         self._refresh_throttle()
+         per_hour, per_day, min_interval = self._get_limits(action_type)
+ 
+-        now = datetime.utcnow()
++        now = datetime.now(timezone.utc)
+         one_hour_ago = now - timedelta(hours=1)
+         one_day_ago = now - timedelta(days=1)
+ 
+@@ -175,14 +175,14 @@ class RateLimiter:
+         with self.db_manager.session_scope() as session:
+             action_log = ActionLog(
+                 action_type=action_type,
+-                timestamp=datetime.utcnow(),
++                timestamp=datetime.now(timezone.utc),
+                 details=details or {}
+             )
+             session.add(action_log)
+         logger.debug(f"Logged action: {action_type}")
+ 
+     def prune_old_entries(self, retention_hours: int = 48) -> int:
+-        cutoff = datetime.utcnow() - timedelta(hours=retention_hours)
++        cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
+         try:
+             with self.db_manager.session_scope() as session:
+                 count = session.query(ActionLog).filter(
+@@ -197,7 +197,7 @@ class RateLimiter:
+     def get_quota_status(self, action_type: str) -> dict:
+         per_hour, per_day, _ = self._get_limits(action_type)
+ 
+-        now = datetime.utcnow()
++        now = datetime.now(timezone.utc)
+         one_hour_ago = now - timedelta(hours=1)
+         one_day_ago = now - timedelta(days=1)
+ 
+@@ -219,7 +219,7 @@ class RateLimiter:
+         }
+ 
+ 
+-async def async_check_rate_limit(action_type: str, max_retries: int = 60) -> None:
++async def async_check_rate_limit(action_type: str, max_retries: int = 60, max_wait_per_retry: int = 3600) -> None:
+     rate_limiter = get_rate_limiter()
+     for attempt in range(max_retries):
+         try:
+@@ -228,7 +228,7 @@ async def async_check_rate_limit(action_type: str, max_retries: int = 60) -> Non
+         except RateLimitExceededError as e:
+             if attempt >= max_retries - 1:
+                 raise
+-            wait = e.wait_time + 1
++            wait = min(e.wait_time + 1, max_wait_per_retry)
+             logger.info(f"Rate limit hit: {e}. Waiting {wait}s before retrying (attempt {attempt + 1}/{max_retries})...")
+             await asyncio.sleep(wait)
+ 
+@@ -241,3 +241,9 @@ def get_rate_limiter() -> RateLimiter:
+     if _rate_limiter is None:
+         _rate_limiter = RateLimiter()
+     return _rate_limiter
++
++
++def reset_rate_limiter() -> None:
++    """Reset global rate limiter instance (for testing)."""
++    global _rate_limiter
++    _rate_limiter = None
+diff --git a/src/utils/retry.py b/src/utils/retry.py
+deleted file mode 100644
+index 0db1286..0000000
+--- a/src/utils/retry.py
++++ /dev/null
+@@ -1,19 +0,0 @@
+-"""Retry utilities for navigation and network operations."""
+-
+-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+-from patchright.async_api import Page, Error as PlaywrightError
+-from loguru import logger
+-
+-
+-@retry(
+-    stop=stop_after_attempt(3),
+-    wait=wait_exponential(multiplier=1, min=2, max=10),
+-    retry=retry_if_exception_type((PlaywrightError, TimeoutError, ConnectionError)),
+-    before_sleep=lambda retry_state: logger.warning(
+-        f"Navigation failed (attempt {retry_state.attempt_number}), retrying..."
+-    ),
+-    reraise=True,
+-)
+-async def retry_navigation(page: Page, url: str, **kwargs) -> None:
+-    """Navigate to a URL with automatic retry on failure."""
+-    await page.goto(url, **kwargs)

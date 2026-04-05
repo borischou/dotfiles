@@ -1,0 +1,973 @@
+2026-02-28 18:58:37.725 | INFO     | src.utils.config:_load_all:41 - Loading configuration files...
+2026-02-28 18:58:37.725 | INFO     | src.utils.config:_load_all:45 - Configuration loaded successfully
+[32m2026-02-28 18:58:37[0m | [1mINFO    [0m | [36msrc.utils.logger[0m:[36msetup_logger[0m:[36m46[0m - [1mLogger initialized with level: INFO[0m
+/Users/zhouboli/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+[32m2026-02-28 18:58:38[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mstart[0m:[36m120[0m - [1mConnecting to Chrome via CDP: http://127.0.0.1:9222[0m
+(node:79537) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[32m2026-02-28 18:58:38[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mstart[0m:[36m145[0m - [1mReusing existing tab: https://maimai.cn/[0m
+[32m2026-02-28 18:58:38[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mstart[0m:[36m155[0m - [1mConnected to Chrome via CDP successfully[0m
+[32m2026-02-28 18:58:40[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+
+[1/2] Searching: 安卓
+[32m2026-02-28 18:58:40[0m | [1mINFO    [0m | [36msrc.models.database[0m:[36minit_db[0m:[36m181[0m - [1mDatabase tables created successfully[0m
+[32m2026-02-28 18:58:40[0m | [1mINFO    [0m | [36msrc.models.database[0m:[36m__init__[0m:[36m176[0m - [1mDatabase initialized at: data/maimai.db[0m
+[32m2026-02-28 18:58:42[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 18:58:45[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates[0m:[36m164[0m - [1mClicked '人脉' tab[0m
+[32m2026-02-28 18:58:58[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_search_results[0m:[36m529[0m - [1mJavaScript extraction found 10 candidates[0m
+[32m2026-02-28 18:58:58[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_search_results[0m:[36m668[0m - [1mExtracted 10 candidates from page[0m
+⠋ Page 1: Found 10 candidates
+Search complete. Found 10 candidates.
+  Found 10 candidates, 10 new (deduplicated)
+
+[2/2] Searching: 研发
+[32m2026-02-28 18:59:01[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 18:59:01[0m | [1mINFO    [0m | [36msrc.utils.rate_limiter[0m:[36masync_check_rate_limit[0m:[36m348[0m - [1mRate limit hit: Minimum interval not met for search. Wait 27 seconds.. Waiting 28s before retrying (attempt 1/60, elapsed 0s)...[0m
+[32m2026-02-28 18:59:35[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36msearch_candidates[0m:[36m164[0m - [1mClicked '人脉' tab[0m
+[32m2026-02-28 18:59:49[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_search_results[0m:[36m529[0m - [1mJavaScript extraction found 9 candidates[0m
+[32m2026-02-28 18:59:49[0m | [1mINFO    [0m | [36msrc.modules.search[0m:[36m_extract_search_results[0m:[36m668[0m - [1mExtracted 9 candidates from page[0m
+⠸ Page 1: Found 9 candidates
+Search complete. Found 9 candidates.
+  Found 9 candidates, 9 new (deduplicated)
+                        Pipeline Results (19 candidates)                        
+┏━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃  # ┃ Name       ┃ Title          ┃ Company         ┃ Location ┃ ID           ┃
+┡━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│  1 │ 李政       │ 开发           │ 得物App安卓     │          │ mm_55734145  │
+│  2 │ 卡酷桑     │ 专家           │ 滴滴出行安卓技… │          │ mm_244656    │
+│  3 │ 李春雨     │ 个人经历：...… │ 作业帮安卓Lead… │          │ mm_30582318  │
+│    │            │ app安卓开发    │                 │          │              │
+│    │            │ YY...          │                 │          │              │
+│  4 │ 梁荣达     │ 负责人         │ 一点资讯安卓    │          │ mm_1536826   │
+│  5 │ 朝鲁       │ 开发           │ 小红书安卓      │          │ mm_158565000 │
+│  6 │ 李纪阳     │ 开发           │ 51Talk安卓      │          │ mm_34622705  │
+│  7 │ 王同学     │ 开发           │ 小红书资深安卓  │          │ mm_218583889 │
+│  8 │ Ryan       │ 专家           │ 阿里巴巴安卓技… │          │ mm_168966564 │
+│  9 │ lisen      │ 架构师         │ 小红书安卓      │          │ mm_215945864 │
+│ 10 │ 齐晨飞     │ 高级开发       │ 滴滴安卓        │          │ mm_233589243 │
+│ 11 │ 杜威       │ 曾任职:韵达Ja… │ EBAY中国研发中… │          │ mm_25766040  │
+│ 12 │ 程序员小王 │ 个人经历：...… │ 中科曙光研发    │          │ mm_46651     │
+│ 13 │ 熊出没     │ 工程师         │ 拼多多研发      │          │ mm_32653093  │
+│ 14 │ 曲晨阳     │ 工程师         │ 快手研发        │          │ mm_212403533 │
+│ 15 │ 孟凡琦     │ 工程师         │ 字节跳动研发    │          │ mm_36210983  │
+│ 16 │ 程派峰     │ 工程师         │ 字节跳动（南京… │          │ mm_36122462  │
+│ 17 │ 管志鹏     │ 工程师         │ 微软亚太研发集… │          │ mm_3452027   │
+│ 18 │ 王小恒     │ 工程师         │ 中国移动杭州研… │          │ mm_37573739  │
+│ 19 │ 陈志丰     │ 个人经历：...… │ 奇虎360搜索研发 │          │ mm_5430575   │
+└────┴────────────┴────────────────┴─────────────────┴──────────┴──────────────┘
+[32m2026-02-28 18:59:49[0m | [1mINFO    [0m | [36msrc.utils.scoring[0m:[36msort_candidates_by_score[0m:[36m182[0m - [1mCandidates scored: top=65, bottom=10, count=19[0m
+Validating template for all candidates...
+╭────────────────────────────── Pipeline Summary ──────────────────────────────╮
+│                                                                              │
+│  Template: jd_live                                                           │
+│  Candidates: 19 found, 5 already messaged                                    │
+│  Will send to: 14 candidates                                                 │
+│                                                                              │
+│  Message Preview (first candidate):                                          │
+│  To: lisen (架构师 @ 小红书安卓)                                             │
+│                                                                              │
+│  您好，我这里是京东直播的业务，想聊聊看吗                                    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Auto-confirmed: sending to 14 candidates
+[32m2026-02-28 18:59:51[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 18:59:58[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 18:59:58[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 18:59:58[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_215945864.png[0m
+[32m2026-02-28 18:59:58[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for lisen in 2.3s[0m
+[32m2026-02-28 19:00:03[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:00:09[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:00:09[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:00:09[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_215945864.png[0m
+[32m2026-02-28 19:00:09[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for lisen in 5.0s[0m
+[32m2026-02-28 19:00:16[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:00:19[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:00:19[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:00:19[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_215945864.png[0m
+[32m2026-02-28 19:00:19[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to lisen after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:00:23[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:00:26[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:00:26[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:00:26[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_32653093.png[0m
+[32m2026-02-28 19:00:26[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 熊出没 in 3.4s[0m
+[32m2026-02-28 19:00:32[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:00:34[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:00:34[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:00:34[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_32653093.png[0m
+[32m2026-02-28 19:00:34[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 熊出没 in 6.1s[0m
+[32m2026-02-28 19:00:43[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:00:45[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:00:45[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:00:46[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_32653093.png[0m
+[32m2026-02-28 19:00:46[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 熊出没 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:00:51[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:00:54[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:00:54[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:00:54[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_36210983.png[0m
+[32m2026-02-28 19:00:54[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 孟凡琦 in 3.5s[0m
+[32m2026-02-28 19:01:00[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:01:04[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:01:04[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:01:05[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_36210983.png[0m
+[32m2026-02-28 19:01:05[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 孟凡琦 in 5.0s[0m
+[32m2026-02-28 19:01:12[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:01:20[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:01:20[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:01:20[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_36210983.png[0m
+[32m2026-02-28 19:01:20[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 孟凡琦 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:01:35[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:01:38[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:01:38[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:01:38[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_36122462.png[0m
+[32m2026-02-28 19:01:38[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 程派峰 in 2.5s[0m
+[32m2026-02-28 19:01:42[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:01:47[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:01:47[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:01:47[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_36122462.png[0m
+[32m2026-02-28 19:01:47[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 程派峰 in 7.0s[0m
+[32m2026-02-28 19:01:56[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:01:59[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:01:59[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:01:59[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_36122462.png[0m
+[32m2026-02-28 19:01:59[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 程派峰 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:02:03[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:02:11[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:02:11[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:02:11[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_5430575.png[0m
+[32m2026-02-28 19:02:11[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 陈志丰 in 2.5s[0m
+[32m2026-02-28 19:02:16[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:02:20[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:02:20[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:02:21[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_5430575.png[0m
+[32m2026-02-28 19:02:21[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 陈志丰 in 5.8s[0m
+[32m2026-02-28 19:02:29[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:02:33[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:02:33[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:02:33[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_5430575.png[0m
+[32m2026-02-28 19:02:33[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 陈志丰 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:02:36[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:02:43[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:02:43[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:02:43[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_158565000.png[0m
+[32m2026-02-28 19:02:43[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 朝鲁 in 3.1s[0m
+[32m2026-02-28 19:02:48[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:02:51[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:02:51[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:02:51[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_158565000.png[0m
+[32m2026-02-28 19:02:51[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 朝鲁 in 7.2s[0m
+[32m2026-02-28 19:03:01[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:03:04[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:03:04[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:03:04[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_158565000.png[0m
+[32m2026-02-28 19:03:04[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 朝鲁 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:03:08[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:03:12[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:03:12[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:03:12[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_218583889.png[0m
+[32m2026-02-28 19:03:12[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 王同学 in 3.0s[0m
+[32m2026-02-28 19:03:17[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:03:21[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:03:21[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:03:21[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_218583889.png[0m
+[32m2026-02-28 19:03:21[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 王同学 in 5.4s[0m
+[32m2026-02-28 19:03:28[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:03:31[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:03:31[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:03:32[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_218583889.png[0m
+[32m2026-02-28 19:03:32[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 王同学 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:03:36[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:03:39[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:03:39[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:03:40[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_233589243.png[0m
+[32m2026-02-28 19:03:40[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 齐晨飞 in 2.7s[0m
+[32m2026-02-28 19:03:44[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:03:48[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:03:48[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:03:48[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_233589243.png[0m
+[32m2026-02-28 19:03:48[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 齐晨飞 in 7.3s[0m
+[32m2026-02-28 19:03:57[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:04:03[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:04:03[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:04:03[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_233589243.png[0m
+[32m2026-02-28 19:04:03[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 齐晨飞 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:04:06[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:04:10[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:04:10[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:04:10[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_25766040.png[0m
+[32m2026-02-28 19:04:10[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 杜威 in 3.0s[0m
+[32m2026-02-28 19:04:16[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:04:19[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:04:19[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:04:19[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_25766040.png[0m
+[32m2026-02-28 19:04:19[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 杜威 in 7.4s[0m
+[32m2026-02-28 19:04:29[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:04:34[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:04:34[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:04:34[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_25766040.png[0m
+[32m2026-02-28 19:04:34[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 杜威 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:04:37[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:04:42[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:04:42[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:04:43[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_46651.png[0m
+[32m2026-02-28 19:04:43[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 程序员小王 in 2.6s[0m
+[32m2026-02-28 19:04:47[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:04:54[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:04:54[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:04:54[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_46651.png[0m
+[32m2026-02-28 19:04:54[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 程序员小王 in 4.5s[0m
+[32m2026-02-28 19:05:00[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:05:04[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:05:04[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:05:04[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_46651.png[0m
+[32m2026-02-28 19:05:04[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 程序员小王 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:05:08[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:05:13[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:05:13[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:05:13[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_34622705.png[0m
+[32m2026-02-28 19:05:14[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 李纪阳 in 3.2s[0m
+[32m2026-02-28 19:05:19[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:05:22[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:05:22[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:05:22[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_34622705.png[0m
+[32m2026-02-28 19:05:22[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 李纪阳 in 4.5s[0m
+[32m2026-02-28 19:05:29[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:05:31[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:05:31[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:05:31[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_34622705.png[0m
+[32m2026-02-28 19:05:31[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 李纪阳 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:05:36[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:05:42[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:05:42[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:05:42[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_212403533.png[0m
+[32m2026-02-28 19:05:42[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 曲晨阳 in 2.4s[0m
+[32m2026-02-28 19:05:47[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:05:55[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:05:55[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:05:55[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_212403533.png[0m
+[32m2026-02-28 19:05:55[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 曲晨阳 in 6.3s[0m
+[32m2026-02-28 19:06:03[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:06:10[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:06:10[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:06:10[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_212403533.png[0m
+[32m2026-02-28 19:06:10[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 曲晨阳 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:06:14[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:06:19[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:06:19[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:06:19[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_3452027.png[0m
+[32m2026-02-28 19:06:19[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 管志鹏 in 3.1s[0m
+[32m2026-02-28 19:06:25[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:06:33[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:06:33[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:06:33[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_3452027.png[0m
+[32m2026-02-28 19:06:33[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 管志鹏 in 5.1s[0m
+[32m2026-02-28 19:06:40[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:06:44[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:06:44[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:06:44[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_3452027.png[0m
+[32m2026-02-28 19:06:44[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 管志鹏 after 3 attempt(s): send returned False[0m
+[32m2026-02-28 19:06:48[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:06:53[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:06:53[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:06:53[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_37573739.png[0m
+[32m2026-02-28 19:06:53[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 1/2 for 王小恒 in 3.7s[0m
+[32m2026-02-28 19:06:59[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:07:03[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:07:03[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:07:03[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_37573739.png[0m
+[32m2026-02-28 19:07:03[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m949[0m - [1mRetry 2/2 for 王小恒 in 5.0s[0m
+[32m2026-02-28 19:07:10[0m | [1mINFO    [0m | [36msrc.modules.auth[0m:[36mcheck_login_status[0m:[36m171[0m - [1mLogin status check: logged_in=True, detail=protected_page_accessible (url=https://maimai.cn/web/search_center)[0m
+[32m2026-02-28 19:07:13[0m | [1mINFO    [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m270[0m - [1mDetected '极速联系' (Quick Contact) page[0m
+[32m2026-02-28 19:07:13[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36m_handle_quick_contact[0m:[36m401[0m - [31m[1mQuick contact handling failed: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+Traceback (most recent call last):
+  File "/Users/zhouboli/Documents/maimai-assistant/src/modules/message.py", line 291, in _handle_quick_contact
+    raise QuotaExhaustedError(remaining=quota.get('uh_left', 0))
+src.exceptions.errors.QuotaExhaustedError: 联系券已用尽 (剩余: 0)
+
+解决方案:
+  1. 等待配额恢复 (通常每日刷新)
+  2. 升级脉脉会员以获取更多配额
+  3. 使用 --dry-run 模式先搜索并保存候选人，稍后再发送
+[0m
+Quick Contact page detected but send failed
+[32m2026-02-28 19:07:13[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36mscreenshot[0m:[36m332[0m - [1mScreenshot saved: data/screenshots/message_error_qc_mm_37573739.png[0m
+[32m2026-02-28 19:07:13[0m | [31m[1mERROR   [0m | [36msrc.modules.message[0m:[36msend_message_batch[0m:[36m962[0m - [31m[1mFailed to send message to 王小恒 after 3 attempt(s): send returned False[0m
+Sending messages... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 14/14
+
+             Send Results             
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ Metric                     ┃ Count ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ Total candidates           │    19 │
+│ Sent                       │     0 │
+│ Failed                     │    14 │
+│ Skipped (already messaged) │     5 │
+│ Rate limited               │     0 │
+│ 联系券剩余                 │     0 │
+└────────────────────────────┴───────┘
+[32m2026-02-28 19:07:17[0m | [1mINFO    [0m | [36msrc.services.pipeline[0m:[36mgenerate_pipeline_report[0m:[36m351[0m - [1mPipeline report saved to: data/reports/pipeline_20260228_190717.xlsx[0m
+Pipeline report saved to: data/reports/pipeline_20260228_190717.xlsx
+Checkpoint cleared (pipeline complete)
+数据库已自动备份: maimai_20260228_190717.db
+[32m2026-02-28 19:07:17[0m | [1mINFO    [0m | [36msrc.core.browser[0m:[36m_close_internal[0m:[36m219[0m - [1mDisconnected from Chrome (browser stays open)[0m

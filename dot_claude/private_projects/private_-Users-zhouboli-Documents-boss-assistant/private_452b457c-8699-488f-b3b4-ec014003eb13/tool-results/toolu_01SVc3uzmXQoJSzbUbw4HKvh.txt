@@ -1,0 +1,80 @@
+     1→"""Tests for validation utilities."""
+     2→
+     3→import pytest
+     4→from src.utils.validators import (
+     5→    validate_boss_id,
+     6→    validate_keywords,
+     7→    validate_template_variables,
+     8→)
+     9→from src.exceptions.errors import ValidationError
+    10→
+    11→
+    12→def test_validate_boss_id_valid():
+    13→    """Test validating valid Boss IDs."""
+    14→    assert validate_boss_id('zp_abc123') == 'zp_abc123'
+    15→    assert validate_boss_id('abc123def456') == 'abc123def456'
+    16→    assert validate_boss_id(' zp_test123 ') == 'zp_test123'
+    17→
+    18→
+    19→def test_validate_boss_id_invalid():
+    20→    """Test validating invalid Boss IDs."""
+    21→    with pytest.raises(ValidationError):
+    22→        validate_boss_id('')
+    23→
+    24→    with pytest.raises(ValidationError):
+    25→        validate_boss_id('invalid@id')
+    26→
+    27→    with pytest.raises(ValidationError):
+    28→        validate_boss_id('id with spaces')
+    29→
+    30→
+    31→def test_validate_keywords_valid():
+    32→    """Test validating valid search keywords."""
+    33→    assert validate_keywords('前端工程师') == '前端工程师'
+    34→    assert validate_keywords('  Python  ') == 'Python'
+    35→
+    36→
+    37→def test_validate_keywords_invalid():
+    38→    """Test validating invalid keywords."""
+    39→    with pytest.raises(ValidationError):
+    40→        validate_keywords('')
+    41→
+    42→    with pytest.raises(ValidationError):
+    43→        validate_keywords('a')  # Too short
+    44→
+    45→    with pytest.raises(ValidationError):
+    46→        validate_keywords('x' * 201)  # Too long
+    47→
+    48→
+    49→def test_validate_template_variables_valid():
+    50→    """Test validating template variables - all present."""
+    51→    template = {'variables': ['name', 'company']}
+    52→    variables = {'name': '张三', 'company': '阿里巴巴'}
+    53→    # Should not raise
+    54→    validate_template_variables(template, variables)
+    55→
+    56→
+    57→def test_validate_template_variables_missing():
+    58→    """Test validating template variables - missing required."""
+    59→    template = {'variables': ['name', 'company', 'position']}
+    60→    variables = {'name': '张三'}
+    61→    with pytest.raises(ValidationError) as exc_info:
+    62→        validate_template_variables(template, variables)
+    63→    assert 'Missing required template variables' in str(exc_info.value)
+    64→
+    65→
+    66→def test_validate_template_variables_empty():
+    67→    """Test validating template with no required variables."""
+    68→    template = {'variables': []}
+    69→    variables = {}
+    70→    # Should not raise
+    71→    validate_template_variables(template, variables)
+    72→
+    73→
+    74→def test_validate_template_variables_extra():
+    75→    """Test validating template variables - extra variables are fine."""
+    76→    template = {'variables': ['name']}
+    77→    variables = {'name': '张三', 'extra': 'value'}
+    78→    # Should not raise
+    79→    validate_template_variables(template, variables)
+    80→

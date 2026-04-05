@@ -1,0 +1,49 @@
+     1→"""Logging configuration using Loguru."""
+     2→
+     3→import sys
+     4→from pathlib import Path
+     5→
+     6→from loguru import logger
+     7→
+     8→from src.utils.config import get_config
+     9→
+    10→
+    11→def setup_logger():
+    12→    """Configure Loguru logger with settings from config."""
+    13→    config = get_config()
+    14→
+    15→    # Remove default handler
+    16→    logger.remove()
+    17→
+    18→    # Get logging settings
+    19→    log_level = config.get('logging.level', 'INFO')
+    20→    log_format = config.get('logging.format')
+    21→    rotation = config.get('logging.rotation', '10 MB')
+    22→    retention = config.get('logging.retention', '30 days')
+    23→    log_dir = Path(config.get('data.log_dir', 'data/logs'))
+    24→
+    25→    # Create log directory if it doesn't exist
+    26→    log_dir.mkdir(parents=True, exist_ok=True)
+    27→
+    28→    # Add console handler with colors
+    29→    logger.add(
+    30→        sys.stdout,
+    31→        format=log_format,
+    32→        level=log_level,
+    33→        colorize=True,
+    34→    )
+    35→
+    36→    # Add file handler with rotation
+    37→    logger.add(
+    38→        log_dir / "maimai_assistant_{time:YYYY-MM-DD}.log",
+    39→        format=log_format,
+    40→        level=log_level,
+    41→        rotation=rotation,
+    42→        retention=retention,
+    43→        encoding='utf-8',
+    44→    )
+    45→
+    46→    logger.info(f"Logger initialized with level: {log_level}")
+    47→
+    48→
+    49→

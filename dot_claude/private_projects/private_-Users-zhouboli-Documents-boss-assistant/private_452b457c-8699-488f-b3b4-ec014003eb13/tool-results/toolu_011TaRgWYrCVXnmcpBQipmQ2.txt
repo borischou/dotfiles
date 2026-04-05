@@ -1,0 +1,56 @@
+     1→     1→     1→"""Dashboard route — GET /"""
+     2→     2→     2→
+     3→     3→     3→from datetime import datetime, timezone
+     4→     4→     4→
+     5→     5→     5→from fastapi import APIRouter, Request
+     6→     6→     6→
+     7→     7→     7→from src.web.app import chrome_manager, task_queue, templates
+     8→     8→     8→from src.models.database import Candidate, Message, SearchHistory, get_db_manager
+     9→     9→     9→from src.utils.rate_limiter import get_rate_limiter
+    10→    10→    10→
+    11→    11→    11→router = APIRouter()
+    12→    12→    12→
+    13→    13→    13→
+    14→    14→    14→@router.get("/")
+    15→    15→    15→async def dashboard(request: Request):
+    16→    16→    16→    """Main dashboard with status overview and today's stats."""
+    17→    17→    17→    db = get_db_manager()
+    18→    18→    18→    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    19→    19→    19→
+    20→    20→    20→    with db.session_scope() as session:
+    21→    21→    21→        total_candidates = session.query(Candidate).count()
+    22→    22→    22→        total_messages_sent = session.query(Message).filter(Message.status == 'sent').count()
+    23→    23→    23→        today_searches = session.query(SearchHistory).filter(
+    24→    24→    24→            SearchHistory.executed_at >= today_start
+    25→    25→    25→        ).count()
+    26→    26→    26→        today_messages = session.query(Message).filter(
+    27→    27→    27→            Message.created_at >= today_start,
+    28→    28→    28→            Message.status == 'sent',
+    29→    29→    29→        ).count()
+    30→    30→    30→
+    31→    31→    31→    # Chrome status
+    32→    32→    32→    chrome_healthy = await chrome_manager._check_cdp_health()
+    33→    33→    33→
+    34→    34→    34→    # Pipeline status
+    35→    35→    35→    pipeline_busy = task_queue.is_busy
+    36→    36→    36→    pipeline_task_id = task_queue.current_task_id
+    37→    37→    37→
+    38→    38→    38→    # Rate limiter status
+    39→    39→    39→    try:
+    40→    40→    40→        rate_limiter = get_rate_limiter()
+    41→    41→    41→        throttle = rate_limiter.throttle_factor
+    42→    42→    42→    except Exception:
+    43→    43→    43→        throttle = 1.0
+    44→    44→    44→
+    45→    45→    45→    return templates.TemplateResponse("dashboard.html", {
+    46→    46→    46→        "request": request,
+    47→    47→    47→        "chrome_healthy": chrome_healthy,
+    48→    48→    48→        "pipeline_busy": pipeline_busy,
+    49→    49→    49→        "pipeline_task_id": pipeline_task_id,
+    50→    50→    50→        "total_candidates": total_candidates,
+    51→    51→    51→        "total_messages_sent": total_messages_sent,
+    52→    52→    52→        "today_searches": today_searches,
+    53→    53→    53→        "today_messages": today_messages,
+    54→    54→    54→        "throttle_factor": throttle,
+    55→    55→    55→    })
+    56→    56→    56→

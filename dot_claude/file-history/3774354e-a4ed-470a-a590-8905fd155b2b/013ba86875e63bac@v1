@@ -1,0 +1,222 @@
+"""Serial browser task queue.
+
+All browser operations go through this queue to ensure only one
+browser action runs at a time (Chrome CDP is a serial resource).
+Non-browser operations (DB queries, template listing) bypass the queue.
+"""
+
+import asyncio
+import uuid
+from datetime import datetime, timezone, timedelta
+from enum import IntEnum
+from typing import Any, Awaitable, Callable, Dict, Optional
+
+from loguru import logger
+
+
+class TaskPriority(IntEnum):
+    """Task priority levels. Lower value = higher priority."""
+    HIGH = 1      # Status checks
+    NORMAL = 5    # Search, message
+    LOW = 10      # Pipeline (long-running)
+
+
+class TaskStatus:
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+
+
+class BrowserTask:
+    """A task to be executed in the browser queue."""
+
+    def __init__(
+        self,
+        name: str,
+        coroutine_factory: Callable[[], Awaitable[Any]],
+        priority: TaskPriority = TaskPriority.NORMAL,
+        task_id: Optional[str] = None,
+        user: str = "anonymous",
+    ):
+        self.task_id = task_id or str(uuid.uuid4())[:8]
+        self.name = name
+        self.coroutine_factory = coroutine_factory
+        self.priority = priority
+        self.user = user
+        self.status = TaskStatus.QUEUED
+        self.result: Any = None
+        self.error: Optional[str] = None
+        self.created_at = datetime.now(timezone.utc)
+        self.started_at: Optional[datetime] = None
+        self.completed_at: Optional[datetime] = None
+        # asyncio.Event for callers that want to wait for completion
+        self._done_event = asyncio.Event()
+        # asyncio.Event for pipeline confirmation flow
+        self.confirmation_event: Optional[asyncio.Event] = None
+        self.confirmation_data: Optional[Dict] = None
+        # Lock to protect confirmation flow from race conditions
+        self._confirmation_lock = asyncio.Lock()
+
+    def __lt__(self, other: 'BrowserTask') -> bool:
+        """Compare by (priority, creation time) for PriorityQueue."""
+        if self.priority != other.priority:
+            return self.priority < other.priority
+        return self.created_at < other.created_at
+
+    async def wait(self, timeout: Optional[float] = None) -> None:
+        """Wait for task completion."""
+        if timeout:
+            await asyncio.wait_for(self._done_event.wait(), timeout=timeout)
+        else:
+            await self._done_event.wait()
+
+    def mark_done(self) -> None:
+        self._done_event.set()
+
+    def to_dict(self) -> dict:
+        return {
+            "task_id": self.task_id,
+            "name": self.name,
+            "status": self.status,
+            "priority": self.priority.name,
+            "user": self.user,
+            "created_at": self.created_at.isoformat(),
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "error": self.error,
+        }
+
+
+class TaskQueue:
+    """Async serial task queue for browser operations.
+
+    Uses asyncio.PriorityQueue so higher-priority tasks run first.
+    A single background worker consumes tasks one at a time.
+    """
+
+    def __init__(self):
+        self._queue: asyncio.PriorityQueue[BrowserTask] = asyncio.PriorityQueue()
+        self._worker_task: Optional[asyncio.Task] = None
+        self._tasks: Dict[str, BrowserTask] = {}  # task_id -> task
+        self._running: bool = False
+        self._current_task: Optional[BrowserTask] = None
+
+    async def start(self) -> None:
+        """Start the background worker."""
+        if self._running:
+            return
+        self._running = True
+        self._worker_task = asyncio.create_task(self._worker())
+        logger.info("Task queue worker started")
+
+    async def stop(self) -> None:
+        """Stop the background worker and wait for completion."""
+        self._running = False
+        if self._worker_task:
+            # Signal worker to stop
+            self._worker_task.cancel()
+            try:
+                # Wait for worker to finish cleanup
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._worker_task = None
+        logger.info("Task queue worker stopped")
+
+    async def submit(self, task: BrowserTask) -> BrowserTask:
+        """Submit a task to the queue. Returns the task for tracking."""
+        self._tasks[task.task_id] = task
+        await self._queue.put(task)
+        logger.info(f"Task queued: {task.task_id} ({task.name}) priority={task.priority.name}")
+        return task
+
+    def get_task(self, task_id: str) -> Optional[BrowserTask]:
+        """Get a task by ID."""
+        return self._tasks.get(task_id)
+
+    @property
+    def current_task(self) -> Optional[BrowserTask]:
+        return self._current_task
+
+    @property
+    def queue_size(self) -> int:
+        return self._queue.qsize()
+
+    def get_queue_status(self) -> dict:
+        """Get current queue status."""
+        pending = [
+            t.to_dict() for t in self._tasks.values()
+            if t.status == TaskStatus.QUEUED
+        ]
+        return {
+            "queue_size": self._queue.qsize(),
+            "current_task": self._current_task.to_dict() if self._current_task else None,
+            "pending_tasks": pending,
+            "total_tracked": len(self._tasks),
+        }
+
+    def get_recent_tasks(self, limit: int = 20) -> list:
+        """Get recent tasks sorted by creation time (newest first)."""
+        tasks = sorted(
+            self._tasks.values(),
+            key=lambda t: t.created_at,
+            reverse=True,
+        )
+        return [t.to_dict() for t in tasks[:limit]]
+
+    async def _worker(self) -> None:
+        """Background worker: dequeue and execute tasks serially."""
+        while self._running:
+            try:
+                task = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+
+            self._current_task = task
+            task.status = TaskStatus.RUNNING
+            task.started_at = datetime.now(timezone.utc)
+            logger.info(f"Task running: {task.task_id} ({task.name})")
+
+            try:
+                task.result = await task.coroutine_factory()
+                task.status = TaskStatus.COMPLETED
+                logger.info(f"Task completed: {task.task_id}")
+            except asyncio.CancelledError:
+                task.status = TaskStatus.CANCELLED
+                task.error = "cancelled"
+                logger.warning(f"Task cancelled: {task.task_id}")
+            except Exception as e:
+                task.status = TaskStatus.FAILED
+                task.error = str(e)
+                logger.error(f"Task failed: {task.task_id} — {e}")
+            finally:
+                task.completed_at = datetime.now(timezone.utc)
+                task.mark_done()
+                self._current_task = None
+                self._queue.task_done()
+
+                # Periodically cleanup old tasks (every 10th task)
+                if len(self._tasks) % 10 == 0:
+                    removed = self.cleanup_old_tasks(max_age_hours=24)
+                    if removed > 0:
+                        logger.debug(f"Cleaned up {removed} old tasks")
+
+        logger.info("Task queue worker exiting")
+
+    def cleanup_old_tasks(self, max_age_hours: int = 24) -> int:
+        """Remove completed/failed tasks older than max_age_hours."""
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        to_remove = [
+            tid for tid, t in self._tasks.items()
+            if t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+            and t.completed_at and t.completed_at < cutoff
+        ]
+        for tid in to_remove:
+            del self._tasks[tid]
+        return len(to_remove)

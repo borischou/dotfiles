@@ -1,0 +1,44 @@
+"""Dependency injection for FastAPI endpoints.
+
+Provides shared singleton instances of BrowserManager, DatabaseManager,
+TaskQueue, and Broadcaster via FastAPI's Depends() system.
+"""
+
+from typing import Optional
+
+from src.core.browser import BrowserManager, get_browser_manager
+from src.models.database import DatabaseManager, get_db_manager
+from src.web.task_queue import TaskQueue
+from src.web.progress import Broadcaster
+
+
+# Module-level singletons (initialized in app lifespan)
+_task_queue: Optional[TaskQueue] = None
+_broadcaster: Optional[Broadcaster] = None
+
+
+def init_singletons(queue: TaskQueue, broadcaster: Broadcaster) -> None:
+    """Called once during app lifespan startup."""
+    global _task_queue, _broadcaster
+    _task_queue = queue
+    _broadcaster = broadcaster
+
+
+def get_queue() -> TaskQueue:
+    if _task_queue is None:
+        raise RuntimeError("TaskQueue not initialized - app lifespan may not have run")
+    return _task_queue
+
+
+def get_broadcaster() -> Broadcaster:
+    if _broadcaster is None:
+        raise RuntimeError("Broadcaster not initialized - app lifespan may not have run")
+    return _broadcaster
+
+
+def get_browser() -> BrowserManager:
+    return get_browser_manager()
+
+
+def get_db() -> DatabaseManager:
+    return get_db_manager()

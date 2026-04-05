@@ -1,0 +1,63 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 项目概述
+
+水下视频增强命令行工具（underwater-enhancer）。针对深潜视频的蓝绿雾化、低对比度、色彩偏移、能见度差等问题，使用传统 CV 算法进行逐帧增强处理。
+
+运行环境：macOS + Apple M4 芯片，Python 单文件工具。
+
+## 依赖安装
+
+```bash
+pip install opencv-contrib-python numpy
+brew install ffmpeg
+```
+
+注意：必须使用 `opencv-contrib-python`（非 `opencv-python`），因为导向滤波 `cv2.ximgproc.guidedFilter` 在 contrib 版本中。
+
+## 运行命令
+
+```bash
+# 单张图片
+python underwater_enhance.py image input.jpg -o output.jpg [--compare] [--preset medium]
+
+# 视频
+python underwater_enhance.py video input.mp4 -o output.mp4 [--compare]
+
+# 批量
+python underwater_enhance.py batch ./raw_videos/ -o ./enhanced_videos/
+
+# 自定义参数
+python underwater_enhance.py video input.mp4 -o output.mp4 \
+    --white-balance 0.6 --dehaze 0.7 --clahe 3.0 --color-boost 1.4 --sharpen 0.5
+```
+
+## 架构
+
+单文件结构 `underwater_enhance.py`，核心是 `UnderwaterEnhancer` 类，增强流程链：
+
+```
+原始帧 → 白平衡校正 → 去雾(Dark Channel Prior) → CLAHE对比度增强 → 色彩增强 → 锐化 → 输出帧
+```
+
+- **白平衡**：保守策略（strength=0.6），保留水的蓝色基调，红色增益上限 1.8
+- **去雾**：何凯明暗通道先验，omega=0.7，导向滤波平滑透射率（fallback 到双边滤波）
+- **CLAHE**：LAB 色彩空间 L 通道，clip_limit=3.0
+- **色彩增强**：HSV 空间饱和度 ×1.4，明度 ×1.05
+- **锐化**：Unsharp Mask，strength=0.5
+
+视频处理后通过 ffmpeg 重编码为 H.265（`hevc_videotoolbox` 硬件加速），`-c:a copy` 保留原始音轨。
+
+## 关键设计约束
+
+- 目标效果是"让蓝色更纯净通透"，而非"消除蓝色"——水下蓝色基调应保留
+- 导向滤波需 `cv2.ximgproc`，必须做 try/except fallback 到 `cv2.bilateralFilter`
+- 所有参数需有 clip 范围，防止极端值导致画面异常
+- 三档预设：light（水质好）、medium（默认）、heavy（严重浑浊）
+- `--compare` 模式生成左右并排对比（中间白色分割线）
+
+## 参考文档
+
+详细技术方案和参数表见 `video-enhance-plan.md`。

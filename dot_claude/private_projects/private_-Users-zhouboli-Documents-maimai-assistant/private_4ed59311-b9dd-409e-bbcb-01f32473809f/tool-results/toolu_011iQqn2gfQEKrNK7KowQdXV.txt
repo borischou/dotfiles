@@ -1,0 +1,57 @@
+     1→"""Custom exceptions for Maimai Assistant."""
+     2→
+     3→
+     4→class MaimaiAssistantError(Exception):
+     5→    """Base exception for all Maimai Assistant errors."""
+     6→    pass
+     7→
+     8→
+     9→class BrowserError(MaimaiAssistantError):
+    10→    """Raised when browser automation fails."""
+    11→    pass
+    12→
+    13→
+    14→class SessionExpiredError(MaimaiAssistantError):
+    15→    """Raised when Maimai session has expired."""
+    16→    pass
+    17→
+    18→
+    19→class RateLimitExceededError(MaimaiAssistantError):
+    20→    """Raised when rate limit is exceeded."""
+    21→
+    22→    def __init__(self, action_type: str, wait_time: int, message: str = None):
+    23→        self.action_type = action_type
+    24→        self.wait_time = wait_time
+    25→        if message is None:
+    26→            message = f"Rate limit exceeded for {action_type}. Wait {wait_time} seconds."
+    27→        super().__init__(message)
+    28→
+    29→
+    30→class SelectorNotFoundError(MaimaiAssistantError):
+    31→    """Raised when page selector is not found."""
+    32→    pass
+    33→
+    34→
+    35→class ExtractionError(MaimaiAssistantError):
+    36→    """Raised when data extraction fails."""
+    37→    pass
+    38→
+    39→
+    40→
+    41→class ConfigurationError(MaimaiAssistantError):
+    42→    """Raised when configuration is invalid."""
+    43→    pass
+    44→
+    45→
+    46→class ValidationError(MaimaiAssistantError):
+    47→    """Raised when input validation fails."""
+    48→    pass
+    49→
+    50→
+    51→class PermanentFailureError(MaimaiAssistantError):
+    52→    """Raised when a send failure is deterministic and should not be retried.
+    53→
+    54→    Examples: no profile URL, VIP paywall, candidate already messaged.
+    55→    """
+    56→    pass
+    57→

@@ -1,0 +1,472 @@
+"""Batch greet candidates on Boss直聘 recommend page.
+
+Automates the "打招呼" flow on the recommend page:
+1. Switch to the specified job posting
+2. Extract candidate info from cards
+3. Prioritize big-company candidates
+4. Click "打招呼" on each with rate-limited delays
+5. Scroll to load more candidates
+6. Track and report results
+"""
+
+import asyncio
+import json
+import random
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.core.browser import get_browser_manager
+from src.utils.config import get_config
+
+# --- Configuration ---
+TARGET_JOB_VALUE = "04ebe0c3c86affd603J82tm_EVZY"  # Android高级开发工程师
+TARGET_JOB_NAME = "Android高级开发工程师"
+MIN_DELAY = 8  # seconds between greetings (Boss自身也有频率限制)
+MAX_DELAY = 15
+MAX_GREETS = 200  # safety cap
+SCROLL_WAIT = 3  # seconds to wait after scrolling
+PREFERRED_YEARS_MIN = 3
+PREFERRED_YEARS_MAX = 5
+
+# Big company keywords for prioritization
+BIG_COMPANIES = {
+    "腾讯", "阿里", "字节", "百度", "美团", "京东", "拼多多", "网易",
+    "滴滴", "快手", "小红书", "华为", "大疆", "小米", "OPPO", "vivo",
+    "联想", "360", "搜狐", "新浪", "微博", "携程", "去哪儿", "58同城",
+    "蚂蚁", "饿了么", "高德", "优酷", "爱奇艺", "bilibili", "B站",
+    "微信", "抖音", "头条", "淘宝", "天猫", "支付宝", "钉钉",
+    "shopee", "Shopee", "字节跳动", "阿里巴巴", "Tencent", "Baidu",
+    "Alibaba", "ByteDance", "Meituan", "JD", "Xiaomi", "Huawei",
+    "知乎", "陌陌", "探探", "Soul", "YY", "虎牙", "斗鱼",
+    "猿辅导", "作业帮", "好未来", "新东方",
+    "顺丰", "菜鸟", "中通", "韵达",
+    "商汤", "旷视", "科大讯飞", "寒武纪",
+}
+
+
+def _parse_years(info_text: str) -> int:
+    """Extract years of experience from info text like '30岁 9年 本科'."""
+    import re
+    m = re.search(r'(\d+)年', info_text)
+    return int(m.group(1)) if m else 0
+
+
+def _is_big_company(company: str) -> bool:
+    """Check if company name matches any big company keywords."""
+    for kw in BIG_COMPANIES:
+        if kw in company:
+            return True
+    return False
+
+
+def _score_candidate(info: dict) -> int:
+    """Score a candidate for prioritization.
+    Higher score = higher priority.
+    """
+    score = 50  # base score
+
+    years = info.get('years', 0)
+    company = info.get('company', '')
+
+    # Experience match (3-5 years preferred)
+    if PREFERRED_YEARS_MIN <= years <= PREFERRED_YEARS_MAX:
+        score += 30
+    elif years > 0:
+        # Some bonus for close matches
+        diff = min(abs(years - PREFERRED_YEARS_MIN), abs(years - PREFERRED_YEARS_MAX))
+        score += max(0, 20 - diff * 5)
+
+    # Big company bonus
+    if _is_big_company(company):
+        score += 20
+
+    # Active status bonus
+    active = info.get('active', '')
+    if '刚刚' in active or '今日' in active:
+        score += 10
+    elif '3日' in active:
+        score += 5
+
+    # Ready to join bonus
+    if '离职' in info.get('job_status', ''):
+        score += 5
+    elif '月内到岗' in info.get('job_status', ''):
+        score += 3
+
+    return score
+
+
+async def switch_to_job(frame, job_value: str, job_name: str) -> bool:
+    """Switch to the target job posting in the recommend page."""
+    # Click the job selector to open dropdown
+    label = await frame.query_selector('.job-selecter-wrap .ui-dropmenu-label')
+    if not label:
+        print("ERROR: Job selector label not found")
+        return False
+
+    current_text = await label.inner_text()
+    if job_name in current_text:
+        print(f"Already on job: {current_text.strip()}")
+        return True
+
+    await label.click()
+    await asyncio.sleep(1)
+
+    # Click the target job item
+    result = await frame.evaluate("""
+        (targetValue) => {
+            const items = document.querySelectorAll('.job-item');
+            for (const item of items) {
+                if (item.getAttribute('value') === targetValue) {
+                    item.click();
+                    return true;
+                }
+            }
+            return false;
+        }
+    """, job_value)
+
+    if result:
+        await asyncio.sleep(3)  # Wait for candidate list to refresh
+        new_label = await frame.query_selector('.job-selecter-wrap .ui-dropmenu-label')
+        new_text = await new_label.inner_text() if new_label else "?"
+        print(f"Switched to job: {new_text.strip()}")
+        return True
+    else:
+        print(f"ERROR: Could not find job with value {job_value}")
+        return False
+
+
+async def extract_candidates(frame) -> list:
+    """Extract candidate info from visible cards."""
+    return await frame.evaluate("""
+        () => {
+            const cards = document.querySelectorAll('.card-item');
+            const results = [];
+            for (const card of cards) {
+                const inner = card.querySelector('.card-inner');
+                if (!inner) continue;
+
+                const nameEl = card.querySelector('.name');
+                const name = nameEl ? nameEl.innerText.trim() : '';
+                if (!name) continue;
+
+                const baseInfo = card.querySelector('.base-info');
+                const info = baseInfo ? baseInfo.innerText.trim() : '';
+
+                const activeEl = card.querySelector('.active-text');
+                const active = activeEl ? activeEl.innerText.trim() : '';
+
+                const expectEl = card.querySelector('.expect-wrap');
+                const expect = expectEl ? expectEl.innerText.trim() : '';
+
+                const salaryEl = card.querySelector('.salary-wrap span');
+                const salary = salaryEl ? salaryEl.innerText.trim() : '';
+
+                const greetBtn = card.querySelector('button.btn.btn-greet');
+                const canGreet = !!greetBtn && !greetBtn.disabled;
+
+                const geekId = inner.getAttribute('data-geek') ||
+                               inner.getAttribute('data-geekid') || '';
+
+                results.push({
+                    name, info, active, expect, salary,
+                    canGreet, geekId
+                });
+            }
+            return results;
+        }
+    """)
+
+
+async def click_greet_by_geek_id(frame, geek_id: str) -> str:
+    """Click the greet button for a specific candidate by geek ID.
+    Returns: 'ok', 'no_button', 'dialog', 'error'
+    """
+    result = await frame.evaluate("""
+        (geekId) => {
+            const cards = document.querySelectorAll('.card-item');
+            for (const card of cards) {
+                const inner = card.querySelector('.card-inner');
+                if (!inner) continue;
+                const id = inner.getAttribute('data-geek') ||
+                           inner.getAttribute('data-geekid') || '';
+                if (id === geekId) {
+                    const btn = card.querySelector('button.btn.btn-greet');
+                    if (btn && !btn.disabled) {
+                        btn.click();
+                        return 'clicked';
+                    }
+                    return 'no_button';
+                }
+            }
+            return 'not_found';
+        }
+    """, geek_id)
+
+    if result != 'clicked':
+        return result
+
+    # Wait and check for dialogs or quota warnings
+    await asyncio.sleep(2)
+
+    # Check for any popup dialogs on the MAIN page (parent of iframe)
+    page = frame.page
+    dialog_check = await page.evaluate("""
+        () => {
+            // Check for quota exhaustion
+            const body = document.body.innerText;
+            if (body.includes('今日沟通次数已用完') ||
+                body.includes('沟通次数已达上限') ||
+                body.includes('今日联系人数已满')) {
+                return 'quota_exhausted';
+            }
+
+            // Check for popup dialogs
+            const dialogs = document.querySelectorAll('.dialog-wrap.active, .boss-popup');
+            for (const d of dialogs) {
+                const text = d.innerText || '';
+                if (text.includes('升级') || text.includes('会员') || text.includes('购买')) {
+                    // Close it
+                    const closeBtn = d.querySelector('.boss-popup__close, .iboss-close, .close-btn');
+                    if (closeBtn) closeBtn.click();
+                    return 'purchase_dialog';
+                }
+            }
+
+            return 'ok';
+        }
+    """)
+
+    return dialog_check
+
+
+async def scroll_and_load_more(frame) -> int:
+    """Scroll down to load more candidates. Returns new candidate count."""
+    before_count = await frame.evaluate("document.querySelectorAll('.card-item').length")
+
+    await frame.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    await asyncio.sleep(SCROLL_WAIT)
+
+    after_count = await frame.evaluate("document.querySelectorAll('.card-item').length")
+    return after_count - before_count
+
+
+async def batch_greet():
+    """Main batch greeting function."""
+    bm = get_browser_manager()
+    page = await bm.start()
+
+    start_time = time.time()
+    greeted = []
+    skipped = []
+    failed = []
+    greeted_ids = set()
+
+    print(f"\n{'='*60}")
+    print(f"  Boss直聘 批量打招呼 - {TARGET_JOB_NAME}")
+    print(f"  开始时间: {datetime.now().strftime('%H:%M:%S')}")
+    print(f"  优先: {PREFERRED_YEARS_MIN}-{PREFERRED_YEARS_MAX}年经验, 大厂优先")
+    print(f"{'='*60}\n")
+
+    # Navigate to recommend page
+    await page.goto('https://www.zhipin.com/web/chat/recommend',
+                    timeout=15000, wait_until='domcontentloaded')
+    await asyncio.sleep(4)
+
+    # Get recommend iframe
+    frame = page.frame(name='recommendFrame')
+    if not frame:
+        for f in page.frames:
+            if 'frame/recommend' in (f.url or ''):
+                frame = f
+                break
+
+    if not frame:
+        print("ERROR: recommendFrame not found!")
+        return
+
+    # Switch to Android job
+    if not await switch_to_job(frame, TARGET_JOB_VALUE, TARGET_JOB_NAME):
+        print("ERROR: Failed to switch to Android job!")
+        return
+
+    await asyncio.sleep(2)
+
+    no_new_rounds = 0
+    round_num = 0
+
+    while len(greeted) < MAX_GREETS:
+        round_num += 1
+        print(f"\n--- 第 {round_num} 轮 ---")
+
+        # Extract candidates
+        candidates = await extract_candidates(frame)
+        print(f"页面上共 {len(candidates)} 个候选人")
+
+        # Filter to ungreeted candidates
+        new_candidates = [
+            c for c in candidates
+            if c['canGreet'] and c['geekId'] and c['geekId'] not in greeted_ids
+        ]
+
+        if not new_candidates:
+            print("没有新的可打招呼候选人，尝试加载更多...")
+            loaded = await scroll_and_load_more(frame)
+            if loaded == 0:
+                no_new_rounds += 1
+                if no_new_rounds >= 3:
+                    print("连续3轮无新候选人，停止")
+                    break
+                # Try switching tabs to get fresh candidates
+                print("尝试切换标签获取更多候选人...")
+                # Click 最新 tab then back to 推荐
+                await frame.evaluate("""
+                    () => {
+                        const tabs = document.querySelectorAll('.tab-item');
+                        for (const tab of tabs) {
+                            if (tab.getAttribute('data-status') === '1') {
+                                tab.click();
+                                return;
+                            }
+                        }
+                    }
+                """)
+                await asyncio.sleep(3)
+                await frame.evaluate("""
+                    () => {
+                        const tabs = document.querySelectorAll('.tab-item');
+                        for (const tab of tabs) {
+                            if (tab.getAttribute('data-status') === '0') {
+                                tab.click();
+                                return;
+                            }
+                        }
+                    }
+                """)
+                await asyncio.sleep(3)
+                continue
+            else:
+                no_new_rounds = 0
+                print(f"加载了 {loaded} 个新候选人")
+                continue
+
+        no_new_rounds = 0
+
+        # Score and sort candidates (big company / right experience first)
+        for c in new_candidates:
+            c['years'] = _parse_years(c['info'])
+            c['company'] = ''  # Company info may be in 'expect' or need extraction
+            c['job_status'] = c['info']
+            c['_score'] = _score_candidate(c)
+
+        new_candidates.sort(key=lambda x: x['_score'], reverse=True)
+
+        print(f"待打招呼: {len(new_candidates)} 人")
+
+        for c in new_candidates:
+            if len(greeted) >= MAX_GREETS:
+                break
+
+            years = c['years']
+            name = c['name']
+            info = c['info']
+            score = c['_score']
+
+            print(f"\n  [{len(greeted)+1}] {name} | {info} | 评分:{score}", end=" ... ")
+
+            result = await click_greet_by_geek_id(frame, c['geekId'])
+
+            if result == 'ok' or result == 'clicked':
+                greeted.append({
+                    'name': name,
+                    'info': info,
+                    'score': score,
+                    'geek_id': c['geekId'],
+                    'time': datetime.now().strftime('%H:%M:%S'),
+                })
+                greeted_ids.add(c['geekId'])
+                print(f"✅ 已打招呼")
+            elif result == 'quota_exhausted':
+                print(f"⛔ 额度已用完!")
+                print(f"\n额度已耗尽，停止。")
+                break
+            elif result == 'purchase_dialog':
+                print(f"⚠️ 弹出购买对话框，跳过")
+                skipped.append({'name': name, 'reason': 'purchase_dialog'})
+                greeted_ids.add(c['geekId'])  # Don't retry
+                continue
+            else:
+                print(f"❌ 失败 ({result})")
+                failed.append({'name': name, 'reason': result})
+                greeted_ids.add(c['geekId'])  # Don't retry
+                continue
+
+            # Rate limiting delay
+            if len(greeted) < MAX_GREETS:
+                delay = random.uniform(MIN_DELAY, MAX_DELAY)
+                print(f"  等待 {delay:.0f}s ...", end="", flush=True)
+                await asyncio.sleep(delay)
+                print(" ok")
+
+        else:
+            # All candidates in this batch processed, scroll for more
+            await scroll_and_load_more(frame)
+            continue
+
+        # If we broke out of the inner loop (quota exhausted or max reached)
+        if result == 'quota_exhausted' or len(greeted) >= MAX_GREETS:
+            break
+
+    # --- Summary ---
+    elapsed = time.time() - start_time
+    elapsed_min = elapsed / 60
+
+    print(f"\n{'='*60}")
+    print(f"  批量打招呼完成!")
+    print(f"{'='*60}")
+    print(f"  职位: {TARGET_JOB_NAME}")
+    print(f"  耗时: {elapsed_min:.1f} 分钟")
+    print(f"  打招呼: {len(greeted)} 人")
+    print(f"  跳过: {len(skipped)} 人")
+    print(f"  失败: {len(failed)} 人")
+
+    if greeted:
+        # Stats
+        big_co_count = sum(1 for g in greeted if _is_big_company(g.get('info', '')))
+        print(f"  其中大厂: {big_co_count} 人")
+
+    # Save results
+    results = {
+        'job': TARGET_JOB_NAME,
+        'date': datetime.now().strftime('%Y-%m-%d'),
+        'start_time': datetime.fromtimestamp(start_time).strftime('%H:%M:%S'),
+        'end_time': datetime.now().strftime('%H:%M:%S'),
+        'elapsed_minutes': round(elapsed_min, 1),
+        'greeted': greeted,
+        'skipped': skipped,
+        'failed': failed,
+        'total_greeted': len(greeted),
+        'total_skipped': len(skipped),
+        'total_failed': len(failed),
+    }
+
+    output_path = Path('data/greet_results')
+    output_path.mkdir(parents=True, exist_ok=True)
+    result_file = output_path / f"greet_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(result_file, 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+
+    print(f"\n  结果已保存: {result_file}")
+    print(f"{'='*60}")
+
+    return results
+
+
+if __name__ == '__main__':
+    asyncio.run(batch_greet())

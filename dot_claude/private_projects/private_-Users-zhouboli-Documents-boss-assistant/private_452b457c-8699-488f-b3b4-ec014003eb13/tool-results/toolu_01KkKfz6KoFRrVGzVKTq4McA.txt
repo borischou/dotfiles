@@ -1,0 +1,188 @@
+     1→"""Ollama LLM-based candidate scoring.
+     2→
+     3→Provides optional deep semantic evaluation of candidates against job
+     4→descriptions using a local Ollama instance. All functions are fault-tolerant:
+     5→errors return None and never block the pipeline.
+     6→"""
+     7→
+     8→import json
+     9→import re
+    10→from typing import Any, Dict, List, Optional
+    11→
+    12→import httpx
+    13→from loguru import logger
+    14→
+    15→
+    16→async def check_ollama_available(endpoint: str = "http://127.0.0.1:11434") -> bool:
+    17→    """Check if Ollama is reachable."""
+    18→    try:
+    19→        async with httpx.AsyncClient() as client:
+    20→            resp = await client.get(f"{endpoint.rstrip('/')}/api/tags", timeout=5)
+    21→            return resp.status_code == 200
+    22→    except Exception:
+    23→        return False
+    24→
+    25→
+    26→def _build_scoring_prompt(candidate_info: Dict[str, Any], jd_config: Dict[str, Any]) -> str:
+    27→    """Build a Chinese evaluation prompt for the LLM."""
+    28→    jd_title = jd_config.get("title", "")
+    29→    jd_desc = jd_config.get("description", "")
+    30→    required = ", ".join(jd_config.get("required_skills", []))
+    31→    preferred = ", ".join(jd_config.get("preferred_skills", []))
+    32→    min_exp = jd_config.get("min_experience_years", "")
+    33→    pref_edu = jd_config.get("preferred_education", "")
+    34→
+    35→    c_name = candidate_info.get("name", "未知")
+    36→    c_title = candidate_info.get("title", "未知")
+    37→    c_company = candidate_info.get("company", "未知")
+    38→    c_edu = candidate_info.get("education_level", "未知")
+    39→    c_years = candidate_info.get("work_years", "未知")
+    40→    c_skills = ", ".join(candidate_info.get("skills", [])) or "未提供"
+    41→
+    42→    work_exp_text = ""
+    43→    for exp in candidate_info.get("work_experience", []):
+    44→        if isinstance(exp, dict):
+    45→            work_exp_text += f"- {exp.get('company', '')} | {exp.get('title', '')} | {exp.get('description', '')}\n"
+    46→
+    47→    return f"""你是一位资深技术招聘专家。请根据职位描述评估以下候选人的匹配程度。
+    48→
+    49→## 职位描述
+    50→- 职位: {jd_title}
+    51→- 描述: {jd_desc}
+    52→- 必备技能: {required}
+    53→- 加分技能: {preferred}
+    54→- 最低经验: {min_exp}年
+    55→- 期望学历: {pref_edu}
+    56→
+    57→## 候选人信息
+    58→- 姓名: {c_name}
+    59→- 当前职位: {c_title}
+    60→- 当前公司: {c_company}
+    61→- 学历: {c_edu}
+    62→- 工作年限: {c_years}
+    63→- 技能标签: {c_skills}
+    64→- 工作经历:
+    65→{work_exp_text or '未提供'}
+    66→
+    67→## 评估要求
+    68→综合考虑技能匹配度、经验相关性、学历背景、职业发展轨迹，给出0-100分的评分。
+    69→
+    70→请严格按以下JSON格式返回（不要包含其他内容）:
+    71→{{"score": <0-100的整数>, "explanation": "<一句话中文说明>"}}"""
+    72→
+    73→
+    74→def _parse_llm_response(text: str) -> Optional[Dict[str, Any]]:
+    75→    """Parse LLM response with multiple fallback strategies."""
+    76→    if not text:
+    77→        return None
+    78→
+    79→    # Strategy 1: Direct JSON parse
+    80→    try:
+    81→        result = json.loads(text.strip())
+    82→        if isinstance(result, dict) and "score" in result:
+    83→            return _validate_result(result)
+    84→    except json.JSONDecodeError:
+    85→        pass
+    86→
+    87→    # Strategy 2: Extract from code block
+    88→    code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    89→    if code_block:
+    90→        try:
+    91→            result = json.loads(code_block.group(1))
+    92→            if isinstance(result, dict) and "score" in result:
+    93→                return _validate_result(result)
+    94→        except json.JSONDecodeError:
+    95→            pass
+    96→
+    97→    # Strategy 3: Find JSON object in text
+    98→    json_match = re.search(r"\{[^{}]*\"score\"\s*:\s*\d+[^{}]*\}", text)
+    99→    if json_match:
+   100→        try:
+   101→            result = json.loads(json_match.group(0))
+   102→            return _validate_result(result)
+   103→        except json.JSONDecodeError:
+   104→            pass
+   105→
+   106→    # Strategy 4: Regex extract score number
+   107→    score_match = re.search(r"[\"']?score[\"']?\s*[:：]\s*(\d+)", text)
+   108→    if score_match:
+   109→        score = int(score_match.group(1))
+   110→        explanation_match = re.search(r"[\"']?explanation[\"']?\s*[:：]\s*[\"']([^\"']+)[\"']", text)
+   111→        explanation = explanation_match.group(1) if explanation_match else ""
+   112→        return _validate_result({"score": score, "explanation": explanation})
+   113→
+   114→    logger.warning(f"Failed to parse LLM response: {text[:200]}")
+   115→    return None
+   116→
+   117→
+   118→def _validate_result(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+   119→    """Validate and clamp the score."""
+   120→    try:
+   121→        score = int(result.get("score", -1))
+   122→        if 0 <= score <= 100:
+   123→            return {
+   124→                "score": score,
+   125→                "explanation": str(result.get("explanation", "")),
+   126→            }
+   127→    except (ValueError, TypeError):
+   128→        pass
+   129→    return None
+   130→
+   131→
+   132→async def llm_score_candidate(
+   133→    candidate_info: Dict[str, Any],
+   134→    jd_config: Dict[str, Any],
+   135→    endpoint: str = "http://127.0.0.1:11434",
+   136→    model: str = "qwen2.5:7b",
+   137→    timeout_seconds: int = 60,
+   138→) -> Optional[Dict[str, Any]]:
+   139→    """Score a single candidate using Ollama LLM.
+   140→
+   141→    Returns:
+   142→        {"score": 0-100, "explanation": "..."} or None on failure.
+   143→    """
+   144→    prompt = _build_scoring_prompt(candidate_info, jd_config)
+   145→
+   146→    try:
+   147→        async with httpx.AsyncClient() as client:
+   148→            resp = await client.post(
+   149→                f"{endpoint.rstrip('/')}/api/chat",
+   150→                json={
+   151→                    "model": model,
+   152→                    "messages": [{"role": "user", "content": prompt}],
+   153→                    "stream": False,
+   154→                    "options": {"temperature": 0.1},
+   155→                },
+   156→                timeout=timeout_seconds,
+   157→            )
+   158→        resp.raise_for_status()
+   159→        data = resp.json()
+   160→        content = data.get("message", {}).get("content", "")
+   161→        result = _parse_llm_response(content)
+   162→        if result:
+   163→            logger.debug(f"LLM scored {candidate_info.get('name', '?')}: {result['score']}")
+   164→        return result
+   165→    except Exception as e:
+   166→        logger.warning(f"LLM scoring failed for {candidate_info.get('name', '?')}: {e}")
+   167→        return None
+   168→
+   169→
+   170→async def llm_score_candidates_batch(
+   171→    candidates_info: List[Dict[str, Any]],
+   172→    jd_config: Dict[str, Any],
+   173→    endpoint: str = "http://127.0.0.1:11434",
+   174→    model: str = "qwen2.5:7b",
+   175→    timeout_seconds: int = 60,
+   176→) -> List[Optional[Dict[str, Any]]]:
+   177→    """Score multiple candidates sequentially.
+   178→
+   179→    Returns:
+   180→        List of results, same length as input. None for failed entries.
+   181→    """
+   182→    results = []
+   183→    for i, info in enumerate(candidates_info):
+   184→        logger.info(f"LLM scoring candidate {i+1}/{len(candidates_info)}: {info.get('name', '?')}")
+   185→        result = await llm_score_candidate(info, jd_config, endpoint, model, timeout_seconds)
+   186→        results.append(result)
+   187→    return results
+   188→

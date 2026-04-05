@@ -1,0 +1,117 @@
+<div id="pipeline-progress"
+     hx-ext="sse"
+     sse-connect="/pipeline/progress/{{ task_id }}"
+     sse-close="done">
+
+    <h3>Pipeline 运行中: {{ task_id }}</h3>
+
+    <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
+    </div>
+
+    <p id="progress-status">初始化...</p>
+
+    <div class="pipeline-log" id="pipeline-log">
+    </div>
+
+    <button hx-delete="/pipeline/cancel" hx-swap="none"
+            onclick="this.disabled=true; this.textContent='取消中...';">
+        取消 Pipeline
+    </button>
+</div>
+
+<div sse-swap="search_start" hx-swap="none" style="display:none;"></div>
+<div sse-swap="search_complete" hx-swap="none" style="display:none;"></div>
+<div sse-swap="scoring_start" hx-swap="none" style="display:none;"></div>
+<div sse-swap="scoring_complete" hx-swap="none" style="display:none;"></div>
+<div sse-swap="send_start" hx-swap="none" style="display:none;"></div>
+<div sse-swap="send_complete" hx-swap="none" style="display:none;"></div>
+<div sse-swap="pipeline_complete" hx-swap="none" style="display:none;"></div>
+<div sse-swap="captcha_detected" hx-swap="none" style="display:none;"></div>
+<div sse-swap="error" hx-swap="none" style="display:none;"></div>
+<div sse-swap="pipeline_cancelled" hx-swap="none" style="display:none;"></div>
+<div sse-swap="done" hx-swap="none" style="display:none;"></div>
+
+<script>
+(function() {
+    const log = document.getElementById("pipeline-log");
+    const status = document.getElementById("progress-status");
+    const fill = document.getElementById("progress-fill");
+
+    function addLog(text) {
+        const entry = document.createElement("div");
+        entry.className = "log-entry";
+        entry.textContent = new Date().toLocaleTimeString() + " — " + text;
+        log.appendChild(entry);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function setProgress(pct) {
+        fill.style.width = pct + "%";
+    }
+
+    // Use HTMX SSE events (single connection managed by hx-ext="sse")
+    const container = document.getElementById("pipeline-progress");
+    if (!container) return;
+
+    container.addEventListener("htmx:sseMessage", function(evt) {
+        const eventType = evt.detail.type;
+        let d;
+        try { d = JSON.parse(evt.detail.data); } catch(e) { return; }
+
+        switch (eventType) {
+            case "search_start":
+                status.textContent = "搜索中: " + (d.keywords || []).join(", ");
+                setProgress(10);
+                addLog("开始搜索: " + (d.keywords || []).join(", "));
+                break;
+            case "search_complete":
+                status.textContent = "搜索完成，找到 " + d.total_candidates + " 个候选人";
+                setProgress(30);
+                addLog("搜索完成: " + d.total_candidates + " 个候选人");
+                break;
+            case "scoring_start":
+                status.textContent = "评分中 (" + d.count + " 个候选人)...";
+                setProgress(40);
+                addLog("开始评分: " + d.count + " 个候选人");
+                break;
+            case "scoring_complete":
+                status.textContent = "评分完成，最高分: " + d.top_score;
+                setProgress(50);
+                addLog("评分完成, 最高分: " + d.top_score);
+                break;
+            case "send_start":
+                status.textContent = "发送消息中 (0/" + d.total + ")...";
+                setProgress(55);
+                addLog("开始发送消息: " + d.total + " 个候选人");
+                break;
+            case "send_complete":
+                status.textContent = "发送完成: 成功 " + (d.sent||0) + ", 失败 " + (d.failed||0);
+                setProgress(90);
+                addLog("发送完成: 成功=" + (d.sent||0) + " 失败=" + (d.failed||0) + " 跳过=" + (d.skipped||0));
+                break;
+            case "pipeline_complete":
+                status.textContent = "Pipeline 完成!";
+                setProgress(100);
+                addLog("Pipeline 完成: 候选人=" + (d.candidates_found||0) + " 发送=" + (d.sent||0));
+                break;
+            case "captcha_detected":
+                status.textContent = "验证码检测到! 请在 Chrome 窗口中处理";
+                addLog("⚠️ 验证码检测到，请在 Chrome 中手动处理");
+                if (typeof showToast === "function") showToast("验证码检测到！请在 Chrome 窗口中处理", "warning");
+                break;
+            case "error":
+                addLog("❌ 错误: " + d.message);
+                if (typeof showToast === "function") showToast("Pipeline 错误: " + d.message, "error");
+                break;
+            case "pipeline_cancelled":
+                status.textContent = "Pipeline 已取消";
+                addLog("Pipeline 已取消");
+                break;
+            case "done":
+                addLog("— 结束 —");
+                break;
+        }
+    });
+})();
+</script>

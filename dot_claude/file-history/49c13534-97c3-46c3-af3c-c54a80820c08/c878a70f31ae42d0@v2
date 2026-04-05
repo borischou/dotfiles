@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}{{ candidate.name }} — Boss Assistant{% endblock %}
+{% block header %}{{ candidate.name }}{% endblock %}
+
+{% block content %}
+<section>
+    <h2>基本信息</h2>
+    <dl>
+        <dt>Boss ID</dt>
+        <dd>{{ candidate.boss_id }}</dd>
+
+        <dt>职位</dt>
+        <dd>{{ candidate.title or "—" }}</dd>
+
+        <dt>公司</dt>
+        <dd>{{ candidate.company or "—" }}</dd>
+
+        <dt>城市</dt>
+        <dd>{{ candidate.location or "—" }}</dd>
+
+        <dt>期望薪资</dt>
+        <dd>{{ candidate.salary_expect or "—" }}</dd>
+
+        <dt>工作年限</dt>
+        <dd>{{ candidate.work_years or "—" }}</dd>
+
+        <dt>学历</dt>
+        <dd>{{ candidate.education_level or "—" }}</dd>
+
+        <dt>来源搜索</dt>
+        <dd>{{ candidate.source_search or "—" }}</dd>
+    </dl>
+
+    {% if candidate.profile_url %}
+    <p><a href="{{ candidate.profile_url }}" target="_blank" rel="noopener">Boss直聘 Profile &rarr;</a></p>
+    {% endif %}
+
+    <div>
+        <button hx-post="/candidates/{{ candidate.boss_id }}/extract"
+                hx-target="#extract-result"
+                hx-indicator="#extract-spinner"
+                {% if pipeline_busy %}disabled{% endif %}>
+            抓取详细 Profile
+        </button>
+        <span id="extract-spinner" class="htmx-indicator">抓取中...</span>
+        <div id="extract-result"></div>
+    </div>
+</section>
+
+{% if candidate.skills %}
+<section>
+    <h2>技能</h2>
+    <p>
+        {% for skill in candidate.skills %}
+        <span class="tag">{{ skill }}</span>
+        {% endfor %}
+    </p>
+</section>
+{% endif %}
+
+{% if candidate.education %}
+<section>
+    <h2>教育经历</h2>
+    {% for edu in candidate.education %}
+    <p>
+        <strong>{{ edu.school or "" }}</strong>
+        {% if edu.degree %} — {{ edu.degree }}{% endif %}
+        {% if edu.major %} — {{ edu.major }}{% endif %}
+        {% if edu.period %} <small>({{ edu.period }})</small>{% endif %}
+    </p>
+    {% endfor %}
+</section>
+{% endif %}
+
+{% if candidate.work_experience %}
+<section>
+    <h2>工作经历</h2>
+    {% for work in candidate.work_experience %}
+    <p>
+        <strong>{{ work.company or "" }}</strong>
+        {% if work.title %} — {{ work.title }}{% endif %}
+        {% if work.period %} <small>({{ work.period }})</small>{% endif %}
+    </p>
+    {% if work.description %}
+    <p><small>{{ work.description[:200] }}</small></p>
+    {% endif %}
+    {% endfor %}
+</section>
+{% endif %}
+
+{% if candidate.basic_info and candidate.basic_info.self_description %}
+<section>
+    <h2>自我描述</h2>
+    <p>{{ candidate.basic_info.self_description[:500] }}</p>
+</section>
+{% endif %}
+
+<section>
+    <h2>消息记录 ({{ messages|length }})</h2>
+    {% if messages %}
+    <table>
+        <thead>
+            <tr>
+                <th>模板</th>
+                <th>内容</th>
+                <th>状态</th>
+                <th>时间</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for msg in messages %}
+            <tr>
+                <td>{{ msg.template_name }}</td>
+                <td>{{ msg.content[:50] }}...</td>
+                <td>{{ msg.status }}</td>
+                <td>{{ (msg.sent_at or msg.created_at).strftime('%Y-%m-%d %H:%M') if (msg.sent_at or msg.created_at) else "—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>暂无消息记录</p>
+    {% endif %}
+
+    <h3>发送消息</h3>
+    <form hx-post="/messages/send" hx-target="#send-result">
+        <input type="hidden" name="boss_id" value="{{ candidate.boss_id }}">
+        <label for="template_name">模板
+            <select name="template_name" id="template_name"
+                    hx-post="/messages/preview" hx-target="#message-preview"
+                    hx-include="[name='boss_id']" hx-trigger="change">
+                <option value="">选择模板...</option>
+            </select>
+        </label>
+        <div id="message-preview"></div>
+        <button type="submit" {% if pipeline_busy %}disabled{% endif %}>发送</button>
+        <div id="send-result"></div>
+    </form>
+</section>
+
+{% block scripts %}
+<script>
+// Load template options on page load
+fetch("/templates?format=json")
+    .then(r => r.json())
+    .then(data => {
+        const select = document.getElementById("template_name");
+        data.forEach(t => {
+            const opt = document.createElement("option");
+            opt.value = t.name;
+            opt.textContent = t.display_name + " — " + t.description;
+            select.appendChild(opt);
+        });
+    })
+    .catch(() => {});
+</script>
+{% endblock %}
